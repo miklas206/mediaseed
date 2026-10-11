@@ -6,11 +6,12 @@ from mediaseed.app import create_app
 PASSWORD = "synthetic-test-password-only"
 
 
-@pytest.fixture
-def client(tmp_path):
+@pytest.fixture(params=[200, 204])
+def client(tmp_path, request):
+    login_status = request.param
     def handler(request):
         if request.url.path == "/api/v2/auth/login":
-            return httpx.Response(200, text="Ok.")
+            return httpx.Response(login_status, text="Ok." if login_status == 200 else "")
         if request.url.path == "/api/v2/app/version":
             return httpx.Response(200, text="v5.1.4")
         return httpx.Response(200, json=[{"hash": "a" * 40, "name": "Test torrent", "progress": 0.5, "save_path": "private"}])

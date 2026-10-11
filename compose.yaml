@@ -45,7 +45,7 @@ services:
       - clientsecrets:/secrets
     restart: "no"
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:latest
+    image: lscr.io/linuxserver/qbittorrent@sha256:97333cc1ccf903e0bbcd8eb67e3332e4970e9c1ecabe145e499e9c0847ebcaed
     depends_on:
       client-init:
         condition: service_completed_successfully
