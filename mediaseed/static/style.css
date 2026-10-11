@@ -47,6 +47,7 @@ h3 { font-size: 16px; }
 .beta-badge { align-self: center; border: 1px solid var(--accent-line); background: var(--accent-bg); color: var(--accent); border-radius: 5px; padding: 2px 7px; font-size: 11px; }
 .topbar { display: none; min-height: 72px; padding: 14px 28px; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .signed-in .topbar { display: flex; }
+#logout { flex-shrink: 0; white-space: nowrap; }
 .app-main { width: 100%; }
 .signed-in .app-main { max-width: 1200px; margin: 0 auto; padding: 28px 32px 90px; }
 .login-screen { min-height: 100dvh; display: grid; place-items: center; padding: 40px 20px 90px; background: radial-gradient(ellipse at 50% 0%, var(--accent-bg) 0%, transparent 60%), var(--bg); }
@@ -88,5 +89,5 @@ dd { margin: 8px 0 0; }
 #message[data-tone="success"] { background: var(--healthy-bg); border-color: color-mix(in srgb, var(--healthy) 30%, var(--line)); }
 footer { position: fixed; bottom: 0; width: 100%; min-height: 42px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px 16px; padding: 10px 24px; background: var(--bg); border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; z-index: 10; }
 .footer-version { margin-left: 5px; }
-@media(max-width: 540px) { .topbar { padding: 14px 16px; } .signed-in .app-main { padding: 22px 16px 96px; } .login-screen { padding: 24px 16px 96px; } .login-panel { padding: 28px 24px; } .login-panel .brand { margin-bottom: 32px; } .toolbar, .settings-form { grid-template-columns: 1fr; } dialog { padding: 20px; } nav { gap: 4px; } nav button { padding: 8px 10px; min-width: 64px; } footer { padding: 10px 16px; } .torrent { padding: 16px; } }
+@media(max-width: 540px) { .topbar { padding: 14px 16px; gap: 10px; } .topbar .brand { gap: 8px; } .topbar .brand strong { font-size: 20px; } .topbar .beta-badge { display: none; } .signed-in .app-main { padding: 22px 16px 96px; } .login-screen { padding: 24px 16px 96px; } .login-panel { padding: 28px 24px; } .login-panel .brand { margin-bottom: 32px; } .toolbar, .settings-form { grid-template-columns: 1fr; } dialog { padding: 20px; } nav { gap: 4px; } nav button { padding: 8px 10px; min-width: 64px; } footer { padding: 10px 16px; } .torrent { padding: 16px; } }
 @media(prefers-reduced-motion: reduce) { button { transition: none; } }
