@@ -1,0 +1,16 @@
+:root { color-scheme: dark; --bg: #0b1015; --panel: #121c24; --text: #e8eef3; --muted: #a0b2c2; --accent: #21c8e6; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px 'Segoe UI', sans-serif; letter-spacing: 0; }
+header { min-height: 68px; padding: 16px 24px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #25323e; background: var(--panel); }
+header strong { font-size: 22px; } .version { color: var(--muted); font-size: 12px; } #logout { margin-left: auto; }
+main { max-width: 1040px; margin: 32px auto; padding: 0 24px 64px; } h1 { font-size: 26px; }
+#identity { max-width: 360px; margin: 64px auto; } label { display: grid; gap: 8px; color: var(--muted); }
+form { display: grid; gap: 18px; } input, button { min-height: 42px; border-radius: 4px; font: inherit; }
+input { background: var(--panel); color: var(--text); border: 1px solid #354958; padding: 10px; width: 100%; }
+button { background: #123747; border: 1px solid #21718a; color: var(--text); padding: 8px 16px; cursor: pointer; }
+button:hover { border-color: var(--accent); } button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.heading { display: flex; justify-content: space-between; align-items: center; } #add { grid-template-columns: minmax(0, 1fr) auto; align-items: end; margin-bottom: 24px; }
+.torrent { border-top: 1px solid #25323e; padding: 18px 0; display: grid; gap: 12px; } .torrent h2 { margin: 0; font-size: 17px; overflow-wrap: anywhere; }
+.torrent p { color: var(--muted); margin: 0; } progress { width: 100%; accent-color: var(--accent); } .actions { display: flex; gap: 10px; }
+#message { color: #f4cd86; overflow-wrap: anywhere; } footer { position: fixed; bottom: 0; width: 100%; padding: 12px 24px; background: var(--bg); border-top: 1px solid #25323e; color: var(--muted); font-size: 12px; }
+[hidden] { display: none !important; } @media(max-width: 540px) { header { padding: 14px; } main { padding: 0 16px 64px; } #add { grid-template-columns: 1fr; } .version { display: none; } }

@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="da">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MediaSeed</title><link rel="stylesheet" href="/static/style.css"><script defer src="/static/app.js"></script></head>
+<body><header><img src="/static/icon.svg" width="32" height="32" alt=""><strong>MediaSeed</strong><span class="version">Udvikling 0.1</span><button id="logout" hidden>Log ud</button></header><main>
+<section id="identity"><h1 id="identity-title">Log ind</h1><form id="login"><label>Brugernavn<input name="username" required maxlength="80" autocomplete="username"></label><label>Adgangskode<input name="password" type="password" required minlength="12" maxlength="256" autocomplete="current-password"></label><button>Fortsæt</button></form></section>
+<section id="downloads" hidden><div class="heading"><h1>Downloads</h1><button id="refresh">Opdater</button></div><form id="add"><label>Magnetlink<input name="url" required placeholder="magnet:?xt=urn:btih:..."></label><button>Tilføj stoppet</button></form><div id="torrents"></div></section>
+<p id="message" role="status"></p></main><footer>MediaSeed / 0.1.0</footer></body></html>

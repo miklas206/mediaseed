@@ -1,0 +1,27 @@
+name: mediaseed-preview
+services:
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:18800:18800"
+    environment:
+      MEDIASEED_BASE_URL: http://127.0.0.1:18800
+      MEDIASEED_DATA: /data
+    volumes:
+      - appdata:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18800/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "2"}
+volumes:
+  appdata:
