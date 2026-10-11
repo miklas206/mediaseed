@@ -1,10 +1,73 @@
 from urllib.parse import parse_qs
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from mediaseed.app import create_app
 from test_app import sign_in
+
+
+def test_tracker_search_and_stopped_import_keep_secrets_private(tmp_path, monkeypatch):
+    from mediaseed import features
+    original_client = httpx.AsyncClient
+    calls = []
+    secret_link = "https://nordicbytes.org/torrents/download/12/private-passkey"
+
+    def tracker_handler(request):
+        calls.append(request)
+        if request.url.path.startswith("/api/"):
+            assert request.headers["Authorization"] == "Bearer synthetic-key"
+            row = {"id": "12", "attributes": {"name": "Legal test", "size": 42, "seeders": 3, "leechers": 0, "download_link": secret_link}}
+            return httpx.Response(200, json={"data": [row] if request.url.path.endswith("filter") else row})
+        assert "Authorization" not in request.headers
+        return httpx.Response(200, content=b"d4:infod4:name4:testee")
+
+    def qbit_handler(request):
+        if request.url.path.endswith("login"):
+            return httpx.Response(204)
+        calls.append(request)
+        assert b'name="stopped"\r\n\r\ntrue' in request.content
+        assert b'name="paused"\r\n\r\ntrue' in request.content
+        assert b'name="torrents"; filename="tracker.torrent"' in request.content
+        return httpx.Response(204)
+
+    def client_factory(**kwargs):
+        kwargs.setdefault("transport", httpx.MockTransport(tracker_handler))
+        return original_client(**kwargs)
+
+    monkeypatch.setattr(features.httpx, "AsyncClient", client_factory)
+    with TestClient(create_app(tmp_path, "http://testserver", qbit_password="synthetic", transport=httpx.MockTransport(qbit_handler))) as client:
+        assert client.get("/api/trackers/unknown/search").status_code == 401
+        sign_in(client)
+        identifier = client.post("/api/trackers", json={"name": "Test", "api_key": "synthetic-key"}).json()["id"]
+        result = client.get(f"/api/trackers/{identifier}/search", params={"query": "Legal"})
+        assert result.status_code == 200
+        assert result.json()["results"][0]["name"] == "Legal test"
+        assert "passkey" not in result.text and "synthetic-key" not in result.text
+        assert client.post(f"/api/trackers/{identifier}/torrents/12", json={"ratio": 1}).json() == {"added": True, "stopped": True, "downloadsEnabled": False}
+        secret_link = "https://localhost/torrents/download/12/private-passkey"
+        assert client.post(f"/api/trackers/{identifier}/torrents/12", json={"ratio": 1}).status_code == 502
+        client.headers["X-MediaSeed-CSRF"] = "invalid"
+        assert client.post(f"/api/trackers/{identifier}/torrents/12", json={"ratio": 1}).status_code == 403
+
+
+@pytest.mark.parametrize("remote_status,content,expected", [(401, b"private-key", 502), (429, b"private-key", 503), (302, b"private-key", 502), (200, b"x" * (1024 * 1024 + 1), 502), (200, b'{"data":null}', 502)], ids=["unauthorized", "rate-limit", "redirect", "oversized", "invalid-shape"])
+def test_tracker_search_rejects_remote_errors_and_oversized_responses(tmp_path, monkeypatch, remote_status, content, expected):
+    from mediaseed import features
+    original_client = httpx.AsyncClient
+
+    def handler(request):
+        assert request.url.host == "nordicbytes.org"
+        return httpx.Response(remote_status, content=content, headers={"Location": "https://localhost/private-key"})
+
+    monkeypatch.setattr(features.httpx, "AsyncClient", lambda **kwargs: original_client(**kwargs, transport=httpx.MockTransport(handler)))
+    with TestClient(create_app(tmp_path, "http://testserver")) as client:
+        sign_in(client)
+        identifier = client.post("/api/trackers", json={"name": "Test", "api_key": "private-key"}).json()["id"]
+        response = client.get(f"/api/trackers/{identifier}/search")
+        assert response.status_code == expected
+        assert "private-key" not in response.text
 
 
 def test_torrent_details_policy_and_early_stop(tmp_path):

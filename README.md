@@ -11,6 +11,7 @@ Independent seedbox application for MediaHub, inspired by FjordSeed's separate-a
 - Downloads UI with search, status filters, sorting, speed/ratio/seeding-time display and a detail dialog for files, tracker hosts and peers.
 - Per-torrent ratio configuration with 49-hour seeding limits, and explicit early-stop confirmation when neither ratio 1 nor 49 hours is reached. Torrent removal always preserves files.
 - Independent RSS and NordicBytes account configuration: create/edit/remove, relative folders, feed start timestamp and ratio goals. Feed URLs/passkeys and API keys are not returned to the browser. Workers/synchronization are not connected yet.
+- Tracker search: select a saved NordicBytes account, search releases, and import a selected torrent file directly into qBittorrent in stopped state with a ratio goal and 49-hour seeding limit. The API key and private download link stay on the server. Only HTTPS downloads from NordicBytes are allowed; redirects and oversized responses are rejected. Starting these torrents still requires the unimplemented verified VPN gate. Other tracker providers and manual magnet/file upload are not implemented.
 
 Source credentials are stored in the private SQLite database, not encrypted at rest. Protect the data volume and its backups. Use only synthetic credentials in this preview until the encrypted credential store is integrated.
 

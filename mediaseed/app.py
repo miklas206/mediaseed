@@ -99,7 +99,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             raise HTTPException(403, "Session verification failed")
         return dict(session)
 
-    async def qbit(path, method="GET", payload=None):
+    async def qbit(path, method="GET", payload=None, files=None):
         if not password:
             raise HTTPException(503, "Torrent client is not configured")
         try:
@@ -110,7 +110,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
                 if method == "GET":
                     response = await client.get(path, params=payload)
                 else:
-                    response = await client.post(path, data=payload)
+                    response = await client.post(path, data=payload, files=files)
                 response.raise_for_status()
                 return response
         except (httpx.HTTPError, ValueError):

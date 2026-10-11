@@ -17,7 +17,7 @@ message.addEventListener('focus', () => clearTimeout(notificationTimer));
 function resumeNotification() { if (message.textContent && !message.matches(':hover') && document.activeElement !== message) notificationTimer = setTimeout(() => { message.textContent = ''; }, 6000); }
 message.addEventListener('mouseleave', resumeNotification);
 message.addEventListener('blur', resumeNotification);
-const errorLabels = {'Invalid credentials': 'Brugernavn eller adgangskode er forkert.', 'Try again later': 'For mange loginforsøg. Prøv igen om lidt.', 'Torrent client is not configured': 'Torrentklienten er endnu ikke tilsluttet.', 'Sign in required': 'Log ind for at fortsætte.'};
+const errorLabels = {'Invalid credentials': 'Brugernavn eller adgangskode er forkert.', 'Try again later': 'For mange loginforsøg. Prøv igen om lidt.', 'Torrent client is not configured': 'Torrentklienten er endnu ikke tilsluttet.', 'Sign in required': 'Log ind for at fortsætte.', 'Tracker API key lacks access': 'API-nøglen har ikke adgang til trackerens torrents.', 'Tracker rate limit reached; try again later': 'Trackeren begrænser antal opslag. Prøv igen om lidt.', 'Tracker request failed': 'Trackeren kunne ikke levere svaret.', 'Tracker unavailable or invalid response': 'Trackeren er utilgængelig eller returnerede et ukendt svar.', 'Unsafe tracker download address': 'Trackeren returnerede et downloadlink, som ikke er godkendt.', 'Torrent client rejected the torrent file': 'qBittorrent afviste torrentfilen.'};
 async function api(path, body, method) {
   const response = await fetch('/api/' + path, {method: method || (body ? 'POST' : 'GET'), headers: {'Content-Type': 'application/json', 'X-MediaSeed-CSRF': csrf}, ...(body ? {body: JSON.stringify(body)} : {})});
   const result = await response.json();
@@ -28,7 +28,7 @@ function notify(error) { showNotification(errorLabels[error.message] || error.me
 function element(tag, text, className) { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; }
 function bytes(value) { const number = Number(value || 0); for (const [divisor, unit] of [[1073741824, 'GiB'], [1048576, 'MiB'], [1024, 'KiB']]) if (number >= divisor) return `${(number / divisor).toFixed(1)} ${unit}`; return `${number} B`; }
 function state(row) { if (/error|missing/i.test(row.state)) return 'error'; if (/stopped|paused/i.test(row.state)) return 'stopped'; if (Number(row.progress) >= 1) return 'seeding'; return 'downloading'; }
-function command(label, handler) { const button = element('button', label); button.type = 'button'; button.onclick = async () => { button.disabled = true; try { await handler(); } catch (error) { notify(error); } finally { button.disabled = false; } }; return button; }
+function command(label, handler) { const button = element('button', label); button.type = 'button'; button.onclick = async () => { button.disabled = true; try { await handler(); } catch (error) { notify(error); } finally { button.disabled = button.dataset.added === 'true'; } }; return button; }
 async function torrentAction(row, action) {
   if (action === 'remove' && !confirm(`Fjern ${row.name}? Downloadede filer bevares.`)) return;
   try { await api('torrents/' + action, {torrent_hash: row.hash}); }
@@ -67,11 +67,38 @@ async function showDetails(row) {
 }
 async function loadSources(kind) {
   const rows = await api(kind); const target = document.querySelector(kind === 'feeds' ? '#feed-list' : '#tracker-list'); target.replaceChildren(); if (!rows.length) target.append(element('p', kind === 'feeds' ? 'Ingen feeds' : 'Ingen konti', 'muted'));
+  if (kind === 'trackers') {
+    const select = document.querySelector('#tracker-account'); const previous = select.value; select.replaceChildren(element('option', 'Vælg konto')); select.firstChild.value = '';
+    for (const row of rows) { const option = element('option', row.name); option.value = row.id; select.append(option); }
+    select.value = rows.some(row => row.id === previous) ? previous : rows.length === 1 ? rows[0].id : '';
+    document.querySelector('#tracker-search-submit').disabled = !rows.length;
+  }
   for (const row of rows) {
     const item = element('article', undefined, 'source-row'); item.append(element('h2', row.name), element('p', kind === 'feeds' ? `${row.folder || '/downloads'} · Ratio ${row.ratio} · Pauset` : 'NordicBytes · Ikke synkroniseret', 'muted')); const actions = element('div', undefined, 'actions');
     actions.append(command('Rediger', () => { const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); form.reset(); for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } form.querySelector('input[name="name"]').focus(); }), command('Fjern', async () => { if (!confirm(`Fjern ${row.name}? Filer og torrents bevares.`)) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); })); item.append(actions); target.append(item);
   }
 }
+let trackerSearchGeneration = 0;
+document.querySelector('#tracker-account').onchange = () => { trackerSearchGeneration++; document.querySelector('#tracker-results').replaceChildren(); document.querySelector('#tracker-search-status').textContent = ''; };
+document.querySelector('#tracker-search').onsubmit = async event => {
+  event.preventDefault(); const form = event.target; const account = form.elements.namedItem('account').value; if (!account) return;
+  const generation = ++trackerSearchGeneration; const button = document.querySelector('#tracker-search-submit'); const target = document.querySelector('#tracker-results'); const status = document.querySelector('#tracker-search-status'); button.disabled = true; target.replaceChildren(); status.textContent = 'Søger…';
+  try {
+    const response = await api(`trackers/${encodeURIComponent(account)}/search?query=${encodeURIComponent(form.elements.namedItem('query').value)}`);
+    if (generation !== trackerSearchGeneration) return;
+    status.textContent = response.results.length ? `${response.results.length} resultater · Torrents tilføjes stoppet. Start kræver verificeret VPN.` : 'Ingen resultater';
+    for (const row of response.results) {
+      const item = element('article', undefined, 'source-row'); item.append(element('h2', row.name), element('p', `${row.size === null ? 'Ukendt størrelse' : bytes(row.size)} · Seeders ${row.seeders ?? '?'} · Leechers ${row.leechers ?? '?'}`, 'muted'));
+      const actions = element('div', undefined, 'actions'); const add = command('Tilføj stoppet', async () => {
+        if (!form.reportValidity()) return;
+        await api(`trackers/${encodeURIComponent(account)}/torrents/${encodeURIComponent(row.id)}`, {ratio: Number(form.elements.namedItem('ratio').value)});
+        add.textContent = 'Tilføjet stoppet'; add.dataset.added = 'true'; showNotification('Torrent tilføjet stoppet. Download kræver verificeret VPN.', 'success'); await refresh();
+      });
+      actions.append(add); item.append(actions); target.append(item);
+    }
+  } catch (error) { if (generation === trackerSearchGeneration) { status.textContent = ''; notify(error); } }
+  finally { button.disabled = document.querySelector('#tracker-account').options.length === 1; }
+};
 for (const [selector, kind] of [['#feed-form', 'feeds'], ['#tracker-form', 'trackers']]) {
   const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { body.ratio = Number(body.ratio); body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); form.reset(); form.elements.namedItem('id').value = ''; await loadSources(kind); showNotification('Gemt', 'success'); } catch (error) { notify(error); } };
   form.addEventListener('reset', () => { form.elements.namedItem('id').setAttribute('value', ''); });

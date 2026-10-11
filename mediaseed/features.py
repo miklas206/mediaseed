@@ -1,8 +1,10 @@
 import json
 import secrets
+import re
 from urllib.parse import urlsplit
 
-from fastapi import Depends, HTTPException
+import httpx
+from fastapi import Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -88,6 +90,77 @@ def install_features(app, authorized, database, qbit):
         with database() as connection:
             connection.execute("INSERT INTO settings VALUES (?,?,?) ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload", (kind, identifier, json.dumps(payload)))
         return {"saved": True, "id": identifier}
+
+    def tracker_account(identifier):
+        account = next((row for row in rows("trackers") if row["id"] == identifier), None)
+        if account is None:
+            raise HTTPException(404, "Tracker account not found")
+        return account
+
+    async def tracker_read(account, path, params=None, binary=False):
+        limit = 4 * 1024 * 1024 if binary else 1024 * 1024
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=False, trust_env=False) as client:
+                headers = {} if binary else {"Authorization": "Bearer " + account["api_key"], "Accept": "application/json"}
+                async with client.stream("GET", "https://nordicbytes.org" + path, params=params, headers=headers) as response:
+                    if response.status_code in (401, 403):
+                        raise HTTPException(502, "Tracker API key lacks access")
+                    if response.status_code == 429:
+                        raise HTTPException(503, "Tracker rate limit reached; try again later")
+                    if response.status_code != 200:
+                        raise HTTPException(502, "Tracker request failed")
+                    content = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        content.extend(chunk)
+                        if len(content) > limit:
+                            raise HTTPException(502, "Tracker response is too large")
+            return bytes(content) if binary else json.loads(content)
+        except (httpx.HTTPError, ValueError):
+            raise HTTPException(502, "Tracker unavailable or invalid response") from None
+
+    @app.get("/api/trackers/{identifier}/search")
+    async def tracker_search(identifier: str, query: str = Query(default="", max_length=200), session=Depends(authorized)):
+        account = tracker_account(identifier)
+        data = await tracker_read(account, "/api/torrents/filter", {"name": query, "perPage": 50})
+        if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+            raise HTTPException(502, "Invalid tracker search response")
+        results = []
+        for row in data["data"][:50]:
+            if not isinstance(row, dict) or not re.fullmatch(r"[1-9][0-9]{0,17}", str(row.get("id", ""))):
+                continue
+            attributes = row.get("attributes")
+            if not isinstance(attributes, dict) or not isinstance(attributes.get("name"), str):
+                continue
+            result = {"id": str(row["id"]), "name": attributes["name"][:300]}
+            for field in ("size", "seeders", "leechers"):
+                value = attributes.get(field)
+                result[field] = value if type(value) is int and 0 <= value <= 2**63 - 1 else None
+            results.append(result)
+        return {"results": results, "limit": 50, "downloadsEnabled": False}
+
+    @app.post("/api/trackers/{identifier}/torrents/{torrent_id}")
+    async def tracker_import(identifier: str, torrent_id: str, body: SeedingPolicy, session=Depends(authorized)):
+        if not re.fullmatch(r"[1-9][0-9]{0,17}", torrent_id):
+            raise HTTPException(422, "Invalid tracker torrent ID")
+        account = tracker_account(identifier)
+        data = await tracker_read(account, "/api/torrents/" + torrent_id)
+        row = data.get("data") if isinstance(data, dict) else None
+        attributes = row.get("attributes") if isinstance(row, dict) else None
+        if not isinstance(attributes, dict) or str(row.get("id")) != torrent_id:
+            raise HTTPException(502, "Invalid tracker torrent response")
+        link = attributes.get("download_link")
+        if not isinstance(link, str) or len(link) > 4096:
+            raise HTTPException(502, "Tracker did not provide a torrent download")
+        address = urlsplit(link)
+        if address.scheme != "https" or address.netloc != "nordicbytes.org" or address.fragment or not address.path.startswith("/torrents/download/"):
+            raise HTTPException(502, "Unsafe tracker download address")
+        content = await tracker_read(account, address.path + ("?" + address.query if address.query else ""), binary=True)
+        if not content.startswith(b"d") or not content.endswith(b"e"):
+            raise HTTPException(502, "Tracker did not return a torrent file")
+        response = await qbit("/api/v2/torrents/add", "POST", {"stopped": "true", "paused": "true", "savepath": "/downloads", "ratioLimit": str(body.ratio), "seedingTimeLimit": "2940"}, files={"torrents": ("tracker.torrent", content, "application/x-bittorrent")})
+        if response.status_code != 204 and response.text.strip() != "Ok.":
+            raise HTTPException(502, "Torrent client rejected the torrent file")
+        return {"added": True, "stopped": True, "downloadsEnabled": False}
 
     @app.get("/api/transfer")
     async def transfer(session=Depends(authorized)):
