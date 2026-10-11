@@ -158,7 +158,14 @@ def install_features(app, authorized, database, qbit):
         if not content.startswith(b"d") or not content.endswith(b"e"):
             raise HTTPException(502, "Tracker did not return a torrent file")
         response = await qbit("/api/v2/torrents/add", "POST", {"stopped": "true", "paused": "true", "savepath": "/downloads", "ratioLimit": str(body.ratio), "seedingTimeLimit": "2940"}, files={"torrents": ("tracker.torrent", content, "application/x-bittorrent")})
-        if response.status_code != 204 and response.text.strip() != "Ok.":
+        accepted = response.status_code == 204 or response.text.strip() == "Ok."
+        if not accepted:
+            try:
+                outcome = response.json()
+                accepted = isinstance(outcome, dict) and outcome.get("success_count") == 1 and outcome.get("failure_count") == 0 and outcome.get("pending_count") == 0
+            except ValueError:
+                accepted = False
+        if not accepted:
             raise HTTPException(502, "Torrent client rejected the torrent file")
         return {"added": True, "stopped": True, "downloadsEnabled": False}
 

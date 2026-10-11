@@ -8,7 +8,8 @@ from mediaseed.app import create_app
 from test_app import sign_in
 
 
-def test_tracker_search_and_stopped_import_keep_secrets_private(tmp_path, monkeypatch):
+@pytest.mark.parametrize("add_format", ["no-content", "legacy-text", "current-json"])
+def test_tracker_search_and_stopped_import_keep_secrets_private(tmp_path, monkeypatch, add_format):
     from mediaseed import features
     original_client = httpx.AsyncClient
     calls = []
@@ -31,7 +32,9 @@ def test_tracker_search_and_stopped_import_keep_secrets_private(tmp_path, monkey
         assert b'name="stopped"\r\n\r\ntrue' in request.content
         assert b'name="paused"\r\n\r\ntrue' in request.content
         assert b'name="torrents"; filename="tracker.torrent"' in request.content
-        return httpx.Response(204)
+        if add_format == "current-json":
+            return httpx.Response(200, json={"added_torrent_ids": ["a" * 40], "success_count": 1, "failure_count": 0, "pending_count": 0})
+        return httpx.Response(200, text="Ok.") if add_format == "legacy-text" else httpx.Response(204)
 
     def client_factory(**kwargs):
         kwargs.setdefault("transport", httpx.MockTransport(tracker_handler))
