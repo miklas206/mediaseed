@@ -13,6 +13,10 @@ from mediaseed.app import create_app
 async def verify():
     with tempfile.TemporaryDirectory() as root:
         app = create_app(data_dir=Path(root), base_url="http://testserver")
+        with sqlite3.connect(Path(os.environ["MEDIASEED_DATA"]) / "mediaseed.sqlite") as original:
+            tracker_settings = original.execute("SELECT kind,id,payload FROM settings WHERE kind='trackers'").fetchall()
+        with sqlite3.connect(Path(root) / "mediaseed.sqlite") as temporary:
+            temporary.executemany("INSERT INTO settings VALUES (?,?,?)", tracker_settings)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver", timeout=60) as client:
             credentials = {"username": "verification", "password": "synthetic-verification-only"}
             assert (await client.post("/api/auth/setup", json=credentials)).status_code == 200
@@ -25,6 +29,11 @@ async def verify():
                 data = response.json()
                 allowed = {key: data.get(key) for key in ("ready", "downloadsEnabled", "publicIp", "forwardedPort", "rssWorker", "version", "active", "limit", "waiting") if key in data}
                 print(path, json.dumps(allowed))
+            response = await client.get("/api/trackers")
+            assert response.status_code == 200
+            accounts = response.json()
+            assert all("api_key" not in account for account in accounts)
+            print("Tracker accounts", json.dumps({"count": len(accounts), "verifiedStatistics": sum(account.get("status") == "ok" for account in accounts), "credentialsExposed": False}))
     token = Path(os.environ["MEDIASEED_VPN_TOKEN_FILE"]).read_text().strip()
     async with httpx.AsyncClient(base_url=os.environ["MEDIASEED_VPN_URL"], headers={"X-MediaSeed-Key": token}, timeout=60, trust_env=False) as client:
         for path in ("app/preferences", "rss/items"):
