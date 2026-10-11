@@ -189,6 +189,19 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         media_type = "image/jpeg" if prefix.startswith(b"\xff\xd8\xff") else "image/png" if prefix.startswith(b"\x89PNG") else "image/webp"
         return FileResponse(path, media_type=media_type)
 
+    @app.get("/api/torrents/{identifier}/benefits")
+    def benefits(identifier: str, session=Depends(authorized)):
+        path = covers.path(torrent_hash(identifier)) if covers else None
+        if path is None or not path.with_suffix(".json").is_file():
+            return {"status": "unknown"}
+        try:
+            evidence = json.loads(path.with_suffix(".json").read_text())
+            if evidence.get("infoHash") != identifier.lower() or not 0 <= time.time() - evidence.get("checkedAt", 0) < 300:
+                return {"status": "unknown"}
+            return evidence
+        except (ValueError, OSError, TypeError):
+            return {"status": "unknown"}
+
     @app.post("/api/trackers/{identifier}/torrents/{torrent_id}")
     async def tracker_import(identifier: str, torrent_id: str, body: SeedingPolicy, session=Depends(authorized)):
         if not re.fullmatch(r"[1-9][0-9]{0,17}", torrent_id):

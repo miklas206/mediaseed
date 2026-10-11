@@ -1,9 +1,10 @@
 import asyncio
 import hashlib
+import json
 import re
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 
 import httpx
 
@@ -18,7 +19,7 @@ def poster_url(value):
     return value if re.fullmatch(prefix + r"(?:w[0-9]{2,4}|original)/[A-Za-z0-9_-]+\.(?:jpg|png|webp)", address.path) else None
 
 
-def matching_poster(data, identifier):
+def matching_attributes(data, identifier):
     rows = data.get("data", []) if isinstance(data, dict) else []
     if not isinstance(rows, list):
         return None
@@ -26,9 +27,14 @@ def matching_poster(data, identifier):
         attributes = row.get("attributes", {}) if isinstance(row, dict) else {}
         if not isinstance(attributes, dict) or str(attributes.get("info_hash", "")).lower() != identifier.lower():
             continue
-        meta = attributes.get("meta")
-        return poster_url(meta.get("poster")) if isinstance(meta, dict) else None
+        return attributes
     return None
+
+
+def matching_poster(data, identifier):
+    attributes = matching_attributes(data, identifier)
+    meta = attributes.get("meta") if attributes else None
+    return poster_url(meta.get("poster")) if isinstance(meta, dict) else None
 
 
 class Covers:
@@ -55,7 +61,7 @@ class Covers:
             torrents = response.json()
             if not isinstance(torrents, list):
                 return
-            budget = 3
+            budget = 6
             for torrent in torrents[:500]:
                 if not isinstance(torrent, dict):
                     continue
@@ -63,18 +69,53 @@ class Covers:
                 path = self.path(identifier)
                 if path is None or time.monotonic() - self.checked.get(identifier, -1000) < 300:
                     continue
-                if path.exists() and time.time() - path.stat().st_mtime < 86400:
-                    continue
                 if budget == 0:
                     break
-                budget -= 1
                 self.checked[identifier] = time.monotonic()
                 try:
                     for account in accounts:
-                        data = await self.tracker_read(account, "/api/torrents/filter", {"name": str(torrent.get("name", ""))[:200], "perPage": 50})
-                        poster = matching_poster(data, identifier)
-                        if poster:
-                            await self.download(poster, path)
+                        name = str(torrent.get("name", ""))[:200]
+                        variants = list(dict.fromkeys([name, re.sub(r"[._]+", " ", name).strip()]))
+                        matched = False
+                        for variant in variants:
+                            cursor = None
+                            for page in range(3):
+                                if budget == 0:
+                                    break
+                                budget -= 1
+                                params = {"name": variant, "perPage": 50}
+                                if cursor:
+                                    params["cursor"] = cursor
+                                data = await self.tracker_read(account, "/api/torrents/filter", params)
+                                attributes = matching_attributes(data, identifier)
+                                if attributes:
+                                    featured = attributes.get("featured") is True
+                                    freeleech = attributes.get("freeleech")
+                                    try:
+                                        freeleech = float(str(freeleech).rstrip("%"))
+                                    except (ValueError, TypeError):
+                                        freeleech = None
+                                    evidence = {"status": "matched", "infoHash": identifier.lower(), "tracker": account["name"][:80], "checkedAt": time.time(), "freeleech": 100 if featured else freeleech if freeleech in {0, 25, 50, 75, 100} else None, "featured": featured, "doubleUpload": True if featured else attributes.get("double_upload") if type(attributes.get("double_upload")) is bool else None, "internal": attributes.get("internal") is True, "refundable": attributes.get("refundable") is True}
+                                    evidence_path = path.with_suffix(".json")
+                                    evidence_path.write_text(json.dumps(evidence))
+                                    evidence_path.chmod(0o600)
+                                    meta = attributes.get("meta")
+                                    poster = poster_url(meta.get("poster")) if isinstance(meta, dict) else None
+                                    if poster and (not path.exists() or time.time() - path.stat().st_mtime >= 86400):
+                                        await self.download(poster, path)
+                                    matched = True
+                                    break
+                                links = data.get("links", {}) if isinstance(data, dict) else {}
+                                next_link = links.get("next") if isinstance(links, dict) else None
+                                if not isinstance(next_link, str) or len(next_link) > 4096:
+                                    break
+                                next_address = urlsplit(next_link)
+                                cursor = parse_qs(next_address.query).get("cursor", [None])[0]
+                                if not cursor or len(cursor) > 2048:
+                                    break
+                            if matched or budget == 0:
+                                break
+                        if matched or budget == 0:
                             break
                 except Exception:
                     continue
@@ -108,3 +149,6 @@ class Covers:
                 path.unlink(missing_ok=True)
             else:
                 total += size
+        for path in self.root.glob("*.json"):
+            if time.time() - path.stat().st_mtime > 7 * 86400:
+                path.unlink(missing_ok=True)

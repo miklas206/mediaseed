@@ -9,6 +9,7 @@ Independent seedbox application for MediaHub, inspired by FjordSeed's separate-a
 - Shared native queue with maximum eight active downloads and RSS priority for new RSS imports, plus source filtering and queue counters. RSS origin is stored as a category. Pause/deletion of a feed never deletes its torrent data.
 - Cached NordicBytes account statistics refreshed at most every five minutes, including ratio/upload/download/bonus/warnings; remote private fields and credentials are excluded.
 - Automatic tracker poster lookup for exact infohash matches. Only approved TMDB image hosts are fetched without tracker credentials. Authenticated local cache: 2 MiB/image, 64 MiB total, 24-hour refresh and seven-day cleanup. Missing/mismatched posters do not produce guessed artwork.
+- Torrent details show fresh exact-hash tracker benefit evidence (freeleech, double upload, featured/internal/refundable) when supplied by NordicBytes. Evidence expires after five minutes; it does not invent Green-credit or tracker-accounted ratio.
 
 Remaining FjordSeed parity includes selected-badge RSS filters, durable Green-credit accounting, detailed benefit/ratio previews, opt-in automatic file deletion/archive, generic tracker support and generic installation/SSO. TCP relay and country/profile-generation UI remain MediaVPN follow-ups. These features are not implemented by this release.
 
@@ -61,6 +62,10 @@ No production service, beta account, torrent, download, VPN key or shared storag
 `/healthz` reports application process availability only, not VPN protection or torrent health.
 
 ## Verification
+
+For a VPN-enabled installation, upgrades must include both `compose.yaml` and `compose.vpn.yaml` and the existing trusted `MEDIASEED_VPN_URL` / `MEDIASEED_VPN_TOKEN_PATH` operator variables. Omitting the overlay recreates the app without the machine token and closes its VPN gate; do not treat the standalone preview command as an integration upgrade.
+
+The opt-in scripts `tests/verify_runtime.py` and `tests/verify_rss_runtime.py` run inside the installed MediaSeed container. The first checks live VPN/native RSS/queue readiness using a disposable account without changing the live account. The second uses synthetic RSS metadata and a tracker-free one-byte torrent, starts only its exact generated hash, proves restart-dedup, and removes only that test torrent without deleting files. It does not activate live user feeds or prove a real provider feed download.
 
 `pytest tests -q` tests independent setup/login/logout, CSRF, host/origin rejection, filtered torrent reads, invalid hashes and the disabled start gate. Real VPN operation, Compose build and full feature parity are not covered by these tests.
 
