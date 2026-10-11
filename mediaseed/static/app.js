@@ -4,13 +4,27 @@ let torrents = [];
 let selectedHash = '';
 const message = document.querySelector('#message');
 const dialog = document.querySelector('#torrent-details');
+let notificationTimer;
+function showNotification(text, tone = 'danger') {
+  clearTimeout(notificationTimer);
+  message.dataset.tone = tone;
+  message.textContent = text;
+  if (text) notificationTimer = setTimeout(() => { message.textContent = ''; }, 6000);
+}
+message.tabIndex = 0;
+message.addEventListener('mouseenter', () => clearTimeout(notificationTimer));
+message.addEventListener('focus', () => clearTimeout(notificationTimer));
+function resumeNotification() { if (message.textContent && !message.matches(':hover') && document.activeElement !== message) notificationTimer = setTimeout(() => { message.textContent = ''; }, 6000); }
+message.addEventListener('mouseleave', resumeNotification);
+message.addEventListener('blur', resumeNotification);
+const errorLabels = {'Invalid credentials': 'Brugernavn eller adgangskode er forkert.', 'Try again later': 'For mange loginforsøg. Prøv igen om lidt.', 'Torrent client is not configured': 'Torrentklienten er endnu ikke tilsluttet.', 'Sign in required': 'Log ind for at fortsætte.'};
 async function api(path, body, method) {
   const response = await fetch('/api/' + path, {method: method || (body ? 'POST' : 'GET'), headers: {'Content-Type': 'application/json', 'X-MediaSeed-CSRF': csrf}, ...(body ? {body: JSON.stringify(body)} : {})});
   const result = await response.json();
   if (!response.ok) throw Object.assign(new Error(typeof result.detail === 'string' ? result.detail : 'Kontrollér felterne og prøv igen.'), {status: response.status});
   return result;
 }
-function notify(error) { message.textContent = error.message; }
+function notify(error) { showNotification(errorLabels[error.message] || error.message); }
 function element(tag, text, className) { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; }
 function bytes(value) { const number = Number(value || 0); for (const [divisor, unit] of [[1073741824, 'GiB'], [1048576, 'MiB'], [1024, 'KiB']]) if (number >= divisor) return `${(number / divisor).toFixed(1)} ${unit}`; return `${number} B`; }
 function state(row) { if (/error|missing/i.test(row.state)) return 'error'; if (/stopped|paused/i.test(row.state)) return 'stopped'; if (Number(row.progress) >= 1) return 'seeding'; return 'downloading'; }
@@ -36,7 +50,7 @@ function renderTorrents() {
   }
 }
 async function refresh() {
-  message.textContent = ''; try { torrents = await api('torrents'); renderTorrents(); } catch (error) { notify(error); }
+  showNotification(''); try { torrents = await api('torrents'); renderTorrents(); } catch (error) { notify(error); }
   try { const transfer = await api('transfer'); document.querySelector('#transfer').textContent = `Download ${bytes(transfer.dl_info_speed)}/s · Upload ${bytes(transfer.up_info_speed)}/s · Klient ${transfer.connection_status || 'ukendt'}`; } catch { document.querySelector('#transfer').textContent = 'Klient ikke tilsluttet'; }
   const storage = document.querySelector('#storage'); storage.hidden = false;
   try { const capacity = await api('storage'); storage.textContent = `Lokal storage: ${bytes(capacity.freeBytes)} ledig af ${bytes(capacity.totalBytes)}${capacity.lowSpace ? ' · Lav diskplads' : ''}${capacity.writable ? '' : ' · Ikke skrivbar'}`; } catch { storage.textContent = 'Lokal storage utilgængelig'; }
@@ -59,15 +73,15 @@ async function loadSources(kind) {
   }
 }
 for (const [selector, kind] of [['#feed-form', 'feeds'], ['#tracker-form', 'trackers']]) {
-  const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { body.ratio = Number(body.ratio); body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); form.reset(); form.elements.namedItem('id').value = ''; await loadSources(kind); message.textContent = 'Gemt'; } catch (error) { notify(error); } };
+  const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { body.ratio = Number(body.ratio); body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); form.reset(); form.elements.namedItem('id').value = ''; await loadSources(kind); showNotification('Gemt', 'success'); } catch (error) { notify(error); } };
   form.addEventListener('reset', () => { form.elements.namedItem('id').setAttribute('value', ''); });
 }
 for (const button of document.querySelectorAll('[data-view]')) button.onclick = async () => { message.textContent = ''; for (const other of document.querySelectorAll('[data-view]')) other.setAttribute('aria-pressed', String(other === button)); for (const section of document.querySelectorAll('.view')) section.hidden = section.id !== button.dataset.view; try { if (button.dataset.view === 'feeds' || button.dataset.view === 'trackers') await loadSources(button.dataset.view); else if (button.dataset.view === 'vpn') { const runtime = await api('runtime'); document.querySelector('#vpn-status').textContent = runtime.vpn === 'unverified' ? 'Ikke verificeret' : 'Ukendt'; } } catch (error) { notify(error); } };
 document.querySelector('#close-details').onclick = () => dialog.close();
 document.querySelector('#policy-form').onsubmit = async event => { event.preventDefault(); try { await api(`torrents/${selectedHash}/policy`, {ratio: Number(event.target.elements.namedItem('ratio').value)}); document.querySelector('#detail-message').textContent = 'Seedingmål gemt'; } catch (error) { document.querySelector('#detail-message').textContent = error.message; } };
 for (const selector of ['#search', '#filter', '#sort']) document.querySelector(selector).addEventListener('input', renderTorrents);
-function showWorkspace() { document.querySelector('#identity').hidden = true; document.querySelector('#workspace').hidden = false; document.querySelector('#logout').hidden = false; refresh(); }
+function showWorkspace() { document.body.classList.add('signed-in'); document.querySelector('#identity').hidden = true; document.querySelector('#workspace').hidden = false; document.querySelector('#logout').hidden = false; refresh(); }
 document.querySelector('#login').onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(event.target)); try { if (needsSetup) { await api('auth/setup', body); needsSetup = false; } csrf = (await api('auth/login', body)).csrf; event.target.reset(); showWorkspace(); } catch (error) { notify(error); } };
 document.querySelector('#refresh').onclick = refresh;
 document.querySelector('#logout').onclick = async () => { try { await api('auth/logout', {}); location.reload(); } catch (error) { notify(error); } };
-(async () => { try { needsSetup = (await api('auth/status')).needsSetup; document.querySelector('#identity-title').textContent = needsSetup ? 'Opret administrator' : 'Log ind'; if (!needsSetup) { try { csrf = (await api('auth/me')).csrf; showWorkspace(); } catch {} } } catch (error) { notify(error); } })();
+(async () => { try { needsSetup = (await api('auth/status')).needsSetup; document.querySelector('#identity-title').textContent = needsSetup ? 'En frisk begyndelse.' : 'Velkommen tilbage.'; document.querySelector('#identity-subtitle').textContent = needsSetup ? 'Opret din lokale MediaSeed-administrator.' : 'Log ind på MediaSeed.'; document.querySelector('#login-submit').textContent = needsSetup ? 'Opret administrator' : 'Log ind'; if (!needsSetup) { try { csrf = (await api('auth/me')).csrf; showWorkspace(); } catch {} } } catch (error) { notify(error); } })();
