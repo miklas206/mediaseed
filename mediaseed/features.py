@@ -1,16 +1,27 @@
 import json
 import secrets
 import re
+import time
+import math
+import asyncio
 from urllib.parse import urlsplit
 
 import httpx
 from fastapi import Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from mediaseed.covers import Covers
+from mediaseed.rss_worker import RssWorker
 
 
 class SeedingPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ratio: float = Field(ge=1, le=1000, allow_inf_nan=False)
+
+
+class FeedState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
 
 
 class FeedSettings(BaseModel):
@@ -79,7 +90,9 @@ async def add_stopped(qbit, ratio, content=None, magnet=None):
     return {"added": accepted, "pending": pending, "stopped": True, "downloadsEnabled": False}
 
 
-def install_features(app, authorized, database, qbit, vpn_status=None):
+def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=None):
+    tracker_cache = {}
+    tracker_lock = asyncio.Lock()
     with database() as connection:
         connection.execute("CREATE TABLE IF NOT EXISTS settings (kind TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(kind,id))")
 
@@ -109,6 +122,8 @@ def install_features(app, authorized, database, qbit, vpn_status=None):
             if not existing:
                 raise HTTPException(422, "A source credential is required")
             payload[secret] = existing[secret]
+        if kind == "feeds":
+            payload["enabled"] = existing.get("enabled", False) if existing else False
         identifier = identifier or secrets.token_hex(12)
         with database() as connection:
             connection.execute("INSERT INTO settings VALUES (?,?,?) ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload", (kind, identifier, json.dumps(payload)))
@@ -161,6 +176,19 @@ def install_features(app, authorized, database, qbit, vpn_status=None):
             results.append(result)
         return {"results": results, "limit": 50, "downloadsEnabled": False}
 
+    covers = Covers(data_dir, rows, tracker_read, qbit) if data_dir else None
+    rss_worker = RssWorker(database, rows, qbit, vpn_status) if vpn_status else None
+
+    @app.get("/api/covers/{identifier}")
+    def cover(identifier: str, session=Depends(authorized)):
+        path = covers.path(identifier) if covers else None
+        if path is None or not path.is_file():
+            raise HTTPException(404, "Cover unavailable")
+        with path.open("rb") as content:
+            prefix = content.read(12)
+        media_type = "image/jpeg" if prefix.startswith(b"\xff\xd8\xff") else "image/png" if prefix.startswith(b"\x89PNG") else "image/webp"
+        return FileResponse(path, media_type=media_type)
+
     @app.post("/api/trackers/{identifier}/torrents/{torrent_id}")
     async def tracker_import(identifier: str, torrent_id: str, body: SeedingPolicy, session=Depends(authorized)):
         if not re.fullmatch(r"[1-9][0-9]{0,17}", torrent_id):
@@ -190,10 +218,20 @@ def install_features(app, authorized, database, qbit, vpn_status=None):
             raise HTTPException(503, "Invalid transfer response")
         return {key: result.get(key) for key in ("dl_info_speed", "up_info_speed", "dl_info_data", "up_info_data", "connection_status")}
 
+    @app.get("/api/queue")
+    async def queue_status(session=Depends(authorized)):
+        torrents = await read_json("/api/v2/torrents/info", {"limit": 500})
+        if not isinstance(torrents, list):
+            raise HTTPException(503, "Invalid queue response")
+        active = [row for row in torrents if isinstance(row, dict) and row.get("state") in {"downloading", "stalledDL", "metaDL", "forcedDL"}]
+        waiting = sum(isinstance(row, dict) and row.get("state") == "queuedDL" for row in torrents)
+        rss = sum(str(row.get("category", "")).startswith("MediaSeed-RSS-") for row in active)
+        return {"limit": 8, "active": len(active), "waiting": waiting, "rssActive": rss, "manualActive": len(active) - rss, "boundedView": len(torrents) >= 500}
+
     @app.get("/api/runtime")
     async def runtime(session=Depends(authorized)):
         observed = await vpn_status() if vpn_status else {"vpn": "unverified", "downloadsEnabled": False, "reason": "VPN supervisor is not connected"}
-        return {**observed, "rssWorker": "not_connected", "trackerSync": "not_connected"}
+        return {**observed, "rssWorker": "vpn_bound" if rss_worker and observed.get("downloadsEnabled") else "blocked", "trackerSync": "configured" if rows("trackers") else "not_configured"}
 
     @app.get("/api/torrents/{identifier}/details")
     async def details(identifier: str, session=Depends(authorized)):
@@ -221,7 +259,26 @@ def install_features(app, authorized, database, qbit, vpn_status=None):
 
     @app.get("/api/feeds")
     def feeds(session=Depends(authorized)):
-        return [{key: value for key, value in row.items() if key != "url"} | {"configured": True, "paused": True, "status": "not_connected"} for row in rows("feeds")]
+        return [{key: value for key, value in row.items() if key != "url"} | {"configured": True, "paused": not row.get("enabled", False), "status": rss_worker.reports.get(row["id"], "Afventer VPN/feedposter") if rss_worker and row.get("enabled") else "Pauset"} for row in rows("feeds")]
+
+    @app.put("/api/feeds/{identifier}/state")
+    async def feed_state(identifier: str, body: FeedState, session=Depends(authorized)):
+        feed = next((row for row in rows("feeds") if row["id"] == identifier), None)
+        if feed is None:
+            raise HTTPException(404, "Feed not found")
+        if body.enabled:
+            if urlsplit(feed["url"]).netloc != "nordicbytes.org":
+                raise HTTPException(422, "Only NordicBytes HTTPS RSS sources are enabled")
+            if not (await vpn_status()).get("downloadsEnabled"):
+                raise HTTPException(409, "VPN is not verified; feed activation blocked")
+        with database() as connection:
+            row = connection.execute("SELECT payload FROM settings WHERE kind='feeds' AND id=?", (identifier,)).fetchone()
+            if row is None:
+                raise HTTPException(404, "Feed not found")
+            payload = json.loads(row["payload"])
+            payload["enabled"] = body.enabled
+            connection.execute("UPDATE settings SET payload=? WHERE kind='feeds' AND id=?", (json.dumps(payload), identifier))
+        return {"saved": True, "enabled": body.enabled}
 
     @app.post("/api/feeds")
     def add_feed(body: FeedSettings, session=Depends(authorized)):
@@ -232,8 +289,29 @@ def install_features(app, authorized, database, qbit, vpn_status=None):
         return save("feeds", body.model_dump(), identifier)
 
     @app.get("/api/trackers")
-    def accounts(session=Depends(authorized)):
-        return [{key: value for key, value in row.items() if key != "api_key"} | {"configured": True, "status": "not_connected", "stats": None} for row in rows("trackers")]
+    async def accounts(session=Depends(authorized)):
+        results = []
+        async with tracker_lock:
+            for account in rows("trackers")[:10]:
+                cached = tracker_cache.get(account["id"])
+                if not cached or cached["key"] != account["api_key"] or time.monotonic() - cached["checked"] >= 300:
+                    try:
+                        data = await tracker_read(account, "/api/user")
+                        if not isinstance(data, dict) or not isinstance(data.get("stats"), dict):
+                            raise ValueError("Invalid tracker statistics")
+                        stats = {}
+                        for field in ("uploaded", "downloaded", "ratio", "buffer", "seeding", "leeching", "seedbonus", "hit_and_runs", "seeding_size", "total_uploads"):
+                            value = data["stats"].get(field)
+                            stats[field] = value if type(value) in (int, float) and math.isfinite(value) else None
+                        warnings = data["stats"].get("warnings", {})
+                        stats["warnings"] = sum(value for key, value in warnings.items() if key in {"hnr", "manual"} and type(value) is int and value >= 0) if isinstance(warnings, dict) else None
+                        public = {"status": "ok", "stats": stats, "username": str(data.get("username", ""))[:80], "checkedAt": time.time()}
+                    except (HTTPException, ValueError, TypeError):
+                        public = {"status": "error", "stats": None, "error": "Tracker account statistics are unavailable"}
+                    cached = {"key": account["api_key"], "checked": time.monotonic(), "public": public}
+                    tracker_cache[account["id"]] = cached
+                results.append({key: value for key, value in account.items() if key != "api_key"} | {"configured": True, **cached["public"]})
+        return results
 
     @app.post("/api/trackers")
     def add_account(body: TrackerSettings, session=Depends(authorized)):
@@ -252,3 +330,18 @@ def install_features(app, authorized, database, qbit, vpn_status=None):
             if not cursor.rowcount:
                 raise HTTPException(404, "Settings not found")
         return {"removed": True, "filesPreserved": True}
+
+    async def background():
+        while True:
+            try:
+                if rss_worker:
+                    await rss_worker.tick()
+                if covers:
+                    await covers.tick()
+                if rows("trackers"):
+                    await accounts(session={})
+            except Exception:
+                pass
+            await asyncio.sleep(15)
+
+    return background

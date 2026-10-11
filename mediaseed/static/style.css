@@ -66,6 +66,7 @@ nav button[aria-pressed="true"] { border-color: var(--accent-line); color: var(-
 .toolbar { display: grid; grid-template-columns: minmax(0, 2fr) 1fr 1fr; gap: 16px; margin: 24px 0; }
 .torrent { border: 1px solid var(--line); border-radius: 8px; padding: 20px; margin-top: 14px; background: var(--surface); display: grid; gap: 12px; }
 .torrent h2 { margin: 0; }
+.torrent-cover { width:64px; height:96px; object-fit:cover; border-radius:4px; }
 .torrent p { color: var(--muted); margin: 0; }
 progress { width: 100%; height: 8px; accent-color: var(--accent); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }

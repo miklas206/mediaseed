@@ -1,14 +1,15 @@
 import hashlib
 import base64
+import asyncio
 import os
 import re
 import secrets
 import sqlite3
 import shutil
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, asynccontextmanager, suppress
 from pathlib import Path
-from urllib.parse import urlsplit, parse_qs
+from urllib.parse import urlsplit, parse_qs, urlencode
 
 import httpx
 from argon2 import PasswordHasher
@@ -117,7 +118,16 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             CREATE TABLE IF NOT EXISTS attempts (address TEXT PRIMARY KEY, count INTEGER NOT NULL, started REAL NOT NULL);
         """)
     (data / "mediaseed.sqlite").chmod(0o600)
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    @asynccontextmanager
+    async def lifespan(app):
+        worker = asyncio.create_task(background()) if vpn_url else None
+        yield
+        if worker:
+            worker.cancel()
+            with suppress(asyncio.CancelledError):
+                await worker
+
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[parsed.hostname])
 
     @app.middleware("http")
@@ -148,7 +158,8 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
     async def qbit(path, method="GET", payload=None, files=None):
         if vpn_url:
             if files:
-                result = await vpn_request("upload?ratio=" + str(float(payload.get("ratioLimit", 1))), "POST", content=files["torrents"][1])
+                query = urlencode({"ratio": float(payload.get("ratioLimit", 1)), "savepath": payload.get("savepath", "/downloads"), "category": payload.get("category", "")})
+                result = await vpn_request("upload?" + query, "POST", content=files["torrents"][1])
             else:
                 result = await vpn_request("rpc", "POST", {"path": path.removeprefix("/api/v2/"), "method": method, "payload": payload or {}})
             try:
@@ -258,7 +269,16 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             rows = response.json()
             if not isinstance(rows, list):
                 raise ValueError()
-            return [{key: value for key, value in row.items() if key in allowed} for row in rows[:500]]
+            result = []
+            for row in rows[:500]:
+                public = {key: value for key, value in row.items() if key in allowed}
+                identifier = str(row.get("hash", ""))
+                if re.fullmatch(r"[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", identifier):
+                    cached = data / "cover-cache" / (hashlib.sha256(identifier.lower().encode()).hexdigest() + ".img")
+                    if cached.is_file():
+                        public["cover"] = "/api/covers/" + identifier.lower()
+                result.append(public)
+            return result
         except (ValueError, AttributeError):
             raise HTTPException(503, "Invalid torrent client response") from None
 
@@ -302,7 +322,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         await qbit("/api/v2/torrents/" + path, "POST", {"hashes": body.torrent_hash, "deleteFiles": "false"})
         return {"completed": True}
 
-    install_features(app, authorized, database, qbit, vpn_status=vpn_status)
+    background = install_features(app, authorized, database, qbit, vpn_status=vpn_status, data_dir=data)
 
     @app.get("/")
     def home():

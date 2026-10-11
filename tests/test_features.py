@@ -214,6 +214,39 @@ def test_local_storage_is_ready_without_external_mount(tmp_path):
         assert not (downloads / ".mediahub-storage-id").exists()
 
 
+def test_feed_activation_requires_vpn_and_pause_is_always_available(tmp_path):
+    with TestClient(create_app(tmp_path, "http://testserver")) as client:
+        sign_in(client)
+        identifier = client.post("/api/feeds", json={"name": "Test", "url": "https://nordicbytes.org/rss/private"}).json()["id"]
+        assert client.get("/api/feeds").json()[0]["paused"] is True
+        assert client.put(f"/api/feeds/{identifier}/state", json={"enabled": True}).status_code == 409
+        assert client.put(f"/api/feeds/{identifier}/state", json={"enabled": False}).status_code == 200
+        client.headers["X-MediaSeed-CSRF"] = "wrong"
+        assert client.put(f"/api/feeds/{identifier}/state", json={"enabled": False}).status_code == 403
+
+
+def test_tracker_statistics_are_bounded_private_and_cached(tmp_path, monkeypatch):
+    from mediaseed import features
+    original = httpx.AsyncClient
+    requests = []
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={"username": "tester", "passkey": "private", "stats": {"uploaded": 123, "ratio": 2, "api_key": "private", "warnings": {"hnr": 2, "manual": 1, "unknown": 100}}})
+    monkeypatch.setattr(features.httpx, "AsyncClient", lambda **kwargs: original(**kwargs, transport=httpx.MockTransport(handler)))
+    with TestClient(create_app(tmp_path, "http://testserver")) as client:
+        sign_in(client)
+        identifier = client.post("/api/trackers", json={"name": "Test", "api_key": "private-key"}).json()["id"]
+        result = client.get("/api/trackers")
+        assert result.status_code == 200
+        assert result.json()[0]["stats"]["uploaded"] == 123
+        assert result.json()[0]["stats"]["warnings"] == 3
+        assert "private" not in result.text
+        assert client.get("/api/trackers").status_code == 200 and len(requests) == 1
+        client.put(f"/api/trackers/{identifier}", json={"name": "Test", "api_key": "new-key"})
+        client.get("/api/trackers")
+        assert len(requests) == 2
+
+
 def test_mediavpn_proxy_requires_fresh_readiness_for_start(tmp_path, monkeypatch):
     import base64
     import json

@@ -4,14 +4,22 @@ Independent seedbox application for MediaHub, inspired by FjordSeed's separate-a
 
 ## Implemented
 
+- Verified MediaVPN integration with live tunnel/interface/forwarded-port gates and restricted machine RPC. No Docker socket or VPN keys in MediaSeed. VPN stop closes the start gate and stops its managed client; namespace changes recreate the client using preserved named volumes.
+- NordicBytes RSS automation: feeds are paused by default. Explicit activation requires verified VPN. Native qBittorrent RSS fetches inside the tunnel; publication dates, fixed tracker download URLs and durable SQLite intent/history gate automated stopped import and subsequent start. Ambiguous imports are not automatically retried. Existing user-paused torrents are not resumed. Currently only NordicBytes HTTPS feed/download endpoints are supported; other sources remain saved but cannot activate.
+- Shared native queue with maximum eight active downloads and RSS priority for new RSS imports, plus source filtering and queue counters. RSS origin is stored as a category. Pause/deletion of a feed never deletes its torrent data.
+- Cached NordicBytes account statistics refreshed at most every five minutes, including ratio/upload/download/bonus/warnings; remote private fields and credentials are excluded.
+- Automatic tracker poster lookup for exact infohash matches. Only approved TMDB image hosts are fetched without tracker credentials. Authenticated local cache: 2 MiB/image, 64 MiB total, 24-hour refresh and seven-day cleanup. Missing/mismatched posters do not produce guessed artwork.
+
+Remaining FjordSeed parity includes selected-badge RSS filters, durable Green-credit accounting, detailed benefit/ratio previews, opt-in automatic file deletion/archive, generic tracker support and generic installation/SSO. TCP relay and country/profile-generation UI remain MediaVPN follow-ups. These features are not implemented by this release.
+
 - Independent FastAPI runtime, SQLite account database and static application UI.
 - Administrator setup, Argon2 password storage, expiring HttpOnly sessions, CSRF protection, login throttling and strict host/origin checks.
-- Authenticated qBittorrent 5 API adapter: bounded torrent count, stopped torrent addition, stop a torrent and remove a torrent without deleting downloaded files. Starting downloads is rejected until the VPN gate exists.
+- Authenticated qBittorrent 5 API adapter: bounded torrent count, stopped torrent addition, gated start, stop and removal without deleting downloaded files. Starts require fresh MediaVPN verification.
 - No dependency on MediaHub Core, Agent or FjordVPN. No Docker socket in the application container.
 - Downloads UI with search, status filters, sorting, speed/ratio/seeding-time display and a detail dialog for files, tracker hosts and peers.
 - Per-torrent ratio configuration with 49-hour seeding limits, and explicit early-stop confirmation when neither ratio 1 nor 49 hours is reached. Torrent removal always preserves files.
-- Independent RSS and NordicBytes account configuration: create/edit/remove, relative folders, feed start timestamp and ratio goals. Feed URLs/passkeys and API keys are not returned to the browser. Workers/synchronization are not connected yet.
-- Tracker search: select a saved NordicBytes account, search releases, and import a selected torrent file directly into qBittorrent in stopped state with a ratio goal and 49-hour seeding limit. The API key and private download link stay on the server. Only HTTPS downloads from NordicBytes are allowed; redirects and oversized responses are rejected. Starting these torrents still requires the unimplemented verified VPN gate. Other tracker providers are not implemented.
+- Independent RSS and NordicBytes account configuration: create/edit/remove, relative folders, feed start timestamp and ratio goals. Feed URLs/passkeys and API keys are not returned to the browser.
+- Tracker search: select a saved NordicBytes account, search releases, and import a selected torrent file directly into qBittorrent in stopped state with a ratio goal and 49-hour seeding limit. The API key and private download link stay on the server. Only HTTPS downloads from NordicBytes are allowed; redirects and oversized responses are rejected. Starting requires fresh MediaVPN verification. Other tracker providers are not implemented.
 - Manual addition: Downloads > Tilfoej torrent offers magnet links or a selected/dropped .torrent file (maximum 4 MiB), plus a ratio goal. Both paths use the same stopped-import policy as trackers, with a 49-hour seeding limit. Magnet metadata can remain pending while the client has no Internet access; this is reported separately from completed addition. No arbitrary HTTP torrent URLs or magnet external file sources are accepted. Uploads are not saved in the app data volume; qBittorrent validates the torrent contents.
 
 Source credentials are stored in the private SQLite database, not encrypted at rest. Protect the data volume and its backups. Use only synthetic credentials in this preview until the encrypted credential store is integrated.

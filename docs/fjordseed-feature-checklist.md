@@ -21,7 +21,15 @@ Reference: qlerup/fjordseed main README and source inventory reviewed 2026-10-11
 | VPN | Explicitly unverified | Own Gluetun project, profile provisioning, gate, supervisor, port synchronization, restart recovery |
 | Hub integration | Not implemented | Scoped managed login, installation/update manifest, independent local access |
 
-FjordSeed uses FjordVPN. MediaSeed is intended to own its VPN runtime instead; this architectural difference is not complete yet. The app's health endpoint reports process availability only. Never interpret saved feed/account settings as a running RSS/tracker integration.
+## Update 2026-10-12
+
+The table above records the earlier preview, not current implemented status. MediaSeed now uses a separate MediaVPN controller (not an embedded VPN runtime): live health/control/tun0/public-IP/port checks, namespace-bound qBittorrent, loopback WebUI and restricted authenticated RPC. VPN stop/restart recovery was verified on beta; no user torrents were started in the check.
+
+Manual magnet/file and NordicBytes search imports work in stopped state. Start requires fresh MediaVPN verification. RSS now has explicit pause/activation, native VPN-bound feed retrieval, publication-date gating and durable import-intent history. New feeds stay paused. NordicBytes is the only automatically downloadable feed provider in this implementation. RSS/manual sources share the native eight-download queue; new RSS imports receive queue priority.
+
+Tracker account statistics are bounded and cached for five minutes. Torrent covers use exact infohash matches, approved public poster hosts and an authenticated bounded local cache. Missing covers never trigger guessed title-search artwork.
+
+Still missing: selected-benefit RSS gates, Green-credit ledger, two-stage benefit/ratio preview, opt-in delete/archive completion actions, general providers, country/location generation, TCP relay, SSO and generic installer/update manifests. The application is not at full FjordSeed/FjordVPN feature parity. Application health still reports process availability, not VPN protection.
 
 ## Data boundaries
 
