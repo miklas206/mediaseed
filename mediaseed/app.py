@@ -103,7 +103,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         if not password:
             raise HTTPException(503, "Torrent client is not configured")
         try:
-            async with httpx.AsyncClient(base_url=endpoint, timeout=8, follow_redirects=False, trust_env=False, transport=transport) as client:
+            async with httpx.AsyncClient(base_url=endpoint, headers={"Referer": endpoint}, timeout=8, follow_redirects=False, trust_env=False, transport=transport) as client:
                 response = await client.post("/api/v2/auth/login", data={"username": qbit_user, "password": password}, headers={"Referer": endpoint})
                 if not (response.status_code == 204 or (response.status_code == 200 and response.text.strip() == "Ok.")):
                     raise HTTPException(503, "Torrent client authentication unavailable")

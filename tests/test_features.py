@@ -24,6 +24,7 @@ def test_tracker_search_and_stopped_import_keep_secrets_private(tmp_path, monkey
         return httpx.Response(200, content=b"d4:infod4:name4:testee")
 
     def qbit_handler(request):
+        assert request.headers["Referer"] == "http://vpn:8080"
         if request.url.path.endswith("login"):
             return httpx.Response(204)
         calls.append(request)
