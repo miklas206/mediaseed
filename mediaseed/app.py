@@ -177,6 +177,14 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         response.delete_cookie(COOKIE)
         return {"signedOut": True}
 
+    @app.get("/api/client")
+    async def client_status(session=Depends(authorized)):
+        response = await qbit("/api/v2/app/version")
+        version = response.text.strip()
+        if not version.startswith("v") or len(version) > 40:
+            raise HTTPException(503, "Invalid torrent client version")
+        return {"name": "qBittorrent", "version": version, "connected": True, "downloadsEnabled": False}
+
     @app.get("/api/torrents")
     async def torrents(session=Depends(authorized)):
         response = await qbit("/api/v2/torrents/info", payload={"limit": 500})

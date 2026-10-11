@@ -11,6 +11,8 @@ def client(tmp_path):
     def handler(request):
         if request.url.path == "/api/v2/auth/login":
             return httpx.Response(200, text="Ok.")
+        if request.url.path == "/api/v2/app/version":
+            return httpx.Response(200, text="v5.1.4")
         return httpx.Response(200, json=[{"hash": "a" * 40, "name": "Test torrent", "progress": 0.5, "save_path": "private"}])
 
     with TestClient(create_app(tmp_path, "http://testserver", qbit_password="synthetic", transport=httpx.MockTransport(handler))) as client:
@@ -48,3 +50,9 @@ def test_host_origin_and_cookie_guards(client):
     assert client.post("/api/auth/setup", json={"username": "tester", "password": PASSWORD}, headers={"origin": "https://untrusted.test"}).status_code == 403
     sign_in(client)
     assert client.get("/api/auth/me").headers["Cache-Control"] == "no-store"
+
+
+def test_client_status_requires_auth_and_reports_real_version(client):
+    assert client.get("/api/client").status_code == 401
+    sign_in(client)
+    assert client.get("/api/client").json() == {"name": "qBittorrent", "version": "v5.1.4", "connected": True, "downloadsEnabled": False}

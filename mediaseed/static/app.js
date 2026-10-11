@@ -51,7 +51,7 @@ function renderTorrents() {
 }
 async function refresh() {
   showNotification(''); try { torrents = await api('torrents'); renderTorrents(); } catch (error) { notify(error); }
-  try { const transfer = await api('transfer'); document.querySelector('#transfer').textContent = `Download ${bytes(transfer.dl_info_speed)}/s · Upload ${bytes(transfer.up_info_speed)}/s · Klient ${transfer.connection_status || 'ukendt'}`; } catch { document.querySelector('#transfer').textContent = 'Klient ikke tilsluttet'; }
+  try { const client = await api('client'); const transfer = await api('transfer'); document.querySelector('#transfer').textContent = `${client.name} ${client.version} · Download ${bytes(transfer.dl_info_speed)}/s · Upload ${bytes(transfer.up_info_speed)}/s · Downloads blokeret indtil VPN er verificeret`; } catch { document.querySelector('#transfer').textContent = 'qBittorrent ikke tilsluttet'; }
   const storage = document.querySelector('#storage'); storage.hidden = false;
   try { const capacity = await api('storage'); storage.textContent = `Lokal storage: ${bytes(capacity.freeBytes)} ledig af ${bytes(capacity.totalBytes)}${capacity.lowSpace ? ' · Lav diskplads' : ''}${capacity.writable ? '' : ' · Ikke skrivbar'}`; } catch { storage.textContent = 'Lokal storage utilgængelig'; }
 }

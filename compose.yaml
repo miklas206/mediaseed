@@ -2,15 +2,25 @@ name: mediaseed-preview
 services:
   app:
     build: .
+    depends_on:
+      client-init:
+        condition: service_completed_successfully
+      qbittorrent:
+        condition: service_started
     ports:
       - "${MEDIASEED_BIND:-127.0.0.1}:${MEDIASEED_PORT:-18800}:18800"
     environment:
       MEDIASEED_BASE_URL: ${MEDIASEED_BASE_URL:-http://127.0.0.1:18800}
       MEDIASEED_DATA: /data
       MEDIASEED_DOWNLOADS: /downloads
+      MEDIASEED_QBIT_URL: http://qbittorrent:8080
+      MEDIASEED_QBIT_USER: mediaseed
+      MEDIASEED_QBIT_PASSWORD_FILE: /secrets/qbit-password
     volumes:
       - appdata:/data
       - downloads:/downloads
+      - clientsecrets:/secrets:ro
+    networks: [default, client]
     read_only: true
     tmpfs:
       - /tmp:size=16m
@@ -25,6 +35,39 @@ services:
     logging:
       driver: json-file
       options: {max-size: 5m, max-file: "2"}
+  client-init:
+    build: .
+    user: "0:0"
+    network_mode: none
+    entrypoint: [python, -m, mediaseed.client_init]
+    volumes:
+      - clientconfig:/config
+      - clientsecrets:/secrets
+    restart: "no"
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    depends_on:
+      client-init:
+        condition: service_completed_successfully
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      WEBUI_PORT: "8080"
+      TZ: Europe/Copenhagen
+    volumes:
+      - clientconfig:/config
+      - downloads:/downloads
+    networks: [client]
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "2"}
+networks:
+  client:
+    internal: true
 volumes:
   appdata:
   downloads:
+  clientconfig:
+  clientsecrets:

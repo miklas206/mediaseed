@@ -16,7 +16,7 @@ Source credentials are stored in the private SQLite database, not encrypted at r
 
 ## Preview
 
-Run `docker compose up --build` and open `http://127.0.0.1:18800`. The default Compose starts only the application. The first local visitor creates its administrator account: do not expose a fresh instance to other users before setup. Behind HTTPS, set `MEDIASEED_BASE_URL` to the exact external origin before starting.
+Run `docker compose up --build` and open `http://127.0.0.1:18800`. Compose starts MediaSeed and a real LinuxServer qBittorrent client with persistent configuration and shared local downloads. A one-shot initializer generates a separate internal password, protected by file permissions, without printing it. Existing client configuration is never overwritten. The first local visitor creates its administrator account: do not expose a fresh instance to other users before setup. Behind HTTPS, set `MEDIASEED_BASE_URL` to the exact external origin before starting.
 
 For local development: install this package and run `uvicorn mediaseed.app:create_app --factory --host 127.0.0.1 --port 18800`. Set `MEDIASEED_DATA` to a private, disposable local directory. Tests use a synthetic qBittorrent transport and never start downloads.
 
@@ -28,7 +28,7 @@ No external disk, NFS share or manually configured mount is required. Compose au
 
 For a private LAN preview set `MEDIASEED_BIND` to the LXC address and `MEDIASEED_BASE_URL` to `http://<LXC-address>:18800`, then start Compose. Keep it off the public tunnel and perform administrator setup on a trusted LAN. `MEDIASEED_PORT` changes the external port. This does not add the app to MediaHub's App Store yet. Optional external storage and torrent-runtime migration are separate follow-up work.
 
-The adapter reads `MEDIASEED_QBIT_URL`, `MEDIASEED_QBIT_USER`, and `MEDIASEED_QBIT_PASSWORD_FILE`. These are trusted operator configuration, never request parameters. The secret file must not be committed. There is deliberately no connected torrent service in preview Compose.
+The adapter reads `MEDIASEED_QBIT_URL`, `MEDIASEED_QBIT_USER`, and `MEDIASEED_QBIT_PASSWORD_FILE`. Compose configures these automatically using private `clientconfig` and `clientsecrets` volumes. qBittorrent has no published ports and only an internal Docker network, with no Internet access. `/api/client` proves authenticated connectivity and reports the actual client version. This installs the client, but does not enable downloading: a verified VPN runtime remains required. Never attach the client to an Internet-enabled network to bypass the gate. Preserve all four named volumes during updates and rollback.
 
 ## Before replacing Seedbox
 
