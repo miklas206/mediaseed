@@ -1,22 +1,23 @@
 import hashlib
 import os
+import re
 import secrets
 import sqlite3
 import shutil
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 
 import httpx
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from mediaseed.features import install_features
+from mediaseed.features import add_stopped, install_features
 
 COOKIE = "mediaseed_session"
 HASHER = PasswordHasher()
@@ -30,8 +31,26 @@ class Credentials(BaseModel):
 
 
 class Magnet(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    url: str = Field(min_length=20, max_length=8192, pattern=r"^magnet:\?xt=urn:bt(?:ih|mh):")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    url: str = Field(min_length=20, max_length=8192)
+    ratio: float = Field(default=1, ge=1, le=1000, allow_inf_nan=False)
+
+    @field_validator("url")
+    @classmethod
+    def magnet_shape(cls, value):
+        if any(ord(char) < 32 for char in value):
+            raise ValueError("Invalid magnet link")
+        value = value.strip()
+        parsed = urlsplit(value)
+        if parsed.scheme != "magnet" or parsed.netloc or parsed.path or parsed.fragment:
+            raise ValueError("Invalid magnet link")
+        params = parse_qs(parsed.query, keep_blank_values=True, max_num_fields=100)
+        topics = params.get("xt", [])
+        if not topics or not all(re.fullmatch(r"urn:btih:(?:[a-fA-F0-9]{40}|[a-zA-Z2-7]{32})|urn:btmh:1220[a-fA-F0-9]{64}", topic) for topic in topics):
+            raise ValueError("Invalid magnet info hash")
+        if any(key in params for key in ("xs", "as", "ws")):
+            raise ValueError("External file sources are not supported")
+        return value
 
 
 class TorrentAction(BaseModel):
@@ -111,6 +130,8 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
                     response = await client.get(path, params=payload)
                 else:
                     response = await client.post(path, data=payload, files=files)
+                if path == "/api/v2/torrents/add" and response.status_code == 415:
+                    raise HTTPException(422, "Invalid torrent file")
                 response.raise_for_status()
                 return response
         except (httpx.HTTPError, ValueError):
@@ -199,7 +220,22 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.post("/api/torrents")
     async def add(body: Magnet, session=Depends(authorized)):
-        raise HTTPException(409, "Adding torrents is disabled until the VPN gate is implemented")
+        return await add_stopped(qbit, body.ratio, magnet=body.url)
+
+    @app.post("/api/torrents/upload")
+    async def upload(request: Request, filename: str = Query(min_length=1, max_length=255), ratio: float = Query(default=1, ge=1, le=1000, allow_inf_nan=False), session=Depends(authorized)):
+        if not filename.lower().endswith(".torrent"):
+            raise HTTPException(422, "Choose a .torrent file")
+        if request.headers.get("content-type", "").split(";")[0] not in {"application/x-bittorrent", "application/octet-stream"}:
+            raise HTTPException(415, "Expected a torrent file upload")
+        content = bytearray()
+        async for chunk in request.stream():
+            content.extend(chunk)
+            if len(content) > 4 * 1024 * 1024:
+                raise HTTPException(413, "Torrent file exceeds 4 MiB")
+        if not content.startswith(b"d") or not content.endswith(b"e"):
+            raise HTTPException(422, "Invalid torrent file")
+        return await add_stopped(qbit, ratio, content=bytes(content))
 
     @app.post("/api/torrents/{action}")
     async def action(action: str, body: TorrentAction, session=Depends(authorized)):

@@ -31,7 +31,7 @@ def test_tracker_search_and_stopped_import_keep_secrets_private(tmp_path, monkey
         calls.append(request)
         assert b'name="stopped"\r\n\r\ntrue' in request.content
         assert b'name="paused"\r\n\r\ntrue' in request.content
-        assert b'name="torrents"; filename="tracker.torrent"' in request.content
+        assert b'name="torrents"; filename="upload.torrent"' in request.content
         if add_format == "current-json":
             return httpx.Response(200, json={"added_torrent_ids": ["a" * 40], "success_count": 1, "failure_count": 0, "pending_count": 0})
         return httpx.Response(200, text="Ok.") if add_format == "legacy-text" else httpx.Response(204)
@@ -144,6 +144,61 @@ def test_configuration_mutations_require_session_and_csrf(tmp_path):
         assert client.post("/api/feeds", json={"name": "Test", "url": "https://example.test/rss"}).status_code == 403
         assert client.delete("/api/settings/feeds/unknown").status_code == 403
         assert client.post("/api/torrents/" + "a" * 40 + "/policy", json={"ratio": 2}).status_code == 403
+
+
+def test_manual_magnet_and_file_additions_are_stopped(tmp_path):
+    calls = []
+    def handler(request):
+        if request.url.path.endswith("/login"):
+            return httpx.Response(204)
+        calls.append(request)
+        return httpx.Response(200, json={"success_count": 1, "failure_count": 0, "pending_count": 0})
+
+    with TestClient(create_app(tmp_path, "http://testserver", qbit_password="synthetic", transport=httpx.MockTransport(handler))) as client:
+        path = "/api/torrents/upload?filename=example.torrent&ratio=2"
+        content = b'd4:infod4:name4:testee'
+        headers = {"Content-Type": "application/x-bittorrent"}
+        assert client.post(path, content=content, headers=headers).status_code == 401
+        sign_in(client)
+        magnet = "magnet:?dn=Example&xt=urn:btih:" + "a" * 40
+        response = client.post("/api/torrents", json={"url": magnet, "ratio": 2})
+        assert response.json() == {"added": True, "pending": False, "stopped": True, "downloadsEnabled": False}
+        payload = parse_qs(calls[-1].content.decode())
+        assert payload["urls"] == [magnet]
+        assert payload["stopped"] == ["true"] and payload["paused"] == ["true"]
+        assert payload["ratioLimit"] == ["2.0"] and payload["seedingTimeLimit"] == ["2940"]
+        assert client.post(path, content=content, headers=headers).json()["stopped"] is True
+        assert b'name="torrents"; filename="upload.torrent"' in calls[-1].content
+        assert b'name="stopped"\r\n\r\ntrue' in calls[-1].content
+        count = len(calls)
+        for url in ("https://example.test/file.torrent", "magnet:?xt=urn:btih:bad", magnet + "\n", magnet + "&xs=http://localhost/secret"):
+            assert client.post("/api/torrents", json={"url": url}).status_code == 422
+        assert client.post("/api/torrents", json={"url": magnet, "ratio": 0.5}).status_code == 422
+        assert client.post(path, content=b"not a torrent", headers=headers).status_code == 422
+        assert client.post(path, content=b"d" + b"x" * (4 * 1024 * 1024) + b"e", headers=headers).status_code == 413
+        assert client.post(path, content=content, headers={"Content-Type": "text/html"}).status_code == 415
+        assert client.post("/api/torrents/upload?filename=file.exe", content=content, headers=headers).status_code == 422
+        assert len(calls) == count
+        client.headers["X-MediaSeed-CSRF"] = "invalid"
+        assert client.post(path, content=content, headers=headers).status_code == 403
+        assert client.post("/api/torrents", json={"url": magnet}).status_code == 403
+
+
+def test_manual_add_reports_pending_metadata_and_client_rejection(tmp_path):
+    def handler(request):
+        if request.url.path.endswith("/login"):
+            return httpx.Response(204)
+        if "multipart/form-data" in request.headers.get("Content-Type", ""):
+            return httpx.Response(415, text="invalid torrent with private details")
+        return httpx.Response(200, json={"success_count": 0, "failure_count": 0, "pending_count": 1})
+
+    with TestClient(create_app(tmp_path, "http://testserver", qbit_password="synthetic", transport=httpx.MockTransport(handler))) as client:
+        sign_in(client)
+        response = client.post("/api/torrents", json={"url": "magnet:?xt=urn:btmh:1220" + "a" * 64})
+        assert response.json() == {"added": False, "pending": True, "stopped": True, "downloadsEnabled": False}
+        response = client.post("/api/torrents/upload?filename=test.torrent", content=b"dee", headers={"Content-Type": "application/x-bittorrent"})
+        assert response.status_code == 422
+        assert "private details" not in response.text
 
 
 def test_local_storage_is_ready_without_external_mount(tmp_path):

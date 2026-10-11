@@ -56,6 +56,29 @@ class TrackerSettings(BaseModel):
     api_key: str = Field(default="", max_length=512)
 
 
+async def add_stopped(qbit, ratio, content=None, magnet=None):
+    payload = {"stopped": "true", "paused": "true", "savepath": "/downloads", "ratioLimit": str(ratio), "seedingTimeLimit": "2940"}
+    files = None
+    if magnet is not None:
+        payload["urls"] = magnet
+    else:
+        files = {"torrents": ("upload.torrent", content, "application/x-bittorrent")}
+    response = await qbit("/api/v2/torrents/add", "POST", payload, files=files)
+    accepted = response.status_code == 204 or response.text.strip() == "Ok."
+    pending = False
+    if not accepted:
+        try:
+            outcome = response.json()
+            if isinstance(outcome, dict) and outcome.get("failure_count") == 0:
+                accepted = outcome.get("success_count") == 1 and outcome.get("pending_count") == 0
+                pending = magnet is not None and outcome.get("success_count") == 0 and outcome.get("pending_count") == 1
+        except ValueError:
+            pass
+    if not accepted and not pending:
+        raise HTTPException(502, "Torrent client rejected the torrent file")
+    return {"added": accepted, "pending": pending, "stopped": True, "downloadsEnabled": False}
+
+
 def install_features(app, authorized, database, qbit):
     with database() as connection:
         connection.execute("CREATE TABLE IF NOT EXISTS settings (kind TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(kind,id))")
@@ -157,16 +180,7 @@ def install_features(app, authorized, database, qbit):
         content = await tracker_read(account, address.path + ("?" + address.query if address.query else ""), binary=True)
         if not content.startswith(b"d") or not content.endswith(b"e"):
             raise HTTPException(502, "Tracker did not return a torrent file")
-        response = await qbit("/api/v2/torrents/add", "POST", {"stopped": "true", "paused": "true", "savepath": "/downloads", "ratioLimit": str(body.ratio), "seedingTimeLimit": "2940"}, files={"torrents": ("tracker.torrent", content, "application/x-bittorrent")})
-        accepted = response.status_code == 204 or response.text.strip() == "Ok."
-        if not accepted:
-            try:
-                outcome = response.json()
-                accepted = isinstance(outcome, dict) and outcome.get("success_count") == 1 and outcome.get("failure_count") == 0 and outcome.get("pending_count") == 0
-            except ValueError:
-                accepted = False
-        if not accepted:
-            raise HTTPException(502, "Torrent client rejected the torrent file")
+        await add_stopped(qbit, body.ratio, content=content)
         return {"added": True, "stopped": True, "downloadsEnabled": False}
 
     @app.get("/api/transfer")

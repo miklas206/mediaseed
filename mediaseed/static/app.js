@@ -25,6 +25,7 @@ async function api(path, body, method) {
   return result;
 }
 function notify(error) { showNotification(errorLabels[error.message] || error.message); }
+Object.assign(errorLabels, {'Invalid torrent file': 'Filen er ikke en gyldig torrentfil.', 'Choose a .torrent file': 'Vælg en .torrent-fil.', 'Torrent file exceeds 4 MiB': 'Torrentfilen må højst være 4 MiB.'});
 function element(tag, text, className) { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; }
 function bytes(value) { const number = Number(value || 0); for (const [divisor, unit] of [[1073741824, 'GiB'], [1048576, 'MiB'], [1024, 'KiB']]) if (number >= divisor) return `${(number / divisor).toFixed(1)} ${unit}`; return `${number} B`; }
 function state(row) { if (/error|missing/i.test(row.state)) return 'error'; if (/stopped|paused/i.test(row.state)) return 'stopped'; if (Number(row.progress) >= 1) return 'seeding'; return 'downloading'; }
@@ -110,5 +111,44 @@ for (const selector of ['#search', '#filter', '#sort']) document.querySelector(s
 function showWorkspace() { document.body.classList.add('signed-in'); document.querySelector('#identity').hidden = true; document.querySelector('#workspace').hidden = false; document.querySelector('#logout').hidden = false; refresh(); }
 document.querySelector('#login').onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(event.target)); try { if (needsSetup) { await api('auth/setup', body); needsSetup = false; } csrf = (await api('auth/login', body)).csrf; event.target.reset(); showWorkspace(); } catch (error) { notify(error); } };
 document.querySelector('#refresh').onclick = refresh;
+const addDialog = document.querySelector('#add-torrent');
+const addForm = document.querySelector('#add-torrent-form');
+const fileInput = document.querySelector('#add-file');
+const fileField = document.querySelector('#file-field');
+let droppedTorrent = null;
+let addingTorrent = false;
+function setAddMode() {
+  const fileMode = addForm.elements.namedItem('mode').value === 'file';
+  document.querySelector('#magnet-field').hidden = fileMode; fileField.hidden = !fileMode;
+  document.querySelector('#add-magnet').disabled = fileMode; document.querySelector('#add-magnet').required = !fileMode;
+  fileInput.disabled = !fileMode; fileInput.required = fileMode && !droppedTorrent;
+}
+for (const radio of addForm.querySelectorAll('[name="mode"]')) radio.onchange = setAddMode;
+document.querySelector('#new-torrent').onclick = () => { showNotification(''); addForm.reset(); droppedTorrent = null; document.querySelector('#file-name').textContent = ''; setAddMode(); addDialog.append(document.querySelector('.notifications')); addDialog.showModal(); };
+addDialog.addEventListener('close', () => { document.body.append(document.querySelector('.notifications')); });
+function closeAdd() { if (!addingTorrent) addDialog.close(); }
+document.querySelector('#close-add').onclick = closeAdd; document.querySelector('#cancel-add').onclick = closeAdd;
+addDialog.addEventListener('cancel', event => { if (addingTorrent) event.preventDefault(); });
+fileInput.onchange = () => { droppedTorrent = null; document.querySelector('#file-name').textContent = fileInput.files[0]?.name || ''; setAddMode(); };
+fileField.ondragover = event => { event.preventDefault(); if (!addingTorrent) fileField.classList.add('dragging'); };
+fileField.ondragleave = () => fileField.classList.remove('dragging');
+fileField.ondrop = event => { event.preventDefault(); fileField.classList.remove('dragging'); if (addingTorrent) return; if (event.dataTransfer.files.length !== 1) { showNotification('Vælg én torrentfil.'); return; } droppedTorrent = event.dataTransfer.files[0]; fileInput.value = ''; document.querySelector('#file-name').textContent = droppedTorrent.name; setAddMode(); };
+addForm.onsubmit = async event => {
+  event.preventDefault(); if (addingTorrent) return;
+  const fileMode = addForm.elements.namedItem('mode').value === 'file'; const ratio = Number(addForm.elements.namedItem('ratio').value);
+  const file = droppedTorrent || fileInput.files[0];
+  if (fileMode && (!file || !file.name.toLowerCase().endsWith('.torrent'))) { showNotification('Vælg en .torrent-fil.'); return; }
+  if (fileMode && file.size > 4 * 1024 * 1024) { showNotification('Torrentfilen må højst være 4 MiB.'); return; }
+  addingTorrent = true; const controls = [...addForm.elements, document.querySelector('#close-add')]; const disabledStates = controls.map(control => control.disabled); controls.forEach(control => { control.disabled = true; });
+  try {
+    let result;
+    if (fileMode) {
+      const response = await fetch(`/api/torrents/upload?filename=${encodeURIComponent(file.name)}&ratio=${ratio}`, {method: 'POST', headers: {'Content-Type': 'application/x-bittorrent', 'X-MediaSeed-CSRF': csrf}, body: file});
+      result = await response.json(); if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Torrentfilen kunne ikke tilføjes.');
+    } else { result = await api('torrents', {url: addForm.elements.namedItem('url').value.trim(), ratio}); }
+    addDialog.close(); await refresh(); showNotification(result.pending ? 'Magnetlink modtaget stoppet. Metadata afventer VPN.' : 'Torrent tilføjet stoppet. Start kræver verificeret VPN.', 'success');
+  } catch (error) { notify(error); }
+  finally { addingTorrent = false; controls.forEach((control, index) => { control.disabled = disabledStates[index]; }); }
+};
 document.querySelector('#logout').onclick = async () => { try { await api('auth/logout', {}); location.reload(); } catch (error) { notify(error); } };
 (async () => { try { needsSetup = (await api('auth/status')).needsSetup; document.querySelector('#identity-title').textContent = needsSetup ? 'En frisk begyndelse.' : 'Velkommen tilbage.'; document.querySelector('#identity-subtitle').textContent = needsSetup ? 'Opret din lokale MediaSeed-administrator.' : 'Log ind på MediaSeed.'; document.querySelector('#login-submit').textContent = needsSetup ? 'Opret administrator' : 'Log ind'; if (!needsSetup) { try { csrf = (await api('auth/me')).csrf; showWorkspace(); } catch {} } } catch (error) { notify(error); } })();

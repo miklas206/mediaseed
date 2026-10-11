@@ -80,6 +80,17 @@ table { width: 100%; border-collapse: collapse; }
 td, th { text-align: left; font-size: 13px; padding: 10px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 th { color: var(--muted); font-weight: 550; }
 #policy-form { margin-top: 24px; max-width: 340px; }
+#add-torrent { max-width: 540px; border-radius: 8px; }
+#add-torrent-form { margin-top: 18px; gap: 16px; }
+.input-mode { display: flex; gap: 8px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.input-mode legend { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+.input-mode label { display: flex; align-items: center; flex: 1; gap: 8px; border: 1px solid var(--line); border-radius: 6px; padding: 10px; cursor: pointer; }
+.input-mode label:has(input:checked) { background: var(--accent-bg); border-color: var(--accent-line); color: var(--accent); }
+.input-mode input { width: 16px; min-height: 16px; margin: 0; accent-color: var(--accent); }
+.file-drop { padding: 16px; border: 1px dashed var(--line); border-radius: 6px; overflow-wrap: anywhere; }
+.file-drop.dragging { border-color: var(--accent); background: var(--accent-bg); }
+.file-drop input { padding: 8px; }
+@media(max-width: 540px) { .downloads-heading { align-items: flex-start; flex-direction: column; } .downloads-heading .actions { width: 100%; } }
 dt { color: var(--muted); margin-top: 24px; }
 dd { margin: 8px 0 0; }
 #storage { font-size: 12px; border-top: 1px solid var(--line); padding-top: 20px; margin-top: 32px; }

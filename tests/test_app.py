@@ -14,6 +14,8 @@ def client(tmp_path, request):
             return httpx.Response(login_status, text="Ok." if login_status == 200 else "")
         if request.url.path == "/api/v2/app/version":
             return httpx.Response(200, text="v5.1.4")
+        if request.url.path == "/api/v2/torrents/add":
+            return httpx.Response(200, text="Ok.")
         return httpx.Response(200, json=[{"hash": "a" * 40, "name": "Test torrent", "progress": 0.5, "save_path": "private"}])
 
     with TestClient(create_app(tmp_path, "http://testserver", qbit_password="synthetic", transport=httpx.MockTransport(handler))) as client:
@@ -39,7 +41,7 @@ def test_independent_account_and_sessions(client):
 def test_torrents_are_filtered_and_controls_fail_closed(client):
     sign_in(client)
     assert client.get("/api/torrents").json() == [{"hash": "a" * 40, "name": "Test torrent", "progress": 0.5}]
-    assert client.post("/api/torrents", json={"url": "magnet:?xt=urn:btih:" + "a" * 40}).status_code == 409
+    assert client.post("/api/torrents", json={"url": "magnet:?xt=urn:btih:" + "a" * 40}).json()["stopped"] is True
     assert client.post("/api/torrents/start", json={"torrent_hash": "a" * 40}).status_code == 409
     assert client.post("/api/torrents/remove", json={"torrent_hash": "all"}).status_code == 422
     client.headers["X-MediaSeed-CSRF"] = "invalid"
