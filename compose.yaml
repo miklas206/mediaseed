@@ -3,12 +3,14 @@ services:
   app:
     build: .
     ports:
-      - "127.0.0.1:18800:18800"
+      - "${MEDIASEED_BIND:-127.0.0.1}:${MEDIASEED_PORT:-18800}:18800"
     environment:
-      MEDIASEED_BASE_URL: http://127.0.0.1:18800
+      MEDIASEED_BASE_URL: ${MEDIASEED_BASE_URL:-http://127.0.0.1:18800}
       MEDIASEED_DATA: /data
+      MEDIASEED_DOWNLOADS: /downloads
     volumes:
       - appdata:/data
+      - downloads:/downloads
     read_only: true
     tmpfs:
       - /tmp:size=16m
@@ -25,3 +27,4 @@ services:
       options: {max-size: 5m, max-file: "2"}
 volumes:
   appdata:
+  downloads:

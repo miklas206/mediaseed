@@ -2,6 +2,7 @@ import hashlib
 import os
 import secrets
 import sqlite3
+import shutil
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -15,6 +16,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from mediaseed.features import install_features
 
 COOKIE = "mediaseed_session"
 HASHER = PasswordHasher()
@@ -35,11 +37,18 @@ class Magnet(BaseModel):
 class TorrentAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     torrent_hash: str = Field(pattern=r"^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$")
+    confirm_early: bool = False
 
 
-def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, transport=None):
+def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, transport=None, downloads_dir=None):
     data = Path(data_dir or os.environ.get("MEDIASEED_DATA", "/data"))
     data.mkdir(parents=True, exist_ok=True, mode=0o700)
+    downloads = Path(downloads_dir or os.environ.get("MEDIASEED_DOWNLOADS", str(data / "downloads")))
+    if not downloads.is_absolute() or ".." in downloads.parts or downloads.is_symlink():
+        raise ValueError("Expected a trusted absolute downloads directory")
+    downloads.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if downloads.resolve() != downloads:
+        raise ValueError("Downloads directory must not contain symlink components")
     base = (base_url or os.environ.get("MEDIASEED_BASE_URL", "http://127.0.0.1:18800")).rstrip("/")
     parsed = urlsplit(base)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.path or parsed.username:
@@ -61,6 +70,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             CREATE TABLE IF NOT EXISTS sessions (digest TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS attempts (address TEXT PRIMARY KEY, count INTEGER NOT NULL, started REAL NOT NULL);
         """)
+    (data / "mediaseed.sqlite").chmod(0o600)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[parsed.hostname])
 
@@ -152,6 +162,14 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
     def me(session=Depends(authorized)):
         return {"csrf": session["csrf"]}
 
+    @app.get("/api/storage")
+    def storage(session=Depends(authorized)):
+        try:
+            capacity = shutil.disk_usage(downloads)
+        except OSError:
+            raise HTTPException(503, "Local downloads storage unavailable") from None
+        return {"label": "Local downloads", "type": "local", "totalBytes": capacity.total, "freeBytes": capacity.free, "usedBytes": capacity.used, "writable": os.access(downloads, os.W_OK), "lowSpace": capacity.free < 2 * 1024**3, "externalMountRequired": False}
+
     @app.post("/api/auth/logout")
     def logout(response: Response, session=Depends(authorized)):
         with database() as connection:
@@ -162,7 +180,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
     @app.get("/api/torrents")
     async def torrents(session=Depends(authorized)):
         response = await qbit("/api/v2/torrents/info", payload={"limit": 500})
-        allowed = {"hash", "name", "progress", "state", "dlspeed", "upspeed", "ratio", "eta", "size"}
+        allowed = {"hash", "name", "progress", "state", "dlspeed", "upspeed", "ratio", "eta", "size", "seeding_time", "ratio_limit", "category", "num_seeds", "num_leechs", "downloaded", "uploaded"}
         try:
             rows = response.json()
             if not isinstance(rows, list):
@@ -179,9 +197,19 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
     async def action(action: str, body: TorrentAction, session=Depends(authorized)):
         if action not in {"stop", "remove"}:
             raise HTTPException(409, "Starting downloads is disabled until the VPN gate is implemented")
+        if not body.confirm_early:
+            properties = await qbit("/api/v2/torrents/properties", payload={"hash": body.torrent_hash})
+            try:
+                observed = properties.json()
+                if float(observed.get("share_ratio", 0)) < 1 and int(observed.get("seeding_time", 0)) < 49 * 3600:
+                    raise HTTPException(409, "Early stop: ratio is below 1 and seeding time is below 49 hours. Explicit confirmation required.")
+            except (ValueError, AttributeError, TypeError):
+                raise HTTPException(503, "Cannot verify seeding progress") from None
         path = "delete" if action == "remove" else "stop"
         await qbit("/api/v2/torrents/" + path, "POST", {"hashes": body.torrent_hash, "deleteFiles": "false"})
         return {"completed": True}
+
+    install_features(app, authorized, database, qbit)
 
     @app.get("/")
     def home():
