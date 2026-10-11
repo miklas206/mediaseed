@@ -6,7 +6,7 @@ Independent seedbox application for MediaHub, inspired by FjordSeed's separate-a
 
 - Independent FastAPI runtime, SQLite account database and static application UI.
 - Administrator setup, Argon2 password storage, expiring HttpOnly sessions, CSRF protection, login throttling and strict host/origin checks.
-- Authenticated qBittorrent 5 API adapter: bounded torrent count, add a stopped magnet, stop a torrent and remove a torrent without deleting downloaded files.
+- Authenticated qBittorrent 5 API adapter: bounded torrent count, stop a torrent and remove a torrent without deleting downloaded files. Adding and starting torrents is rejected until the VPN gate exists.
 - No dependency on MediaHub Core, Agent or FjordVPN. No Docker socket in the application container.
 
 ## Preview

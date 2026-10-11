@@ -173,8 +173,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.post("/api/torrents")
     async def add(body: Magnet, session=Depends(authorized)):
-        await qbit("/api/v2/torrents/add", "POST", {"urls": body.url, "savepath": "/downloads", "stopped": "true"})
-        return {"added": True, "stopped": True}
+        raise HTTPException(409, "Adding torrents is disabled until the VPN gate is implemented")
 
     @app.post("/api/torrents/{action}")
     async def action(action: str, body: TorrentAction, session=Depends(authorized)):

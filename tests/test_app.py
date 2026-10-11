@@ -36,6 +36,7 @@ def test_independent_account_and_sessions(client):
 def test_torrents_are_filtered_and_controls_fail_closed(client):
     sign_in(client)
     assert client.get("/api/torrents").json() == [{"hash": "a" * 40, "name": "Test torrent", "progress": 0.5}]
+    assert client.post("/api/torrents", json={"url": "magnet:?xt=urn:btih:" + "a" * 40}).status_code == 409
     assert client.post("/api/torrents/start", json={"torrent_hash": "a" * 40}).status_code == 409
     assert client.post("/api/torrents/remove", json={"torrent_hash": "all"}).status_code == 422
     client.headers["X-MediaSeed-CSRF"] = "invalid"
