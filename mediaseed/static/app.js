@@ -2,6 +2,8 @@ let csrf = '';
 let needsSetup = false;
 let torrents = [];
 let selectedHash = '';
+let downloadsEnabled = false;
+let refreshing = false;
 const message = document.querySelector('#message');
 const dialog = document.querySelector('#torrent-details');
 let notificationTimer;
@@ -33,7 +35,7 @@ function command(label, handler) { const button = element('button', label); butt
 async function torrentAction(row, action) {
   if (action === 'remove' && !confirm(`Fjern ${row.name}? Downloadede filer bevares.`)) return;
   try { await api('torrents/' + action, {torrent_hash: row.hash}); }
-  catch (error) { if (error.status !== 409) throw error; if (!confirm('Seedingmålet er ikke nået: ratio under 1 og mindre end 49 timer. Vil du alligevel fortsætte?')) return; await api('torrents/' + action, {torrent_hash: row.hash, confirm_early: true}); }
+  catch (error) { if (error.status !== 409 || action === 'start') throw error; if (!confirm('Seedingmålet er ikke nået: ratio under 1 og mindre end 49 timer. Vil du alligevel fortsætte?')) return; await api('torrents/' + action, {torrent_hash: row.hash, confirm_early: true}); }
   await refresh();
 }
 function renderTorrents() {
@@ -46,16 +48,32 @@ function renderTorrents() {
     const item = element('article', undefined, 'torrent'); const progress = element('progress'); progress.max = 1; progress.value = Math.max(0, Math.min(1, Number(row.progress || 0))); progress.setAttribute('aria-label', 'Fremdrift');
     const status = element('p', `${Math.round(Number(row.progress || 0) * 100)} % · ${row.state || ''} · ${bytes(row.size)} · Ratio ${Number(row.ratio || 0).toFixed(2)}`);
     const speeds = element('p', `Download ${bytes(row.dlspeed)}/s · Upload ${bytes(row.upspeed)}/s · Seeding ${(Number(row.seeding_time || 0) / 3600).toFixed(1)} timer`);
-    const actions = element('div', undefined, 'actions'); actions.append(command('Detaljer', () => showDetails(row)), command('Stop', () => torrentAction(row, 'stop')), command('Fjern torrent', () => torrentAction(row, 'remove')));
+    const actions = element('div', undefined, 'actions'); const start = command('Start', () => torrentAction(row, 'start')); start.disabled = !downloadsEnabled; actions.append(command('Detaljer', () => showDetails(row)), start, command('Stop', () => torrentAction(row, 'stop')), command('Fjern torrent', () => torrentAction(row, 'remove')));
     item.append(element('h2', row.name), progress, status, speeds, actions); target.append(item);
   }
 }
 async function refresh() {
-  showNotification(''); try { torrents = await api('torrents'); renderTorrents(); } catch (error) { notify(error); }
-  try { const client = await api('client'); const transfer = await api('transfer'); document.querySelector('#transfer').textContent = `${client.name} ${client.version} · Download ${bytes(transfer.dl_info_speed)}/s · Upload ${bytes(transfer.up_info_speed)}/s · Downloads blokeret indtil VPN er verificeret`; } catch { document.querySelector('#transfer').textContent = 'qBittorrent ikke tilsluttet'; }
+  if (refreshing) return; refreshing = true;
+  try { const runtime = await api('runtime'); downloadsEnabled = runtime.downloadsEnabled === true; } catch { downloadsEnabled = false; }
+  try { torrents = await api('torrents'); renderTorrents(); } catch (error) { torrents = []; renderTorrents(); document.querySelector('#count').textContent = 'Torrentklient utilgængelig'; }
+  try { const client = await api('client'); const transfer = await api('transfer'); document.querySelector('#transfer').textContent = `${client.name} ${client.version} · Download ${bytes(transfer.dl_info_speed)}/s · Upload ${bytes(transfer.up_info_speed)}/s · ${downloadsEnabled ? 'VPN verificeret' : 'Downloads blokeret indtil VPN er verificeret'}`; } catch { document.querySelector('#transfer').textContent = 'qBittorrent ikke tilsluttet · downloads blokeret'; }
   const storage = document.querySelector('#storage'); storage.hidden = false;
   try { const capacity = await api('storage'); storage.textContent = `Lokal storage: ${bytes(capacity.freeBytes)} ledig af ${bytes(capacity.totalBytes)}${capacity.lowSpace ? ' · Lav diskplads' : ''}${capacity.writable ? '' : ' · Ikke skrivbar'}`; } catch { storage.textContent = 'Lokal storage utilgængelig'; }
+  refreshing = false;
 }
+
+async function refreshVpn() {
+  const state = await api('vpn'); const select = document.querySelector('#vpn-profile'); const previous = select.value; select.replaceChildren(element('option', 'Vælg profil')); select.firstChild.value = '';
+  for (const profile of state.profiles || []) { const option = element('option', `${profile.name} · ${profile.forwardedPort ? 'port ' + profile.forwardedPort : 'port ikke verificeret'}`); option.value = profile.id; select.append(option); }
+  select.value = state.profileId || previous; if (!select.value && select.options.length === 2) select.selectedIndex = 1;
+  document.querySelector('#vpn-status').textContent = state.ready ? 'Verificeret' : 'Ikke verificeret';
+  document.querySelector('#vpn-downloads').textContent = state.downloadsEnabled ? 'Tilladt gennem VPN' : 'Blokeret';
+  document.querySelector('#vpn-ip').textContent = state.publicIp || 'Ikke verificeret'; document.querySelector('#vpn-port').textContent = state.forwardedPort || 'Ikke verificeret'; document.querySelector('#vpn-reason').textContent = state.reason || '';
+  document.querySelector('#vpn-connect').disabled = select.options.length < 2;
+}
+document.querySelector('#vpn-form').onsubmit = async event => { event.preventDefault(); const button = document.querySelector('#vpn-connect'); button.disabled = true; try { await api('vpn', {enabled: true, profileId: document.querySelector('#vpn-profile').value}, 'PUT'); await refreshVpn(); await refresh(); showNotification('Seedbox-tilkobling gemt. Status verificeres.', 'success'); } catch (error) { notify(error); } finally { button.disabled = false; } };
+document.querySelector('#vpn-disconnect').onclick = async () => { try { await api('vpn', {enabled: false, profileId: document.querySelector('#vpn-profile').value || null}, 'PUT'); await refreshVpn(); await refresh(); showNotification('Seedbox stoppet.', 'success'); } catch (error) { notify(error); } };
+document.querySelector('#vpn-refresh').onclick = () => refreshVpn().catch(notify);
 function detailTable(title, columns, rows) {
   const section = element('section'); section.append(element('h3', title)); if (!rows.length) { section.append(element('p', 'Ingen data', 'muted')); return section; }
   const table = element('table'); const heading = element('tr'); for (const [, label] of columns) heading.append(element('th', label)); const head = element('thead'); head.append(heading); table.append(head);
@@ -104,7 +122,7 @@ for (const [selector, kind] of [['#feed-form', 'feeds'], ['#tracker-form', 'trac
   const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { body.ratio = Number(body.ratio); body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); form.reset(); form.elements.namedItem('id').value = ''; await loadSources(kind); showNotification('Gemt', 'success'); } catch (error) { notify(error); } };
   form.addEventListener('reset', () => { form.elements.namedItem('id').setAttribute('value', ''); });
 }
-for (const button of document.querySelectorAll('[data-view]')) button.onclick = async () => { message.textContent = ''; for (const other of document.querySelectorAll('[data-view]')) other.setAttribute('aria-pressed', String(other === button)); for (const section of document.querySelectorAll('.view')) section.hidden = section.id !== button.dataset.view; try { if (button.dataset.view === 'feeds' || button.dataset.view === 'trackers') await loadSources(button.dataset.view); else if (button.dataset.view === 'vpn') { const runtime = await api('runtime'); document.querySelector('#vpn-status').textContent = runtime.vpn === 'unverified' ? 'Ikke verificeret' : 'Ukendt'; } } catch (error) { notify(error); } };
+for (const button of document.querySelectorAll('[data-view]')) button.onclick = async () => { message.textContent = ''; for (const other of document.querySelectorAll('[data-view]')) other.setAttribute('aria-pressed', String(other === button)); for (const section of document.querySelectorAll('.view')) section.hidden = section.id !== button.dataset.view; try { if (button.dataset.view === 'feeds' || button.dataset.view === 'trackers') await loadSources(button.dataset.view); else if (button.dataset.view === 'vpn') await refreshVpn(); } catch (error) { notify(error); } };
 document.querySelector('#close-details').onclick = () => dialog.close();
 document.querySelector('#policy-form').onsubmit = async event => { event.preventDefault(); try { await api(`torrents/${selectedHash}/policy`, {ratio: Number(event.target.elements.namedItem('ratio').value)}); document.querySelector('#detail-message').textContent = 'Seedingmål gemt'; } catch (error) { document.querySelector('#detail-message').textContent = error.message; } };
 for (const selector of ['#search', '#filter', '#sort']) document.querySelector(selector).addEventListener('input', renderTorrents);
@@ -151,4 +169,5 @@ addForm.onsubmit = async event => {
   finally { addingTorrent = false; controls.forEach((control, index) => { control.disabled = disabledStates[index]; }); }
 };
 document.querySelector('#logout').onclick = async () => { try { await api('auth/logout', {}); location.reload(); } catch (error) { notify(error); } };
+setInterval(() => { if (!document.hidden && document.body.classList.contains('signed-in')) { if (!document.querySelector('#vpn').hidden) refreshVpn().catch(() => {}); refresh(); } }, 10000);
 (async () => { try { needsSetup = (await api('auth/status')).needsSetup; document.querySelector('#identity-title').textContent = needsSetup ? 'En frisk begyndelse.' : 'Velkommen tilbage.'; document.querySelector('#identity-subtitle').textContent = needsSetup ? 'Opret din lokale MediaSeed-administrator.' : 'Log ind på MediaSeed.'; document.querySelector('#login-submit').textContent = needsSetup ? 'Opret administrator' : 'Log ind'; if (!needsSetup) { try { csrf = (await api('auth/me')).csrf; showWorkspace(); } catch {} } } catch (error) { notify(error); } })();

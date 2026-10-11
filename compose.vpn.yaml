@@ -1,0 +1,12 @@
+services:
+  app:
+    environment:
+      MEDIASEED_VPN_URL: ${MEDIASEED_VPN_URL:?Set the trusted MediaVPN origin}
+      MEDIASEED_VPN_TOKEN_FILE: /vpn-auth/mediaseed.token
+    volumes:
+      - type: bind
+        source: ${MEDIASEED_VPN_TOKEN_PATH:?Set the protected integration token copy}
+        target: /vpn-auth/mediaseed.token
+        read_only: true
+        bind:
+          create_host_path: false

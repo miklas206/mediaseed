@@ -79,7 +79,7 @@ async def add_stopped(qbit, ratio, content=None, magnet=None):
     return {"added": accepted, "pending": pending, "stopped": True, "downloadsEnabled": False}
 
 
-def install_features(app, authorized, database, qbit):
+def install_features(app, authorized, database, qbit, vpn_status=None):
     with database() as connection:
         connection.execute("CREATE TABLE IF NOT EXISTS settings (kind TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(kind,id))")
 
@@ -191,8 +191,9 @@ def install_features(app, authorized, database, qbit):
         return {key: result.get(key) for key in ("dl_info_speed", "up_info_speed", "dl_info_data", "up_info_data", "connection_status")}
 
     @app.get("/api/runtime")
-    def runtime(session=Depends(authorized)):
-        return {"vpn": "unverified", "downloadsEnabled": False, "reason": "VPN supervisor is not connected", "rssWorker": "not_connected", "trackerSync": "not_connected"}
+    async def runtime(session=Depends(authorized)):
+        observed = await vpn_status() if vpn_status else {"vpn": "unverified", "downloadsEnabled": False, "reason": "VPN supervisor is not connected"}
+        return {**observed, "rssWorker": "not_connected", "trackerSync": "not_connected"}
 
     @app.get("/api/torrents/{identifier}/details")
     async def details(identifier: str, session=Depends(authorized)):

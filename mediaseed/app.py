@@ -1,4 +1,5 @@
 import hashlib
+import base64
 import os
 import re
 import secrets
@@ -59,6 +60,12 @@ class TorrentAction(BaseModel):
     confirm_early: bool = False
 
 
+class VpnSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
+    profileId: str | None = Field(default=None, pattern=r"^[a-f0-9]{24}$")
+
+
 def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, transport=None, downloads_dir=None):
     data = Path(data_dir or os.environ.get("MEDIASEED_DATA", "/data"))
     data.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -76,6 +83,26 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
     qbit_user = os.environ.get("MEDIASEED_QBIT_USER", "admin")
     password_file = os.environ.get("MEDIASEED_QBIT_PASSWORD_FILE")
     password = qbit_password or (Path(password_file).read_text().strip() if password_file else None)
+    vpn_url = os.environ.get("MEDIASEED_VPN_URL", "").rstrip("/")
+    vpn_token_file = os.environ.get("MEDIASEED_VPN_TOKEN_FILE")
+
+    async def vpn_request(path, method="GET", payload=None, content=None):
+        if not vpn_url or not vpn_token_file:
+            raise HTTPException(409, "MediaVPN integration is not configured")
+        try:
+            token = Path(vpn_token_file).read_text().strip()
+            async with httpx.AsyncClient(base_url=vpn_url, timeout=45, follow_redirects=False, trust_env=False, headers={"X-MediaSeed-Key": token}) as client:
+                response = await client.request(method, "/api/integration/" + path, json=payload if content is None else None, content=content)
+                if response.status_code >= 400:
+                    raise HTTPException(response.status_code if response.status_code in {409, 413, 422} else 503, "MediaVPN could not verify the operation")
+                return response.json()
+        except (httpx.HTTPError, OSError, ValueError):
+            raise HTTPException(503, "MediaVPN is unavailable; downloads are blocked") from None
+
+    async def vpn_status():
+        if not vpn_url:
+            return {"ready": False, "downloadsEnabled": False, "vpn": "unverified", "profiles": [], "reason": "MediaVPN integration is not configured"}
+        return await vpn_request("status")
 
     @contextmanager
     def database():
@@ -119,6 +146,15 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         return dict(session)
 
     async def qbit(path, method="GET", payload=None, files=None):
+        if vpn_url:
+            if files:
+                result = await vpn_request("upload?ratio=" + str(float(payload.get("ratioLimit", 1))), "POST", content=files["torrents"][1])
+            else:
+                result = await vpn_request("rpc", "POST", {"path": path.removeprefix("/api/v2/"), "method": method, "payload": payload or {}})
+            try:
+                return httpx.Response(result["status"], content=base64.b64decode(result["body"], validate=True))
+            except (KeyError, ValueError, TypeError):
+                raise HTTPException(503, "Invalid MediaVPN client response") from None
         if not password:
             raise HTTPException(503, "Torrent client is not configured")
         try:
@@ -204,7 +240,15 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         version = response.text.strip()
         if not version.startswith("v") or len(version) > 40:
             raise HTTPException(503, "Invalid torrent client version")
-        return {"name": "qBittorrent", "version": version, "connected": True, "downloadsEnabled": False}
+        return {"name": "qBittorrent", "version": version, "connected": True, "downloadsEnabled": (await vpn_status())["downloadsEnabled"]}
+
+    @app.get("/api/vpn")
+    async def vpn_overview(session=Depends(authorized)):
+        return await vpn_status()
+
+    @app.put("/api/vpn")
+    async def configure_vpn(body: VpnSettings, session=Depends(authorized)):
+        return await vpn_request("settings", "PUT", body.model_dump())
 
     @app.get("/api/torrents")
     async def torrents(session=Depends(authorized)):
@@ -239,6 +283,11 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.post("/api/torrents/{action}")
     async def action(action: str, body: TorrentAction, session=Depends(authorized)):
+        if action == "start":
+            if not (await vpn_status())["downloadsEnabled"]:
+                raise HTTPException(409, "Starting downloads is disabled until the VPN gate is implemented")
+            await qbit("/api/v2/torrents/start", "POST", {"hashes": body.torrent_hash})
+            return {"completed": True}
         if action not in {"stop", "remove"}:
             raise HTTPException(409, "Starting downloads is disabled until the VPN gate is implemented")
         if not body.confirm_early:
@@ -253,7 +302,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         await qbit("/api/v2/torrents/" + path, "POST", {"hashes": body.torrent_hash, "deleteFiles": "false"})
         return {"completed": True}
 
-    install_features(app, authorized, database, qbit)
+    install_features(app, authorized, database, qbit, vpn_status=vpn_status)
 
     @app.get("/")
     def home():

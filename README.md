@@ -34,6 +34,12 @@ The adapter reads `MEDIASEED_QBIT_URL`, `MEDIASEED_QBIT_USER`, and `MEDIASEED_QB
 
 ## Before replacing Seedbox
 
+## MediaVPN Integration
+
+Use the opt-in compose.vpn.yaml overlay with MEDIASEED_VPN_URL and MEDIASEED_VPN_TOKEN_PATH. Provision a protected copy of MediaVPN's integration token, readable by UID 1000, on the app host. Mount only that file read-only; never the VPN data directory or Docker socket. In MediaVPN, start a Proton profile with NAT-PMP port-forwarding enabled. In MediaSeed > VPN, select that profile and choose Start seedbox. Readiness requires a fresh verified tunnel, assigned port, correct VPN namespace and tun0 binding. Start is checked again server-side for each operation. The old isolated client is retained stopped for rollback; do not run it concurrently on the shared configuration volume. Do not run Compose up for the qbittorrent service after attachment.
+
+MediaVPN owns the attached client and synchronizes its port after tunnel changes. Native queueing is limited to eight downloads. Stopping the seedbox does not delete torrents or files. Automatic RSS, tracker account refresh, covers and complete FjordSeed/FjordVPN parity are still pending. An installed integration is not a completed first-time installer or independent network-leak certification.
+
 The migration is not complete. Required next steps:
 
 1. Extract the existing fail-closed VPN supervisor and approved storage checks into this application. A shared Gluetun network alone is not a complete replacement for those checks.

@@ -214,6 +214,36 @@ def test_local_storage_is_ready_without_external_mount(tmp_path):
         assert not (downloads / ".mediahub-storage-id").exists()
 
 
+def test_mediavpn_proxy_requires_fresh_readiness_for_start(tmp_path, monkeypatch):
+    import base64
+    import json
+    import mediaseed.app as module
+    token = tmp_path / "machine-token"
+    token.write_text("synthetic-machine-token")
+    monkeypatch.setenv("MEDIASEED_VPN_URL", "http://mediavpn:18802")
+    monkeypatch.setenv("MEDIASEED_VPN_TOKEN_FILE", str(token))
+    original_client = httpx.AsyncClient
+    ready = True
+    mutations = []
+
+    def handler(request):
+        assert request.headers["X-MediaSeed-Key"] == "synthetic-machine-token"
+        if request.url.path.endswith("/status"):
+            return httpx.Response(200, json={"ready": ready, "downloadsEnabled": ready})
+        body = json.loads(request.content)
+        mutations.append(body)
+        return httpx.Response(200, json={"status": 204, "body": base64.b64encode(b"").decode()})
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", lambda **kwargs: original_client(**kwargs, transport=httpx.MockTransport(handler)))
+    with TestClient(create_app(tmp_path / "state", "http://testserver")) as client:
+        sign_in(client)
+        assert client.post("/api/torrents/start", json={"torrent_hash": "a" * 40}).status_code == 200
+        assert mutations[-1]["path"] == "torrents/start"
+        ready = False
+        assert client.post("/api/torrents/start", json={"torrent_hash": "a" * 40}).status_code == 409
+        assert len(mutations) == 1
+
+
 def test_local_storage_rejects_symlink(tmp_path):
     import os
     import pytest
