@@ -62,6 +62,7 @@ class TorrentAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     torrent_hash: str = Field(pattern=r"^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$")
     confirm_early: bool = False
+    delete_files: bool = False
 
 
 class VpnSettings(BaseModel):
@@ -494,7 +495,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             except (ValueError, AttributeError, TypeError):
                 raise HTTPException(503, "Cannot verify seeding progress") from None
         path = "delete" if action == "remove" else "stop"
-        await qbit("/api/v2/torrents/" + path, "POST", {"hashes": body.torrent_hash, "deleteFiles": "false"})
+        await qbit("/api/v2/torrents/" + path, "POST", {"hashes": body.torrent_hash, "deleteFiles": "true" if action == "remove" and body.delete_files else "false"})
         return {"completed": True}
 
     background = install_features(app, authorized, database, qbit, vpn_status=vpn_status, data_dir=data)

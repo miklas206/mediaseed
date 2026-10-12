@@ -102,6 +102,11 @@ def test_torrent_details_policy_and_early_stop(tmp_path):
         assert not any(request.url.path.endswith("/stop") for request in calls)
         assert client.post("/api/torrents/remove", json={"torrent_hash": identifier, "confirm_early": True}).status_code == 200
         assert parse_qs(calls[-1].content.decode())["deleteFiles"] == ["false"]
+        assert client.post("/api/torrents/remove", json={"torrent_hash": identifier, "delete_files": True}).status_code == 409
+        assert client.post("/api/torrents/remove", json={"torrent_hash": identifier, "delete_files": True, "confirm_early": True}).status_code == 200
+        assert parse_qs(calls[-1].content.decode())["deleteFiles"] == ["true"]
+        assert client.post("/api/torrents/stop", json={"torrent_hash": identifier, "delete_files": True, "confirm_early": True}).status_code == 200
+        assert parse_qs(calls[-1].content.decode())["deleteFiles"] == ["false"]
         assert client.post(f"/api/torrents/{identifier}/policy", json={"ratio": 0.5}).status_code == 422
         assert client.post(f"/api/torrents/{identifier}/policy", json={"ratio": 2}).status_code == 200
         assert parse_qs(calls[-1].content.decode())["seedingTimeLimit"] == ["2940"]

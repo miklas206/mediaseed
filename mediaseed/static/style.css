@@ -29,6 +29,11 @@ button:hover:not(:disabled) { background: var(--accent-bg); border-color: var(--
 button:disabled { opacity: .45; cursor: not-allowed; }
 button.primary { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
 button.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, white); }
+button.danger { color: var(--danger); background: var(--danger-bg); border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); }
+#remove-form fieldset { display: grid; gap: 14px; min-width: 0; border: 1px solid var(--line); border-radius: 9px; padding: 16px; }
+#remove-form label { display: flex; align-items: center; gap: 10px; color: var(--text); }
+#remove-form input { width: 16px; min-height: 16px; flex-shrink: 0; accent-color: var(--accent); }
+#remove-name { overflow-wrap: anywhere; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 label { display: grid; gap: 8px; color: var(--muted); font-size: 13px; }
 input, select { width: 100%; min-width: 0; min-height: 42px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-control); padding: 10px 12px; }
@@ -115,12 +120,15 @@ footer { position: fixed; bottom: 0; width: 100%; min-height: 42px; display: fle
 .connection-node > span:last-child { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .connection-icon { display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 4px; border: 1px solid var(--line); border-radius: 15px; color: var(--muted); font-size: 25px; background: var(--surface); }
 .connection-icon svg { width: 25px; height: 25px; }
-.connection-link { position: relative; height: 38px; margin-top: 7px; border-block: 1px solid var(--line); background: linear-gradient(90deg, transparent, var(--accent-bg), transparent); overflow: hidden; }
+.connection-link { position: relative; height: 44px; margin-top: 4px; border-block: 1px solid var(--line); border-radius: 4px; background: linear-gradient(90deg, transparent, var(--accent-bg), transparent); overflow: hidden; mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); }
 .connection-link::after { content: ''; position: absolute; top: 50%; width: 100%; border-top: 1px dashed var(--line); }
 .binary-lane { position: absolute; inset: 0 0 50%; overflow: hidden; visibility: hidden; }
 .binary-download { inset: 50% 0 0; color: var(--accent); }
 .binary-upload { color: var(--healthy); }
-.binary-lane b { position: absolute; left: 0; top: 1px; font: 600 11px/16px ui-monospace, Consolas, monospace; letter-spacing: 2px; white-space: nowrap; opacity: 0; text-shadow: 0 0 8px currentColor; }
+.binary-lane b { position: absolute; left: 0; top: 2px; font: 600 11px/18px ui-monospace, Consolas, monospace; letter-spacing: -.4px; white-space: nowrap; opacity: 0; text-shadow: 0 0 5px currentColor; mask-image: linear-gradient(90deg, transparent, #000 75%); }
+.binary-download b { mask-image: linear-gradient(270deg, transparent, #000 75%); }
+.binary-lane b::after { content: ''; position: absolute; right: 0; top: 5px; width: 2px; height: 9px; background: #dcfff0; box-shadow: 0 0 7px currentColor; }
+.binary-download b::after { right: auto; left: 0; background: #dcfaff; }
 .connection-traffic { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 20px; margin: 0 0 16px; font: 12px ui-monospace, Consolas, monospace; color: var(--muted); }
 .connection-traffic > span { padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .connection-flow[data-download="true"] #connection-download { color: var(--accent); border-color: var(--accent-line); }
@@ -133,13 +141,10 @@ footer { position: fixed; bottom: 0; width: 100%; min-height: 42px; display: fle
 .connection-flow[data-state="active"] .connection-vpn .connection-icon { color: var(--healthy); border-color: var(--healthy); background: var(--healthy-bg); box-shadow: 0 0 0 5px var(--surface), 0 0 0 6px var(--line), 0 0 24px var(--healthy-bg); }
 .connection-flow[data-state="active"][data-upload="true"] .binary-upload,
 .connection-flow[data-state="active"][data-download="true"] .binary-download { visibility: visible; }
-.connection-flow[data-state="active"][data-upload="true"] .binary-upload b { animation: binary-travel 2.8s linear infinite; }
-.connection-flow[data-state="active"][data-download="true"] .binary-download b { animation: binary-travel 2.8s linear infinite reverse; }
-.connection-flow[data-state="active"] .binary-lane b:nth-child(2) { animation-delay: -1.4s; }
-.connection-flow[data-state="active"] .connection-link:nth-of-type(4) .binary-lane b { animation-delay: -.7s; }
-.connection-flow[data-state="active"] .connection-link:nth-of-type(4) .binary-lane b:nth-child(2) { animation-delay: -2.1s; }
+.connection-flow[data-state="active"][data-upload="true"] .binary-upload b { animation: binary-travel var(--flight, 1s) linear var(--phase, 0s) infinite; }
+.connection-flow[data-state="active"][data-download="true"] .binary-download b { animation: binary-travel var(--flight, 1s) linear var(--phase, 0s) infinite reverse; }
 .connection-flow[data-state="blocked"] #connection-status { color: var(--danger); }
 .connection-flow[data-state="blocked"] #connection-status::before { background: var(--danger); }
-@keyframes binary-travel { 0% { left: -55px; opacity: 0; } 15%, 85% { opacity: .9; } 100% { left: 100%; opacity: 0; } }
+@keyframes binary-travel { 0% { left: 0; transform: translateX(-100%); opacity: 0; } 12%, 88% { opacity: var(--glow, .8); } 100% { left: 100%; transform: translateX(0); opacity: 0; } }
 @media(max-width: 540px) { .connection-flow { padding: 16px 12px; } .connection-route { grid-template-columns: minmax(60px, 1fr) minmax(10px, .4fr) minmax(78px, 1fr) minmax(10px, .4fr) minmax(60px, 1fr); } .connection-node > span:last-child { font-size: 11px; } }
-@media(prefers-reduced-motion: reduce) { .connection-flow[data-state="active"][data-upload] .binary-lane b { animation: none; } .binary-lane b:first-child { left: 0; opacity: .8; } .binary-lane b:nth-child(2) { display: none; } }
+@media(prefers-reduced-motion: reduce) { .connection-flow[data-state="active"][data-upload] .binary-lane b { animation: none; } .binary-lane b:first-child { left: 0; opacity: .8; } .binary-lane b:not(:first-child) { display: none; } }

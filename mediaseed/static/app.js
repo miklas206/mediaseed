@@ -36,12 +36,34 @@ function element(tag, text, className) { const node = document.createElement(tag
 function bytes(value) { const number = Number(value || 0); for (const [divisor, unit] of [[1073741824, 'GiB'], [1048576, 'MiB'], [1024, 'KiB']]) if (number >= divisor) return `${(number / divisor).toFixed(1)} ${unit}`; return `${number} B`; }
 function state(row) { if (/error|missing/i.test(row.state)) return 'error'; if (/stopped|paused/i.test(row.state)) return 'stopped'; if (Number(row.progress) >= 1) return 'seeding'; return 'downloading'; }
 function command(label, handler) { const button = element('button', label); button.type = 'button'; button.onclick = async () => { button.disabled = true; try { await handler(); } catch (error) { notify(error); } finally { button.disabled = button.dataset.added === 'true'; } }; return button; }
-async function torrentAction(row, action) {
-  if (action === 'remove' && !confirm(`Fjern ${row.name}? Downloadede filer bevares.`)) return;
-  try { await api('torrents/' + action, {torrent_hash: row.hash}); }
-  catch (error) { if (error.status !== 409 || action === 'start') throw error; if (!confirm('Seedingmålet er ikke nået: ratio under 1 og mindre end 49 timer. Vil du alligevel fortsætte?')) return; await api('torrents/' + action, {torrent_hash: row.hash, confirm_early: true}); }
+async function torrentAction(row, action, deleteFiles = false) {
+  try { await api('torrents/' + action, {torrent_hash: row.hash, delete_files: deleteFiles}); }
+  catch (error) { if (error.status !== 409 || action === 'start') throw error; if (!confirm('Seedingmålet er ikke nået: ratio under 1 og mindre end 49 timer. Vil du alligevel fortsætte?')) return; await api('torrents/' + action, {torrent_hash: row.hash, delete_files: deleteFiles, confirm_early: true}); }
   await refresh();
+  return true;
 }
+let removalRow;
+const removalDialog = document.querySelector('#remove-torrent');
+function chooseRemoval(row) {
+  removalRow = row;
+  document.querySelector('#remove-name').textContent = row.name;
+  document.querySelector('#remove-form').reset();
+  removalDialog.showModal();
+}
+document.querySelector('#cancel-remove').onclick = () => removalDialog.close();
+document.querySelector('#remove-form').onsubmit = async event => {
+  event.preventDefault();
+  const button = document.querySelector('#confirm-remove');
+  if (button.disabled || !removalRow) return;
+  button.disabled = true;
+  try {
+    if (await torrentAction(removalRow, 'remove', document.querySelector('#remove-files').checked)) {
+      removalDialog.close(); removalRow = null;
+      showNotification('Torrenten er fjernet.', 'success');
+    }
+  } catch (error) { notify(error); }
+  finally { button.disabled = false; }
+};
 function renderTorrents() {
   const search = document.querySelector('#search').value.toLocaleLowerCase(); const filter = document.querySelector('#filter').value; const sort = document.querySelector('#sort').value;
   const rows = torrents.filter(row => String(row.name).toLocaleLowerCase().includes(search) && (filter === 'all' || state(row) === filter));
@@ -54,7 +76,7 @@ function renderTorrents() {
     if (typeof row.cover === 'string' && /^\/api\/covers\/(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(row.cover)) { const cover = element('img', undefined, 'torrent-cover'); cover.src = row.cover; cover.alt = ''; cover.width = 64; cover.height = 96; cover.loading = 'lazy'; cover.onerror = () => cover.remove(); item.append(cover); }
     const status = element('p', `${Math.round(Number(row.progress || 0) * 100)} % · ${row.state || ''} · ${bytes(row.size)} · Ratio ${Number(row.ratio || 0).toFixed(2)}`);
     const speeds = element('p', `Download ${bytes(row.dlspeed)}/s · Upload ${bytes(row.upspeed)}/s · Seeding ${(Number(row.seeding_time || 0) / 3600).toFixed(1)} timer`);
-    const actions = element('div', undefined, 'actions'); actions.append(command('Detaljer', () => showDetails(row))); if (appRole !== 'viewer') { const start = command('Start', () => torrentAction(row, 'start')); start.disabled = !downloadsEnabled; actions.append(start, command('Stop', () => torrentAction(row, 'stop')), command('Fjern torrent', () => torrentAction(row, 'remove'))); }
+    const actions = element('div', undefined, 'actions'); actions.append(command('Detaljer', () => showDetails(row))); if (appRole !== 'viewer') { const start = command('Start', () => torrentAction(row, 'start')); start.disabled = !downloadsEnabled; actions.append(start, command('Stop', () => torrentAction(row, 'stop')), command('Fjern', () => chooseRemoval(row))); }
     item.append(element('h2', row.name), progress, status, speeds, actions); target.append(item);
   }
 }
@@ -107,6 +129,26 @@ function expireConnection() {
   if (vpnFreshUntil && Date.now() >= vpnFreshUntil) { downloadsEnabled = false; renderConnection({unavailable: true}); }
   if (trafficFreshUntil && Date.now() >= trafficFreshUntil) renderTraffic();
 }
+// Decorative bits follow measured activity; they never represent torrent content.
+function randomizeStream(packet) {
+  const count = 12 + Math.floor(Math.random() * 9);
+  packet.textContent = Array.from({length: count}, () => Math.random() < .5 ? '0' : '1').join('');
+  packet.style.setProperty('--flight', `${(.72 + Math.random() * .48).toFixed(2)}s`);
+  packet.style.setProperty('--glow', (.55 + Math.random() * .4).toFixed(2));
+}
+function initializeStreams() {
+  for (const lane of document.querySelectorAll('.binary-lane')) {
+    lane.replaceChildren();
+    for (let index = 0; index < 3; index++) {
+      const packet = element('b');
+      randomizeStream(packet);
+      packet.style.setProperty('--phase', `${(-index * .32 - Math.random() * .12).toFixed(2)}s`);
+      packet.addEventListener('animationiteration', () => randomizeStream(packet));
+      lane.append(packet);
+    }
+  }
+}
+initializeStreams();
 setInterval(expireConnection, 1000);
 document.addEventListener('visibilitychange', () => { expireConnection(); if (!document.hidden && document.body.classList.contains('signed-in')) void refresh(); });
 
