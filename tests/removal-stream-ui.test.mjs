@@ -8,7 +8,7 @@ test('removal choice survives early-seeding confirmation and streams regenerate 
   const create = () => ({value: '', dataset: {}, style: {setProperty() {}}, children: [], listeners: {},
     classList: {contains: () => false}, addEventListener(type, callback) {this.listeners[type] = callback;},
     append(...items) {this.children.push(...items);}, replaceChildren() {this.children = [];},
-    showModal() {this.open = true;}, close() {this.open = false;}, setAttribute() {}, querySelectorAll() {return [];},
+    showModal() {this.open = true;}, close() {this.open = false;}, focus() {this.focused = true;}, setAttribute() {}, querySelectorAll() {return [];},
     reset() {find('#remove-files').checked = false;},
   });
   const find = selector => {if (!nodes.has(selector)) nodes.set(selector, create()); return nodes.get(selector);};
@@ -18,7 +18,7 @@ test('removal choice survives early-seeding confirmation and streams regenerate 
   const confirmations = [];
   let refuseOnce = true;
   const context = vm.createContext({document: {querySelector: find, querySelectorAll: s => s === '.binary-lane' ? lanes : [], createElement: create, body: create(), addEventListener() {}},
-    setInterval() {}, setTimeout() {}, clearTimeout() {}, confirm: () => true,
+    setInterval() {}, setTimeout() {}, clearTimeout() {}, confirm: () => {throw new Error('Browser confirmation must not be used');},
     fetch: async (url, options) => {
       if (url.endsWith('/presence')) return new Promise(resolve => confirmations.push(() => resolve({ok: true, json: async () => ({present: false})})));
       if (url === '/api/torrents/remove') {
@@ -56,7 +56,15 @@ test('removal choice survives early-seeding confirmation and streams regenerate 
   assert.equal(find('#remove-torrent').open, true);
   assert.equal(find('#remove-files').checked, false);
   find('#remove-files').checked = true;
-  await find('#remove-form').onsubmit({preventDefault() {}});
+  const removal = find('#remove-form').onsubmit({preventDefault() {}});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests.length, 1, 'wait for explicit in-app confirmation');
+  assert.equal(find('#early-seeding').open, true);
+  assert.equal(find('#cancel-early').focused, true);
+  assert.match(find('#early-consequence').textContent, /filer slettes/);
+  assert.equal(find('#confirm-early').textContent, 'Fjern alligevel');
+  find('#confirm-early').onclick();
+  await removal;
   assert.equal(requests.length, 2);
   assert.ok(requests.every(body => body.delete_files === true));
   assert.equal(requests[1].confirm_early, true);
@@ -77,4 +85,14 @@ test('removal choice survives early-seeding confirmation and streams regenerate 
   assert.equal(requests[2].delete_files, false);
   confirmations.shift()();
   await new Promise(resolve => setImmediate(resolve));
+  const stopped = context.confirmEarlyAction({name: 'Synthetic'}, 'stop', false);
+  assert.equal(find('#confirm-early').textContent, 'Stop alligevel');
+  assert.match(find('#early-consequence').textContent, /bevare/);
+  find('#early-seeding').listeners.cancel({preventDefault() {}});
+  assert.equal(await stopped, false, 'Escape cancels without accepting destructive action');
+  assert.equal(find('#early-seeding').open, false);
+  const kept = context.confirmEarlyAction({name: 'Synthetic'}, 'remove', false);
+  assert.match(find('#early-consequence').textContent, /bevare/);
+  find('#cancel-early').onclick();
+  assert.equal(await kept, false);
 });

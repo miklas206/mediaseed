@@ -45,7 +45,7 @@ function state(row) { if (/error|missing/i.test(row.state)) return 'error'; if (
 function command(label, handler) { const button = element('button', label); button.type = 'button'; button.onclick = async () => { button.disabled = true; try { await handler(); } catch (error) { notify(error); } finally { button.disabled = button.dataset.added === 'true'; } }; return button; }
 async function torrentAction(row, action, deleteFiles = false) {
   try { await api('torrents/' + action, {torrent_hash: row.hash, delete_files: deleteFiles}); }
-  catch (error) { if (error.status !== 409 || action === 'start') throw error; if (!confirm('Seedingmålet er ikke nået: ratio under 1 og mindre end 49 timer. Vil du alligevel fortsætte?')) return; await api('torrents/' + action, {torrent_hash: row.hash, delete_files: deleteFiles, confirm_early: true}); }
+  catch (error) { if (error.status !== 409 || action === 'start') throw error; if (!await confirmEarlyAction(row, action, deleteFiles)) return; await api('torrents/' + action, {torrent_hash: row.hash, delete_files: deleteFiles, confirm_early: true}); }
   if (action === 'remove') {
     pendingRemovals.set(row.hash, {confirmed: false});
     renderTorrents();
@@ -71,6 +71,27 @@ async function confirmRemoval(row) {
     renderTorrents(); notify(error);
   }
 }
+const earlyDialog = document.querySelector('#early-seeding');
+let earlyConfirmation;
+function confirmEarlyAction(row, action, deleteFiles) {
+  if (earlyConfirmation) return Promise.resolve(false);
+  document.querySelector('#early-title').textContent = action === 'remove' ? 'Fjern før seedingmålet er nået?' : 'Stop før seedingmålet er nået?';
+  document.querySelector('#early-name').textContent = row.name;
+  document.querySelector('#early-consequence').textContent = action === 'remove' ? (deleteFiles ? 'Torrenten og de downloadede filer slettes. Det kan ikke fortrydes.' : 'Torrenten fjernes. De downloadede filer bliver bevaret.') : 'Torrenten stoppes. Torrenten og de downloadede filer bliver bevaret.';
+  document.querySelector('#confirm-early').textContent = action === 'remove' ? 'Fjern alligevel' : 'Stop alligevel';
+  document.querySelector('#cancel-early').textContent = action === 'remove' ? 'Behold torrent' : 'Fortsæt seeding';
+  return new Promise(resolve => { earlyConfirmation = resolve; earlyDialog.showModal(); document.querySelector('#cancel-early').focus(); });
+}
+function finishEarlyAction(accepted) {
+  const resolve = earlyConfirmation;
+  earlyConfirmation = undefined;
+  earlyDialog.close();
+  if (resolve) resolve(accepted);
+}
+document.querySelector('#confirm-early').onclick = () => finishEarlyAction(true);
+document.querySelector('#cancel-early').onclick = () => finishEarlyAction(false);
+earlyDialog.addEventListener('cancel', event => { event.preventDefault(); finishEarlyAction(false); });
+earlyDialog.addEventListener('close', () => { if (earlyConfirmation) finishEarlyAction(false); });
 let removalRow;
 const removalDialog = document.querySelector('#remove-torrent');
 function chooseRemoval(row) {
