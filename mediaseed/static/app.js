@@ -165,18 +165,19 @@ function expireConnection() {
 }
 // Decorative bits follow measured activity; they never represent torrent content.
 function randomizeStream(packet) {
-  const count = 12 + Math.floor(Math.random() * 9);
+  const count = 8 + Math.floor(Math.random() * 5);
   packet.textContent = Array.from({length: count}, () => Math.random() < .5 ? '0' : '1').join('');
-  packet.style.setProperty('--flight', `${(.72 + Math.random() * .48).toFixed(2)}s`);
-  packet.style.setProperty('--glow', (.55 + Math.random() * .4).toFixed(2));
 }
 function initializeStreams() {
   for (const lane of document.querySelectorAll('.binary-lane')) {
     lane.replaceChildren();
-    for (let index = 0; index < 3; index++) {
+    const flight = 2.35 + Math.random() * .3;
+    const phase = Math.random() * flight;
+    for (let index = 0; index < 2; index++) {
       const packet = element('b');
       randomizeStream(packet);
-      packet.style.setProperty('--phase', `${(-index * .32 - Math.random() * .12).toFixed(2)}s`);
+      packet.style.setProperty('--flight', `${flight.toFixed(2)}s`);
+      packet.style.setProperty('--phase', `${(-index * flight / 2 - phase).toFixed(2)}s`);
       packet.addEventListener('animationiteration', () => randomizeStream(packet));
       lane.append(packet);
     }

@@ -34,9 +34,9 @@ test('removal choice survives early-seeding confirmation and streams regenerate 
   context.renderTorrents();
   assert.equal(context.countryLabel('Albania'), 'Albanien');
   for (const lane of lanes) {
-    assert.equal(lane.children.length, 3);
+    assert.equal(lane.children.length, 2);
     for (const packet of lane.children) {
-      assert.match(packet.textContent, /^[01]{12,20}$/);
+      assert.match(packet.textContent, /^[01]{8,12}$/);
       const seen = new Set([packet.textContent]);
       for (let i = 0; i < 10; i++) {packet.listeners.animationiteration(); seen.add(packet.textContent);}
       assert.ok(seen.size > 5);
