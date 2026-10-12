@@ -174,16 +174,41 @@ async function refresh() {
   } finally { updateAddStart(); refreshing = false; void refreshAuxiliary(); }
 }
 
-function countryFlag(country) {
-  if (!country) return null;
-  let code = /^[A-Z]{2}$/.test(country) ? country : null;
+function countryCode(country) {
+  if (typeof country !== 'string' || !country.trim()) return null;
+  const name = country.trim();
+  if (/^[A-Za-z]{2}$/.test(name)) {
+    try { return new Intl.Locale('und-' + name.toUpperCase()).region; } catch { return name.toUpperCase(); }
+  }
+  const aliases = {
+    'bosnia and herzegovina': 'BA', 'brunei darussalam': 'BN', "cote d'ivoire": 'CI',
+    'czech republic': 'CZ', 'democratic republic of the congo': 'CD', 'hong kong': 'HK',
+    'korea': 'KR', "lao people's democratic republic": 'LA', 'macao': 'MO',
+    'palestine, state of': 'PS', 'russian federation': 'RU', 'syrian arab republic': 'SY', 'turkey': 'TR',
+  };
+  const normalized = name.toLocaleLowerCase('en');
+  if (aliases[normalized]) return aliases[normalized];
   try {
-    const english = new Intl.DisplayNames(['en'], {type: 'region'});
-    for (let first = 65; !code && first <= 90; first++) for (let second = 65; second <= 90; second++) {
-      const candidate = String.fromCharCode(first, second);
-      if (english.of(candidate) === country) { code = candidate; break; }
+    if (!countryCode.names) {
+      const names = new Map();
+      const english = new Intl.DisplayNames(['en'], {type: 'region'});
+      const danish = new Intl.DisplayNames(['da'], {type: 'region'});
+      for (let first = 65; first <= 90; first++) for (let second = 65; second <= 90; second++) {
+        const code = String.fromCharCode(first, second);
+        // Historical aliases (DD, CS, VD, YD, RH) can share modern names.
+        // Only map canonical codes to the actual bundled flag filenames.
+        if (new Intl.Locale('und-' + code).region !== code) continue;
+        for (const display of [english.of(code), danish.of(code)]) {
+          if (display !== code) names.set(display.toLocaleLowerCase('en'), code);
+        }
+      }
+      countryCode.names = names;
     }
-  } catch {}
+    return countryCode.names.get(normalized) || null;
+  } catch { return null; }
+}
+function countryFlag(country) {
+  const code = countryCode(country);
   if (!code) return null;
   const flag = element('img', undefined, 'country-flag');
   flag.src = `/static/flags/${code.toLowerCase()}.svg`;
@@ -193,15 +218,8 @@ function countryFlag(country) {
 }
 function countryLabel(country) {
   if (!country) return 'Land ukendt';
-  try {
-    const english = new Intl.DisplayNames(['en'], {type: 'region'});
-    const danish = new Intl.DisplayNames(['da'], {type: 'region'});
-    if (/^[A-Z]{2}$/.test(country)) return danish.of(country);
-    for (let first = 65; first <= 90; first++) for (let second = 65; second <= 90; second++) {
-      const code = String.fromCharCode(first, second);
-      if (english.of(code) === country) return danish.of(code);
-    }
-  } catch {}
+  const code = countryCode(country);
+  try { if (code) return new Intl.DisplayNames(['da'], {type: 'region'}).of(code); } catch {}
   return country;
 }
 function renderConnection(state) {
