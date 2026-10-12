@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="da"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MediaSeed · Tilføj</title><link rel="stylesheet" href="popup.css"><script defer src="common.js"></script><script defer src="popup.js"></script></head>
+<body><main><header><img src="mediaseed.svg" width="38" height="38" alt=""><div><h1>MediaSeed</h1><p>Fra browser til seedbox</p></div></header>
+<form id="connect"><label>MediaSeed-adresse<input id="origin" type="url" placeholder="https://seed.example.dk" required autocomplete="off"></label><div class="actions"><button type="submit">Gem og forbind</button><button id="open" type="button">Åbn MediaSeed</button></div></form>
+<p id="status" role="status" aria-live="polite">Angiv adressen på din MediaSeed.</p>
+<form id="add"><label>Magnetlink<textarea id="magnet" rows="3" maxlength="8192" placeholder="magnet:?xt=urn:btih:…" autocomplete="off" spellcheck="false"></textarea></label><span class="separator">eller</span>
+<label id="drop" class="drop">Vælg eller træk en torrentfil hertil<input id="file" type="file" accept=".torrent,application/x-bittorrent"><span id="filename">Maks. 4 MiB</span></label><button type="button" id="clear" hidden>Brug magnetlink i stedet</button>
+<label>Ratio-mål<input id="ratio" type="number" min="1" max="1000" step="0.1" value="1" required></label><p class="hint">Start kræver verificeret VPN. Ved forbindelsesfejl: kontrollér listen i MediaSeed før du prøver igen.</p>
+<div class="actions"><button class="primary" type="submit" value="start">Tilføj og start</button><button type="submit" value="pause">Tilføj på pause</button></div></form>
+<section class="capture"><h2>Fang links på en hjemmeside</h2><p id="site" class="hint">Åbn udvidelsen fra den hjemmeside, du vil aktivere.</p><button id="enable" type="button" disabled>Aktivér på denne hjemmeside</button><ul id="sites"></ul><p class="hint">Kun klik på magnetlinks og .torrent-links fanges. Du vælger derefter start eller pause. Højreklik på et link virker også uden aktivering.</p></section>
+<footer>Bruger dit normale MediaSeed-login · Ingen adgangskoder gemmes</footer></main></body></html>

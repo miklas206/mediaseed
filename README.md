@@ -1,5 +1,7 @@
 # MediaSeed
 
+Browserudvidelsen findes via **Browserudvidelse** i appens topbjælke eller `/static/extensions.html`. Siden genkender browseren og tilbyder Chromium-/Firefox-pakker samt Safari-kilde. Se [installation og tilladelser](browser-extension/README.md). Byg pakker med `python browser-extension/build.py` efter ændringer i udvidelsen.
+
 The connection panel above the app tabs shows MediaSeed → MediaVPN → Internet,
 the observed VPN country, public IP, forwarded port and latest check time.
 Binary streams follow measured qBittorrent transfer speeds: green upload moves
