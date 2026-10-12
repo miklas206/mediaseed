@@ -23,8 +23,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from mediaseed.cleanup import CleanupManager, CleanupPolicy
-from mediaseed.tracker_credit import TrackerCredit
 from mediaseed.features import add_stopped, install_features, queue_summary
+from mediaseed.tracker_credit import TrackerCredit
 
 COOKIE = "mediaseed_session"
 HASHER = PasswordHasher()
@@ -35,6 +35,7 @@ class Credentials(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     username: str = Field(min_length=1, max_length=80)
     password: str = Field(min_length=12, max_length=256)
+    language: Literal["en", "da"] = "en"
 
 
 class Magnet(BaseModel):
@@ -154,6 +155,8 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             CREATE TABLE IF NOT EXISTS hub_attempts (digest TEXT PRIMARY KEY, verifier TEXT NOT NULL, expires REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS hub_sessions (digest TEXT PRIMARY KEY, token TEXT NOT NULL, user_id TEXT NOT NULL);
         """)
+        if "language" not in {row["name"] for row in connection.execute("PRAGMA table_info(accounts)")}:
+            connection.execute("ALTER TABLE accounts ADD COLUMN language TEXT NOT NULL DEFAULT 'da'")
     (data / "mediaseed.sqlite").chmod(0o600)
     vpn_lock = asyncio.Lock()
 
@@ -186,11 +189,11 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         if not selection["provider"] and not discover:
             return disconnected
         if not configured:
-            return {**disconnected, "reason": "MediaVPN er ikke tilgÃ¦ngelig i denne installation."}
+            return {**disconnected, "reason": "MediaVPN is not available in this installation."}
         try:
             remote = await vpn_request("status")
         except HTTPException:
-            return {**disconnected, "provider": selection["provider"], "profileId": selection["profile_id"] if selection["provider"] else None, "integrationAvailable": False, "reason": "MediaVPN er utilgÃ¦ngelig; downloads er blokeret."}
+            return {**disconnected, "provider": selection["provider"], "profileId": selection["profile_id"] if selection["provider"] else None, "integrationAvailable": False, "reason": "MediaVPN is unavailable; downloads are blocked."}
         if not selection["provider"]:
             return {**disconnected, "profiles": remote.get("profiles", []), "reason": "Frakobling afventer MediaVPN. Downloads er blokeret." if selection["disconnect_pending"] else disconnected["reason"]}
         matches = remote.get("enabled") is True and remote.get("profileId") == selection["profile_id"]
@@ -253,7 +256,9 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             managed = connection.execute("SELECT * FROM hub_sessions WHERE digest=?", (digest,)).fetchone()
         if not session:
             raise HTTPException(401, "Sign in required")
-        public = {"role": "administrator"}
+        with database() as connection:
+            account = connection.execute("SELECT language FROM accounts LIMIT 1").fetchone()
+        public = {"role": "administrator", "language": account[0] if account else "en"}
         if hub_url:
             if not managed:
                 raise HTTPException(401, "Sign in through MediaHub")
@@ -320,7 +325,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         if vpn_url:
             selection = vpn_selection()
             if selection["provider"] != "mediavpn" or selection["disconnect_pending"]:
-                raise HTTPException(409, "VÃ¦lg MediaVPN under VPN i MediaSeed fÃ¸rst. Downloads er blokeret.")
+                raise HTTPException(409, "Choose MediaVPN under VPN in MediaSeed first. Downloads are blocked.")
             if files:
                 query = urlencode({"ratio": float(payload.get("ratioLimit", 1)), "savepath": payload.get("savepath", "/downloads"), "category": payload.get("category", ""), "start": "true" if payload.get("stopped") == "false" else "false", "tags": payload.get("tags", "")})
                 result = await vpn_request("upload?" + query, "POST", content=files["torrents"][1])
@@ -367,7 +372,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             connection.execute("BEGIN IMMEDIATE")
             if connection.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]:
                 raise HTTPException(409, "Account already configured")
-            connection.execute("INSERT INTO accounts VALUES (?,?)", (body.username, HASHER.hash(body.password)))
+            connection.execute("INSERT INTO accounts (username,password,language) VALUES (?,?,?)", (body.username, HASHER.hash(body.password), body.language))
         return {"created": True}
 
     @app.post("/api/auth/login")
@@ -398,7 +403,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/api/auth/me")
     def me(session=Depends(authorized)):
-        return {key: session[key] for key in ("csrf", "id", "username", "role") if key in session}
+        return {key: session[key] for key in ("csrf", "id", "username", "role", "language") if key in session}
 
     @app.get("/api/storage")
     def storage(session=Depends(authorized)):
@@ -431,9 +436,9 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
     @app.put("/api/vpn")
     async def configure_vpn(body: VpnSettings, session=Depends(authorized)):
         if body.enabled and (body.provider != "mediavpn" or not body.profileId):
-            raise HTTPException(422, "VÃ¦lg MediaVPN og en profil fÃ¸rst.")
+            raise HTTPException(422, "Choose MediaVPN and a profile first.")
         if body.enabled and (not vpn_url or not vpn_token_file):
-            raise HTTPException(409, "MediaVPN er ikke tilgÃ¦ngelig i denne installation.")
+            raise HTTPException(409, "MediaVPN is not available in this installation.")
         async with vpn_lock:
             if body.enabled:
                 save_vpn("mediavpn", body.profileId)

@@ -7,8 +7,17 @@ const file = name => readFileSync(new URL('../browser-extension/' + name, import
 const sample = 'magnet:?xt=urn:btih:' + 'a'.repeat(40);
 function context(extra = {}) {
   const c = vm.createContext({URL, URLSearchParams, Uint8Array, AbortSignal, btoa, atob, setTimeout, crypto: webcrypto, ...extra});
-  vm.runInContext(file('common.js') + '\n' + file('bridge.js'), c); return c;
+  vm.runInContext(file('i18n.js') + '\n' + file('common.js') + '\n' + file('bridge.js'), c); return c;
 }
+
+test('tracker-page helpers support repeat injection without translating website content', () => {
+  const c = vm.createContext({URL, URLSearchParams, Uint8Array, atob, btoa});
+  vm.runInContext(file('common.js'), c);
+  vm.runInContext(file('common.js'), c);
+  assert.equal(c.MediaSeedExtension.magnet(sample), sample);
+  assert.equal(c.MediaAppI18n, undefined);
+  assert.throws(() => c.MediaSeedExtension.origin('javascript:alert(1)'), /Use only the MediaSeed address/);
+});
 test('validates origins, magnets, ratios and bounded torrent content', () => {
   const c = context(), m = c.MediaSeedExtension;
   assert.equal(m.origin('https://seed.example:18800/'), 'https://seed.example:18800');
@@ -221,7 +230,7 @@ test('popup sends explicit start/pause, accepts a drop without sending, and pres
   let fail = false;
   const c = context({location: {href: 'chrome-extension://synthetic/popup.html'}, document: {
     getElementById: node, addEventListener: (type, fn) => listeners.set(type, fn), querySelectorAll: () => [node('start'), node('pause')], createElement: () => ({append() {}}),
-  }, chrome: {storage: {local: {get: async () => ({origin: 'https://seed.example', sites: []})}}, tabs: {query: async () => []}, runtime: {sendMessage: async msg => {sent.push(msg); return fail ? {error: 'synthetic failure'} : {ok: true, stopped: !msg.item.start};}}}});
+  }, chrome: {storage: {local: {get: async () => ({origin: 'https://seed.example', sites: []})}}, tabs: {query: async () => []}, runtime: {sendMessage: async msg => {if (msg.item.kind === 'check') return {ok: true, language: 'da'}; sent.push(msg); return fail ? {error: 'synthetic failure'} : {ok: true, stopped: !msg.item.start};}}}});
   vm.runInContext(file('popup.js'), c); await new Promise(r => setTimeout(r, 0));
   node('magnet').value = sample;
   await node('add').onsubmit({preventDefault() {}, submitter: {value: 'start'}});
@@ -246,7 +255,7 @@ test('popup saves seed defaults, restores them after reopening and keeps them af
     const node = id => {if (!nodes.has(id)) nodes.set(id, {value: '', dataset: {}, files: [], classList: {add() {}, remove() {}}, replaceChildren() {}, append() {}}); return nodes.get(id);};
     const c = context({location: {href: 'chrome-extension://synthetic/popup.html'}, document: {getElementById: node, addEventListener() {}, querySelectorAll: () => [], createElement: () => ({append() {}})}, chrome: {
       storage: {local: {get: async () => local, set: async data => Object.assign(local, JSON.parse(JSON.stringify(data)))}}, tabs: {query: async () => []},
-      runtime: {sendMessage: async msg => {sent.push(msg); return {ok: true, stopped: !msg.item.start};}},
+      runtime: {sendMessage: async msg => {if (msg.item.kind === 'check') return {ok: true, language: 'da'}; sent.push(msg); return {ok: true, stopped: !msg.item.start};}},
     }});
     vm.runInContext(file('popup.js'), c); await new Promise(r => setTimeout(r, 0)); return node;
   }

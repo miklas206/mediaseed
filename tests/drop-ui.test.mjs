@@ -46,7 +46,7 @@ function setup() {
       return {ok: true, json: async () => ({needsSetup: true})};
     },
   });
-  vm.runInContext(readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
+  vm.runInContext(readFileSync(new URL('../mediaseed/static/i18n.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
   const refresh = context.refresh;
   context.refresh = async () => {};
   const refreshTorrents = context.refreshTorrents;
@@ -154,7 +154,7 @@ test('dashboard renders in one request without waiting for slow auxiliary data o
   await refresh();
   assert.equal(find('#connection-flow').dataset.download, 'true');
   assert.match(find('#queue-status').textContent, /1\/8/);
-  assert.match(find('#count').textContent, /1 af 1/);
+  assert.match(find('#count').textContent, /1 of 1/);
   assert.deepEqual(requests, ['dashboard', 'client', 'storage']);
   await refresh();
   assert.deepEqual(requests, ['dashboard', 'client', 'storage', 'dashboard']);

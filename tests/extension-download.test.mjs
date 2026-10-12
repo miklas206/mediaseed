@@ -2,7 +2,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-const code = readFileSync(new URL('../mediaseed/static/extension-download.js', import.meta.url), 'utf8');
+const code = readFileSync(new URL('../mediaseed/static/i18n.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/extension-download.js', import.meta.url), 'utf8');
 function setup(ua, brave = false, extra = {}) {
   const nodes = new Map();
   const get = id => {if (!nodes.has(id)) nodes.set(id, {addEventListener(type, fn) {this[type] = fn;}, setAttribute(k, v) {this[k] = v;}, getAttribute(k) {return this[k];}, removeAttribute(k) {delete this[k];}}); return nodes.get(id);};

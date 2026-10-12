@@ -55,8 +55,8 @@ test('shipped provider markup supports profile choice, polling, explicit connect
       return { ok: true, json: async () => url === '/api/vpn' ? state : url === '/api/auth/status' ? { needsSetup: true } : url === '/api/torrents' ? [] : {} };
     },
   });
-  vm.runInContext(readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
-  await context.refreshVpn();
+  vm.runInContext(readFileSync(new URL('../mediaseed/static/i18n.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
+  context.MediaAppI18n.setLanguage('da'); await context.refreshVpn();
   assert.equal(find('#vpn-provider').value, '');
   assert.equal(find('#vpn-profile').value, '');
   assert.equal(find('#vpn-profile-field').hidden, true);
@@ -67,7 +67,7 @@ test('shipped provider markup supports profile choice, polling, explicit connect
   assert.equal(find('#vpn-profile-field').hidden, false);
   assert.equal(find('#vpn-connect').disabled, true);
   find('#vpn-profile').value = 'a'.repeat(24); find('#vpn-profile').onchange();
-  await context.refreshVpn();
+  context.MediaAppI18n.setLanguage('da'); await context.refreshVpn();
   assert.equal(find('#vpn-provider').value, 'mediavpn');
   assert.equal(find('#vpn-profile').value, 'a'.repeat(24));
   assert.equal(find('#vpn-connect').disabled, false);
@@ -80,7 +80,7 @@ test('shipped provider markup supports profile choice, polling, explicit connect
   assert.equal(find('#vpn-provider').value, '');
   assert.equal(find('#vpn-profile-field').hidden, true);
   state.integrationAvailable = false;
-  await context.refreshVpn();
+  context.MediaAppI18n.setLanguage('da'); await context.refreshVpn();
   assert.equal(find('#vpn-provider').querySelector('option[value="mediavpn"]').disabled, true);
   for (const id of ['connection-flow', 'connection-status', 'connection-country', 'connection-ip', 'connection-port', 'connection-checked']) assert.ok(html.includes(`id="${id}"`));
   const connected = {provider: 'mediavpn', ready: true, downloadsEnabled: true, checkedAt: now / 1000, country: 'Sweden', publicIp: '203.0.113.7', forwardedPort: 43210};

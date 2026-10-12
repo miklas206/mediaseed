@@ -7,7 +7,7 @@ async function mediaSeedBridge(expectedOrigin, item) {
     if (me.status === 401) return {login: true, error: 'Log ind i MediaSeed-fanen, og prøv derefter igen.'};
     if (!me.ok) return {error: 'MediaSeed kunne ikke kontrollere din adgang.'};
     const user = await me.json();
-    if (item.kind === 'check') return {connected: true, role: user.role};
+    if (item.kind === 'check') return {connected: true, role: user.role, language: user.language || 'en'};
     if (user.role === 'viewer' || !user.csrf) return {error: 'Din bruger har ikke adgang til at tilføje torrents.'};
     let url = '/api/torrents', body = JSON.stringify({url: item.magnet, ratio: item.ratio, start: item.start});
     let contentType = 'application/json';
@@ -25,7 +25,7 @@ async function mediaSeedBridge(expectedOrigin, item) {
       return {error: `MediaSeed afviste tilføjelsen (HTTP ${response.status}). Kontrollér fil/link og din adgang.`};
     }
     const result = await response.json();
-    return {ok: true, pending: result.pending === true, stopped: result.stopped === true, cleanupPending: result.cleanupPending === true};
+    return {ok: true, language: user.language || 'en', pending: result.pending === true, stopped: result.stopped === true, cleanupPending: result.cleanupPending === true};
   } catch { return {error: 'Forbindelsen blev afbrudt. Kontrollér listen i MediaSeed før du prøver igen; torrenten kan være tilføjet.'}; }
 }
 

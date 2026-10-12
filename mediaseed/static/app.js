@@ -1,3 +1,4 @@
+const {t, setLanguage, locale} = globalThis.MediaAppI18n;
 let csrf = '';
 let needsSetup = false;
 let torrents = [];
@@ -20,7 +21,7 @@ let notificationTimer;
 function showNotification(text, tone = 'danger') {
   clearTimeout(notificationTimer);
   message.dataset.tone = tone;
-  message.textContent = text;
+  message.textContent = t(text);
   if (text) notificationTimer = setTimeout(() => { message.textContent = ''; }, 6000);
 }
 message.tabIndex = 0;
@@ -29,18 +30,22 @@ message.addEventListener('focus', () => clearTimeout(notificationTimer));
 function resumeNotification() { if (message.textContent && !message.matches(':hover') && document.activeElement !== message) notificationTimer = setTimeout(() => { message.textContent = ''; }, 6000); }
 message.addEventListener('mouseleave', resumeNotification);
 message.addEventListener('blur', resumeNotification);
-const errorLabels = {'Invalid credentials': 'Brugernavn eller adgangskode er forkert.', 'Try again later': 'For mange loginforsøg. Prøv igen om lidt.', 'Torrent client is not configured': 'Torrentklienten er endnu ikke tilsluttet.', 'Sign in required': 'Log ind for at fortsætte.', 'Tracker API key lacks access': 'API-nøglen har ikke adgang til trackerens torrents.', 'Tracker rate limit reached; try again later': 'Trackeren begrænser antal opslag. Prøv igen om lidt.', 'Tracker request failed': 'Trackeren kunne ikke levere svaret.', 'Tracker unavailable or invalid response': 'Trackeren er utilgængelig eller returnerede et ukendt svar.', 'Unsafe tracker download address': 'Trackeren returnerede et downloadlink, som ikke er godkendt.', 'Torrent client rejected the torrent file': 'qBittorrent afviste torrentfilen.'};
+const errorLabels = {'Invalid credentials': t("Your username or password is incorrect."), 'Try again later': t("Too many login attempts. Try again shortly."), 'Torrent client is not configured': t("The torrent client is not connected yet."), 'Sign in required': t("Sign in to continue."), 'Tracker API key lacks access': t("The API key cannot access the tracker's torrents."), 'Tracker rate limit reached; try again later': t("The tracker limits requests. Try again shortly."), 'Tracker request failed': t("The tracker could not provide a response."), 'Tracker unavailable or invalid response': t("The tracker is unavailable or returned an unknown response."), 'Unsafe tracker download address': t("The tracker returned a download URL that is not approved."), 'Torrent client rejected the torrent file': t("qBittorrent rejected the torrent file.")};
 async function api(path, body, method) {
   const response = await fetch('/api/' + path, {method: method || (body ? 'POST' : 'GET'), headers: {'Content-Type': 'application/json', 'X-MediaSeed-CSRF': csrf}, ...(body ? {body: JSON.stringify(body)} : {})});
   const result = await response.json();
-  if (!response.ok) throw Object.assign(new Error(typeof result.detail === 'string' ? result.detail : 'Kontrollér felterne og prøv igen.'), {status: response.status});
+  if (!response.ok) throw Object.assign(new Error(typeof result.detail === 'string' ? result.detail : t("Check the fields and try again.")), {status: response.status});
   return result;
 }
 function notify(error) { showNotification(errorLabels[error.message] || error.message); }
-Object.assign(errorLabels, {'Invalid torrent file': 'Filen er ikke en gyldig torrentfil.', 'Choose a .torrent file': 'Vælg en .torrent-fil.', 'Torrent file exceeds 4 MiB': 'Torrentfilen må højst være 4 MiB.'});
-errorLabels['Starting requires a verified VPN. Choose add on pause instead.'] = 'Start kræver en verificeret VPN. Kontrollér forbindelsen under VPN.';
+Object.assign(errorLabels, {'Invalid torrent file': t("The file is not a valid torrent file."), 'Choose a .torrent file': t("Choose a .torrent file."), 'Torrent file exceeds 4 MiB': t("Torrent files must not exceed 4 MiB.")});
+errorLabels['Starting requires a verified VPN. Choose add on pause instead.'] = t("Starting requires a verified VPN. Check the connection under VPN.");
 function element(tag, text, className) { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; }
 function bytes(value) { const number = Number(value || 0); for (const [divisor, unit] of [[1073741824, 'GiB'], [1048576, 'MiB'], [1024, 'KiB']]) if (number >= divisor) return `${(number / divisor).toFixed(1)} ${unit}`; return `${number} B`; }
+function torrentStatus(value) {
+  const names = {downloading: 'Downloading', forcedDL: 'Downloading', metaDL: 'Fetching metadata', forcedMetaDL: 'Fetching metadata', stalledDL: 'Waiting for peers', queuedDL: 'Queued download', checkingDL: 'Checking files', checkingUP: 'Checking files', checkingResumeData: 'Checking files', moving: 'Moving files', uploading: 'Seeding', forcedUP: 'Seeding', stalledUP: 'Waiting to seed', queuedUP: 'Queued seeding', stoppedDL: 'Paused', stoppedUP: 'Paused', pausedDL: 'Paused', pausedUP: 'Paused', error: 'Error', missingFiles: 'Missing files', unknown: 'Unknown'};
+  return t(names[value] || 'Unknown');
+}
 function state(row) { if (/error|missing/i.test(row.state)) return 'error'; if (/stopped|paused/i.test(row.state)) return 'stopped'; if (Number(row.progress) >= 1) return 'seeding'; return 'downloading'; }
 function command(label, handler) { const button = element('button', label); button.type = 'button'; button.onclick = async () => { button.disabled = true; try { await handler(); } catch (error) { notify(error); } finally { button.disabled = button.dataset.added === 'true'; } }; return button; }
 async function torrentAction(row, action, deleteFiles = false) {
@@ -60,10 +65,10 @@ async function confirmRemoval(row) {
       if (result.present === false) {
         pendingRemovals.set(row.hash, {confirmed: true});
         renderTorrents();
-        showNotification('Torrenten er fjernet.', 'success');
+        showNotification(t("The torrent has been removed."), 'success');
         return;
       }
-      if (Date.now() >= deadline) throw new Error('Fjernelsen er endnu ikke bekræftet. Opdater listen for at kontrollere status.');
+      if (Date.now() >= deadline) throw new Error(t("Removal is not confirmed yet. Refresh the list to check its status."));
       await new Promise(resolve => setTimeout(resolve, 500));
     }
   } catch (error) {
@@ -75,12 +80,12 @@ const earlyDialog = document.querySelector('#early-seeding');
 let earlyConfirmation;
 function confirmEarlyAction(row, action, deleteFiles) {
   if (earlyConfirmation) return Promise.resolve(false);
-  document.querySelector('#early-title').textContent = action === 'remove' ? 'Fjern før seedingmålet er nået?' : 'Stop før seedingmålet er nået?';
+  document.querySelector('#early-title').textContent = action === 'remove' ? t("Remove before the seeding goal is reached?") : t("Stop before the seeding goal is reached?");
   document.querySelector('#early-name').textContent = row.name;
-  document.querySelector('#early-help').textContent = `Torrenten har endnu ikke nået den valgte ${'credited_ratio' in row ? 'krediterede ' : ''}uploadratio på ${trackerNumber(Number(row.ratio_limit) >= 1 ? row.ratio_limit : 1)} eller 49 timers seeding. Vil du fortsætte alligevel?`;
-  document.querySelector('#early-consequence').textContent = action === 'remove' ? (deleteFiles ? 'Torrenten og de downloadede filer slettes. Det kan ikke fortrydes.' : 'Torrenten fjernes. De downloadede filer bliver bevaret.') : 'Torrenten stoppes. Torrenten og de downloadede filer bliver bevaret.';
-  document.querySelector('#confirm-early').textContent = action === 'remove' ? 'Fjern alligevel' : 'Stop alligevel';
-  document.querySelector('#cancel-early').textContent = action === 'remove' ? 'Behold torrent' : 'Fortsæt seeding';
+  document.querySelector('#early-help').textContent = t("The torrent has not reached the selected {0}upload ratio of {1} or 49 hours of seeding yet. Continue anyway?", {0: 'credited_ratio' in row ? t("credited ") : '', 1: trackerNumber(Number(row.ratio_limit) >= 1 ? row.ratio_limit : 1)});
+  document.querySelector('#early-consequence').textContent = action === 'remove' ? (deleteFiles ? t("The torrent and downloaded files will be deleted. This cannot be undone.") : t("The torrent will be removed. Downloaded files are preserved.")) : t("The torrent will be stopped. The torrent and downloaded files are preserved.");
+  document.querySelector('#confirm-early').textContent = action === 'remove' ? t("Remove anyway") : t("Stop anyway");
+  document.querySelector('#cancel-early').textContent = action === 'remove' ? t("Keep torrent") : t("Continue seeding");
   return new Promise(resolve => { earlyConfirmation = resolve; earlyDialog.showModal(); document.querySelector('#cancel-early').focus(); });
 }
 function finishEarlyAction(accepted) {
@@ -111,7 +116,7 @@ document.querySelector('#remove-form').onsubmit = async event => {
     const row = removalRow;
     if (await torrentAction(row, 'remove', document.querySelector('#remove-files').checked)) {
       removalDialog.close(); removalRow = null;
-      showNotification('Fjernelse anmodet. Afventer bekræftelse fra torrentklienten.', 'info');
+      showNotification(t("Removal requested. Waiting for confirmation from the torrent client."), 'info');
       void confirmRemoval(row);
     }
   } catch (error) { notify(error); }
@@ -124,14 +129,14 @@ function renderTorrents() {
   const source = document.querySelector('#source-filter').value; const filtered = rows.filter(row => source === 'all' || String(row.category || '').startsWith('MediaSeed-RSS-') === (source === 'rss')); rows.splice(0, rows.length, ...filtered);
   rows.sort((first, second) => sort === 'name' ? String(first.name).localeCompare(String(second.name)) : Number(second[sort]) - Number(first[sort]));
   const pending = [...pendingRemovals.values()].filter(row => !row.confirmed).length;
-  document.querySelector('#count').textContent = `${rows.length} af ${visible.length} torrents${pending ? ' · ' + pending + ' fjernes' : ''}`;
-  const target = document.querySelector('#torrents'); target.replaceChildren(); if (!rows.length) target.append(element('p', torrents.length ? 'Ingen matchende torrents' : 'Ingen torrents', 'muted'));
+  document.querySelector('#count').textContent = t("{0} of {1} torrents{2}", {0: rows.length, 1: visible.length, 2: pending ? ' · ' + pending + ' fjernes' : ''});
+  const target = document.querySelector('#torrents'); target.replaceChildren(); if (!rows.length) target.append(element('p', torrents.length ? t("No matching torrents") : t("No torrents"), 'muted'));
   for (const row of rows) {
-    const item = element('article', undefined, 'torrent'); const progress = element('progress'); progress.max = 1; progress.value = Math.max(0, Math.min(1, Number(row.progress || 0))); progress.setAttribute('aria-label', 'Fremdrift');
+    const item = element('article', undefined, 'torrent'); const progress = element('progress'); progress.max = 1; progress.value = Math.max(0, Math.min(1, Number(row.progress || 0))); progress.setAttribute('aria-label', t("Progress"));
     if (typeof row.cover === 'string' && /^\/api\/covers\/(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(row.cover)) { const cover = element('img', undefined, 'torrent-cover'); cover.src = row.cover; cover.alt = ''; cover.width = 64; cover.height = 96; cover.loading = 'lazy'; cover.onerror = () => cover.remove(); item.append(cover); }
-    const status = element('p', `${Math.round(Number(row.progress || 0) * 100)} % · ${row.state || ''} · ${bytes(row.size)} · ${typeof row.credited_ratio === 'number' ? `Krediteret ratio ${trackerNumber(row.credited_ratio)} · Rå ratio ${trackerNumber(row.ratio)}` : `Ratio ${Number(row.ratio || 0).toFixed(2)}`}`);
-    const speeds = element('p', `Download ${bytes(row.dlspeed)}/s · Upload ${bytes(row.upspeed)}/s · Seeding ${(Number(row.seeding_time || 0) / 3600).toFixed(1)} timer`);
-    const actions = element('div', undefined, 'actions'); actions.append(command('Detaljer', () => showDetails(row))); if (appRole !== 'viewer') { const start = command('Start', () => torrentAction(row, 'start')); start.disabled = !downloadsEnabled; actions.append(start, command('Stop', () => torrentAction(row, 'stop')), command('Fjern', () => chooseRemoval(row))); }
+    const status = element('p', `${Math.round(Number(row.progress || 0) * 100)} % · ${torrentStatus(row.state)} · ${bytes(row.size)} · ${typeof row.credited_ratio === 'number' ? t("Credited ratio {0} · Raw ratio {1}", {0: trackerNumber(row.credited_ratio), 1: trackerNumber(row.ratio)}) : `Ratio ${Number(row.ratio || 0).toFixed(2)}`}`);
+    const speeds = element('p', t("Download {0}/s · Upload {1}/s · Seeding {2} hours", {0: bytes(row.dlspeed), 1: bytes(row.upspeed), 2: (Number(row.seeding_time || 0) / 3600).toFixed(1)}));
+    const actions = element('div', undefined, 'actions'); actions.append(command(t("Details"), () => showDetails(row))); if (appRole !== 'viewer') { const start = command('Start', () => torrentAction(row, 'start')); start.disabled = !downloadsEnabled; actions.append(start, command('Stop', () => torrentAction(row, 'stop')), command(t("Remove"), () => chooseRemoval(row))); }
     item.append(element('h2', row.name), progress, status, speeds);
     if ('credited_ratio' in row) item.append(trackerCreditView(row));
     item.append(actions); target.append(item);
@@ -143,7 +148,7 @@ function torrentTraffic() {
 }
 function renderTransferSummary() {
   const traffic = torrentTraffic();
-  document.querySelector('#transfer').textContent = traffic ? `${clientLabel} · Download ${bytes(traffic.dl_info_speed)}/s · Upload ${bytes(traffic.up_info_speed)}/s · ${downloadsEnabled ? 'VPN verificeret' : 'Downloads blokeret indtil VPN er verificeret'}${torrents.length === 500 ? ' · Trafik for de 500 viste torrents' : ''}` : `${clientLabel} · afventer trafikmåling`;
+  document.querySelector('#transfer').textContent = traffic ? `${clientLabel} · Download ${bytes(traffic.dl_info_speed)}/s · Upload ${bytes(traffic.up_info_speed)}/s · ${downloadsEnabled ? t("VPN verified") : t("Downloads blocked until VPN is verified")}${torrents.length === 500 ? t(" · Traffic for the 500 displayed torrents") : ''}` : t("{0} · waiting for traffic measurement", {0: clientLabel});
 }
 function applyTorrentSnapshot(rows, request) {
   if (request !== torrentListRequest) return;
@@ -154,8 +159,8 @@ function applyTorrentSnapshot(rows, request) {
     renderTorrents();
     renderTraffic(torrentTraffic()); renderTransferSummary();
   } else {
-    torrents = []; renderTorrents(); document.querySelector('#count').textContent = 'Torrentklient utilgængelig';
-    renderTraffic(); document.querySelector('#transfer').textContent = 'Torrentklient utilgængelig · afventer trafikmåling';
+    torrents = []; renderTorrents(); document.querySelector('#count').textContent = t("Torrent client unavailable");
+    renderTraffic(); document.querySelector('#transfer').textContent = t("Torrent client unavailable · waiting for traffic measurement");
   }
 }
 async function refreshTorrents() {
@@ -177,8 +182,8 @@ async function refreshAuxiliary() {
     storageRefreshAt = Date.now() + 60000;
     tasks.push((async () => {
       const storage = document.querySelector('#storage'); storage.hidden = false;
-      try { const capacity = await api('storage'); storage.textContent = `Lokal storage: ${bytes(capacity.freeBytes)} ledig af ${bytes(capacity.totalBytes)}${capacity.lowSpace ? ' · Lav diskplads' : ''}${capacity.writable ? '' : ' · Ikke skrivbar'}`; }
-      catch { storage.textContent = 'Lokal storage utilgængelig'; storageRefreshAt = Date.now() + 30000; }
+      try { const capacity = await api('storage'); storage.textContent = t("Local storage: {0} free of {1}{2}{3}", {0: bytes(capacity.freeBytes), 1: bytes(capacity.totalBytes), 2: capacity.lowSpace ? t(" · Low disk space") : '', 3: capacity.writable ? '' : t(" · Not writable")}); }
+      catch { storage.textContent = t("Local storage unavailable"); storageRefreshAt = Date.now() + 30000; }
     })());
   }
   await Promise.allSettled(tasks);
@@ -191,10 +196,10 @@ async function refresh() {
     downloadsEnabled = snapshot.runtime.downloadsEnabled === true; renderConnection(snapshot.runtime);
     applyTorrentSnapshot(snapshot.torrents, request);
     const queue = snapshot.queue;
-    if (request === torrentListRequest) document.querySelector('#queue-status').textContent = queue ? `Kø: ${queue.active}/${queue.limit} aktive · ${queue.waiting} ventende · RSS ${queue.rssActive} · Manuelle ${queue.manualActive}${queue.boundedView ? ' · Begrænset til 500 torrents' : ''}` : 'Køstatus utilgængelig';
+    if (request === torrentListRequest) document.querySelector('#queue-status').textContent = queue ? t("Queue: {0}/{1} active · {2} waiting · RSS {3} · Manual {4}{5}", {0: queue.active, 1: queue.limit, 2: queue.waiting, 3: queue.rssActive, 4: queue.manualActive, 5: queue.boundedView ? t(" · Limited to 500 torrents") : ''}) : t("Queue status unavailable");
   } catch {
     downloadsEnabled = false; renderConnection({unavailable: true}); applyTorrentSnapshot(null, request);
-    document.querySelector('#queue-status').textContent = 'Køstatus utilgængelig';
+    document.querySelector('#queue-status').textContent = t("Queue status unavailable");
   } finally { updateAddStart(); refreshing = false; void refreshAuxiliary(); }
 }
 
@@ -241,9 +246,9 @@ function countryFlag(country) {
   return flag;
 }
 function countryLabel(country) {
-  if (!country) return 'Land ukendt';
+  if (!country) return t("Country unknown");
   const code = countryCode(country);
-  try { if (code) return new Intl.DisplayNames(['da'], {type: 'region'}).of(code); } catch {}
+  try { if (code) return new Intl.DisplayNames([locale()], {type: 'region'}).of(code); } catch {}
   return country;
 }
 function renderConnection(state) {
@@ -253,13 +258,13 @@ function renderConnection(state) {
   const unavailable = state.unavailable || (state.ready && !fresh);
   const status = active ? 'active' : unavailable ? 'unknown' : state.provider || state.disconnectPending ? 'blocked' : 'disconnected';
   document.querySelector('#connection-flow').dataset.state = status;
-  document.querySelector('#connection-status').textContent = active ? 'Forbundet · VPN verificeret' : unavailable ? 'Status kan ikke verificeres' : state.disconnectPending ? 'Frakobling afventer' : state.provider ? 'Forbindelsen er blokeret' : 'Ingen VPN valgt';
-  document.querySelector('#connection-country').textContent = active ? countryLabel(state.country) : 'Afventer forbindelse';
+  document.querySelector('#connection-status').textContent = active ? t("Connected · VPN verified") : unavailable ? t("Status cannot be verified") : state.disconnectPending ? t("Disconnection pending") : state.provider ? t("Connection blocked") : t("No VPN selected");
+  document.querySelector('#connection-country').textContent = active ? countryLabel(state.country) : t("Waiting for connection");
   const flag = active ? countryFlag(state.country) : null;
   if (flag) document.querySelector('#connection-country').append(flag);
-  document.querySelector('#connection-ip').textContent = active ? state.publicIp || 'IP ukendt' : 'Downloads blokeret';
-  document.querySelector('#connection-port').textContent = active ? `VPN-port ${state.forwardedPort || 'ukendt'}` : state.provider ? 'Kontrollér forbindelsen under VPN' : 'Vælg VPN under VPN-fanen';
-  document.querySelector('#connection-checked').textContent = fresh ? `Kontrolleret ${new Date(checked * 1000).toLocaleTimeString('da-DK')}` : 'Afventer statuskontrol';
+  document.querySelector('#connection-ip').textContent = active ? state.publicIp || t("IP unknown") : t("Downloads blocked");
+  document.querySelector('#connection-port').textContent = active ? t("VPN port {port}", {port: state.forwardedPort || t("Unknown")}) : state.provider ? t("Check the connection under VPN") : t("Select a VPN under the VPN tab");
+  document.querySelector('#connection-checked').textContent = fresh ? t("Checked {0}", {0: new Date(checked * 1000).toLocaleTimeString(locale())}) : t("Waiting for status check");
   vpnFreshUntil = active ? Date.now() + 30000 : 0;
   if (!active) renderTraffic();
 }
@@ -271,9 +276,9 @@ function renderTraffic(transfer) {
   const measured = active && typeof transfer?.dl_info_speed === 'number' && typeof transfer?.up_info_speed === 'number' && Number.isFinite(down) && Number.isFinite(up) && down >= 0 && up >= 0;
   flow.dataset.upload = String(measured && up > 0);
   flow.dataset.download = String(measured && down > 0);
-  document.querySelector('#connection-download').textContent = measured ? `↓ Download · ${bytes(down)}/s` : '↓ Download · afventer trafikmåling';
-  document.querySelector('#connection-upload').textContent = measured ? `↑ Upload · ${bytes(up)}/s` : '↑ Upload · afventer trafikmåling';
-  document.querySelector('#connection-activity').textContent = !active ? 'Trafik kræver en verificeret VPN-forbindelse.' : !measured ? 'Afventer en frisk trafikmåling.' : down > 0 && up > 0 ? 'Henter og sender · begge retninger er aktive.' : down > 0 ? 'Henter · Internet → MediaVPN → MediaSeed' : up > 0 ? 'Seeder · MediaSeed → MediaVPN → Internet' : 'VPN klar · ingen aktiv overførsel.';
+  document.querySelector('#connection-download').textContent = measured ? `↓ Download · ${bytes(down)}/s` : t("↓ Download · waiting for traffic measurement");
+  document.querySelector('#connection-upload').textContent = measured ? `↑ Upload · ${bytes(up)}/s` : t("↑ Upload · waiting for traffic measurement");
+  document.querySelector('#connection-activity').textContent = !active ? t("Traffic requires a verified VPN connection.") : !measured ? t("Waiting for a fresh traffic measurement.") : down > 0 && up > 0 ? t("Downloading and uploading · both directions are active.") : down > 0 ? 'Henter · Internet → MediaVPN → MediaSeed' : up > 0 ? 'Seeder · MediaSeed → MediaVPN → Internet' : t("VPN ready · no active transfer.");
   trafficFreshUntil = measured ? Date.now() + 30000 : 0;
 }
 function expireConnection() {
@@ -315,12 +320,12 @@ async function refreshVpn() {
   provider.querySelector('option[value="mediavpn"]').disabled = !state.integrationAvailable;
   const select = document.querySelector('#vpn-profile');
   const previous = select.value;
-  select.replaceChildren(element('option', 'V\u00e6lg profil')); select.firstChild.value = '';
-  for (const profile of state.profiles || []) { const option = element('option', `${profile.name} \u00b7 ${profile.forwardedPort ? 'port ' + profile.forwardedPort : 'port ikke verificeret'}`); option.value = profile.id; select.append(option); }
+  select.replaceChildren(element('option', t("Choose profile"))); select.firstChild.value = '';
+  for (const profile of state.profiles || []) { const option = element('option', `${profile.name} \u00b7 ${profile.forwardedPort ? 'port ' + profile.forwardedPort : t("port not verified")}`); option.value = profile.id; select.append(option); }
   select.value = vpnDraft ? previous : state.profileId || '';
-  document.querySelector('#vpn-status').textContent = state.ready ? 'Verificeret' : state.provider ? 'Ikke verificeret' : 'Ikke tilkoblet';
-  document.querySelector('#vpn-downloads').textContent = state.downloadsEnabled ? 'Tilladt gennem VPN' : 'Blokeret';
-  document.querySelector('#vpn-ip').textContent = state.publicIp || 'Ikke verificeret'; document.querySelector('#vpn-port').textContent = state.forwardedPort || 'Ikke verificeret'; document.querySelector('#vpn-reason').textContent = state.reason || '';
+  document.querySelector('#vpn-status').textContent = state.ready ? t("Verified") : state.provider ? t("Unverified") : t("Not attached");
+  document.querySelector('#vpn-downloads').textContent = state.downloadsEnabled ? t("Allowed through VPN") : t("Blocked");
+  document.querySelector('#vpn-ip').textContent = state.publicIp || t("Unverified"); document.querySelector('#vpn-port').textContent = state.forwardedPort || t("Unverified"); document.querySelector('#vpn-reason').textContent = t(state.reason || '');
   document.querySelector('#vpn-disconnect').disabled = !state.provider && !state.disconnectPending;
   updateVpnChoice();
 }
@@ -333,63 +338,63 @@ document.querySelector('#vpn-form').onsubmit = async event => {
     await api('vpn', {enabled: provider === 'mediavpn', provider, profileId: document.querySelector('#vpn-profile').value || null}, 'PUT');
     vpnDraft = false;
     await refreshVpn(); await refresh();
-    showNotification(provider ? 'MediaVPN valgt. Torrentklienten starter, n\u00e5r profilen er verificeret.' : 'MediaVPN frakoblet. Downloads er blokeret. Data bevares.', 'success');
+    showNotification(provider ? t("MediaVPN selected. The torrent client starts when the profile is verified.") : t("MediaVPN disconnected. Downloads are blocked. Data is preserved."), 'success');
   } catch (error) { notify(error); } finally { updateVpnChoice(); }
 };
 document.querySelector('#vpn-disconnect').onclick = async () => {
   const button = document.querySelector('#vpn-disconnect'); button.disabled = true;
-  try { await api('vpn', {enabled: false, provider: null}, 'PUT'); vpnDraft = false; await refreshVpn(); await refresh(); showNotification('MediaVPN frakoblet. Downloads er blokeret. Data bevares.', 'success'); }
+  try { await api('vpn', {enabled: false, provider: null}, 'PUT'); vpnDraft = false; await refreshVpn(); await refresh(); showNotification(t("MediaVPN disconnected. Downloads are blocked. Data is preserved."), 'success'); }
   catch (error) { notify(error); button.disabled = false; }
 };
 document.querySelector('#vpn-refresh').onclick = () => refreshVpn().catch(error => { renderConnection({unavailable: true}); notify(error); });
 function trackerCreditView(row) {
   const panel = element('section', undefined, 'tracker-credit');
-  const title = row.credit_observation_stale ? 'Trafikmåling afventer · ratiomål beskyttet' : row.green_pending ? 'Trackerregler afventer · foreløbig 0,5× kredit' : row.green_active ? 'Green-periode · 0,5× upload' : row.green_uploaded > 0 ? 'Green-periode afsluttet · ny upload tæller 1×' : 'Trackerregler · upload tæller 1×';
+  const title = row.credit_observation_stale ? t("Waiting for traffic measurement · ratio goal protected") : row.green_pending ? t("Waiting for tracker rules · provisional 0.5× credit") : row.green_active ? t("Green period · 0.5× upload") : row.green_uploaded > 0 ? t("Green period ended · new uploads count 1×") : t("Tracker rules · uploads count 1×");
   panel.append(element('strong', title));
-  panel.append(element('p', `Rå upload ${trackerBytes(row.uploaded)} · Beregnet krediteret upload ${trackerBytes(row.credited_uploaded)} · Krediteret ratio ${trackerNumber(row.credited_ratio)} / mål ${trackerNumber(row.ratio_limit)}`));
-  if (row.green_pending) panel.append(element('p', row.credit_observation_stale ? 'Afventer en stabil trafikmåling. En ældre måling eller en nulstillet tæller må ikke udløse et ratiomål.' : 'Afventer bekræftet oprettelsesdato fra trackeren. Ratio og automatisk oprydning bruger foreløbig halv uploadkredit.', 'muted'));
-  if (row.green_rule_until) panel.append(element('p', `De første 24 timer slutter ${new Date(row.green_rule_until * 1000).toLocaleString('da-DK')}. MediaSeed bruger 30 minutters sikkerhedsmargin til ${new Date(row.green_until * 1000).toLocaleTimeString('da-DK')}.`, 'muted'));
-  if (row.green_uploaded > 0) panel.append(element('p', `${trackerBytes(row.green_uploaded)} upload er registreret til 0,5×. Den del beholder halv kredit efter periodens udløb.`, 'muted'));
-  if (row.green_history_estimated) panel.append(element('p', 'Historisk upload kan ikke tidsopdeles præcist og er beregnet forsigtigt.', 'muted'));
+  panel.append(element('p', t("Raw upload {0} · Estimated credited upload {1} · Credited ratio {2} / goal {3}", {0: trackerBytes(row.uploaded), 1: trackerBytes(row.credited_uploaded), 2: trackerNumber(row.credited_ratio), 3: trackerNumber(row.ratio_limit)})));
+  if (row.green_pending) panel.append(element('p', row.credit_observation_stale ? t("Waiting for a stable traffic measurement. An old measurement or reset counter must not trigger a ratio goal.") : t("Waiting for the tracker to confirm the creation date. Ratio and automatic cleanup provisionally use half upload credit."), 'muted'));
+  if (row.green_rule_until) panel.append(element('p', t("The first 24 hours end at {0}. MediaSeed uses a 30-minute safety margin until {1}.", {0: new Date(row.green_rule_until * 1000).toLocaleString(locale()), 1: new Date(row.green_until * 1000).toLocaleTimeString(locale())}), 'muted'));
+  if (row.green_uploaded > 0) panel.append(element('p', t("{0} of uploads were recorded at 0.5×. That portion retains half credit after the period ends.", {0: trackerBytes(row.green_uploaded)}), 'muted'));
+  if (row.green_history_estimated) panel.append(element('p', t("Historical uploads cannot be split precisely by time and have been estimated conservatively."), 'muted'));
   const benefits = row.tracker_benefits;
   if (benefits) {
-    const flags = [benefits.freeleech === null ? 'Freeleech ukendt' : `Freeleech ${benefits.freeleech} %`, benefits.doubleUpload ? 'Dobbelt upload' : null, benefits.featured ? 'Featured' : null, benefits.internal ? 'Internal' : null, benefits.refundable ? 'Refunderbar' : null, benefits.ownUpload ? 'Egen udgivelse · undtaget fra Green' : null].filter(Boolean);
-    panel.append(element('p', `${benefits.tracker} · Bekræftet info-hash · ${flags.join(' · ')}`, 'tracker-benefit-flags'));
-    if (benefits.doubleUpload) panel.append(element('p', 'Trackerbonus vises som information. Det lokale seedingmål bruger forsigtigt den målte upload med Green-fradrag; kontoens faktiske kredit fremgår af trackerkortet.', 'muted'));
-  } else panel.append(element('p', 'Aktuelle trackerfordele afventer et nyt API-opslag.', 'muted'));
+    const flags = [benefits.freeleech === null ? t("Freeleech unknown") : `Freeleech ${benefits.freeleech} %`, benefits.doubleUpload ? t("Double upload") : null, benefits.featured ? 'Featured' : null, benefits.internal ? 'Internal' : null, benefits.refundable ? t("Refundable") : null, benefits.ownUpload ? t("Own release · exempt from Green") : null].filter(Boolean);
+    panel.append(element('p', t("{0} · Confirmed info hash · {1}", {0: benefits.tracker, 1: flags.join(' · ')}), 'tracker-benefit-flags'));
+    if (benefits.doubleUpload) panel.append(element('p', t("Tracker bonuses are shown for information. The local seeding goal conservatively uses measured uploads with the Green deduction; the account's actual credit is shown on the tracker card."), 'muted'));
+  } else panel.append(element('p', t("Current tracker benefits are awaiting a new API lookup."), 'muted'));
   return panel;
 }
 function detailTable(title, columns, rows) {
-  const section = element('section'); section.append(element('h3', title)); if (!rows.length) { section.append(element('p', 'Ingen data', 'muted')); return section; }
+  const section = element('section'); section.append(element('h3', title)); if (!rows.length) { section.append(element('p', t("No data"), 'muted')); return section; }
   const table = element('table'); const heading = element('tr'); for (const [, label] of columns) heading.append(element('th', label)); const head = element('thead'); head.append(heading); table.append(head);
   const body = element('tbody'); for (const row of rows) { const line = element('tr'); for (const [key] of columns) line.append(element('td', String(row[key] ?? '—'))); body.append(line); } table.append(body); const wrap = element('div', undefined, 'table-wrap'); wrap.append(table); section.append(wrap); return section;
 }
 async function showDetails(row) {
-  selectedHash = row.hash; document.querySelector('#detail-name').textContent = row.name; document.querySelector('#detail-message').textContent = ''; const target = document.querySelector('#detail-data'); target.replaceChildren(element('p', 'Henter detaljer…'));
+  selectedHash = row.hash; document.querySelector('#detail-name').textContent = row.name; document.querySelector('#detail-message').textContent = ''; const target = document.querySelector('#detail-data'); target.replaceChildren(element('p', t("Fetching details…")));
   document.querySelector('#policy-form input').value = Number(row.ratio_limit) >= 1 ? row.ratio_limit : 1; dialog.showModal();
-  try { const details = await api(`torrents/${row.hash}/details`); target.replaceChildren(element('p', `Downloadet ${bytes(details.properties.total_downloaded)} · Uploadet ${bytes(details.properties.total_uploaded)} · Seeding ${(Number(details.properties.seeding_time || 0) / 3600).toFixed(1)} timer`)); target.append(detailTable('Filer', [['name', 'Navn'], ['size', 'Bytes'], ['progress', 'Fremdrift']], details.files), detailTable('Trackere', [['host', 'Tracker'], ['status', 'Status'], ['num_peers', 'Peers']], details.trackers), detailTable('Peers', [['ip', 'IP'], ['client', 'Klient'], ['progress', 'Fremdrift']], details.peers)); if (details.credit && 'credited_ratio' in details.credit) target.append(trackerCreditView({...row, ...details.credit, uploaded: details.properties.total_uploaded})); renderCleanupDetails(details.cleanup, row, target); document.querySelector('#policy-form').hidden = appRole === 'viewer' || (details.cleanup?.mode && details.cleanup.mode !== 'never'); try { const benefits = await api(`torrents/${row.hash}/benefits`); if (benefits.status === 'matched' && !details.credit?.tracker_benefits) { const flags = [benefits.freeleech === null ? null : `Freeleech ${benefits.freeleech} %`, benefits.doubleUpload ? 'Dobbelt upload' : null, benefits.featured ? 'Featured' : null, benefits.internal ? 'Internal' : null, benefits.refundable ? 'Refunderbar' : null].filter(Boolean); target.append(element('h3', 'Trackerfordele'), element('p', `${benefits.tracker} · Præcist hash-match · ${flags.join(' · ') || 'Ingen bekræftede fordele'}`, 'muted')); } } catch {} } catch (error) { target.replaceChildren(element('p', error.message)); }
+  try { const details = await api(`torrents/${row.hash}/details`); target.replaceChildren(element('p', t("Downloaded {0} · Uploaded {1} · Seeding {2} hours", {0: bytes(details.properties.total_downloaded), 1: bytes(details.properties.total_uploaded), 2: (Number(details.properties.seeding_time || 0) / 3600).toFixed(1)}))); target.append(detailTable(t("Files"), [['name', t("Name")], ['size', 'Bytes'], ['progress', t("Progress")]], details.files), detailTable(t("Trackers"), [['host', 'Tracker'], ['status', 'Status'], ['num_peers', 'Peers']], details.trackers), detailTable('Peers', [['ip', 'IP'], ['client', t("Client")], ['progress', t("Progress")]], details.peers)); if (details.credit && 'credited_ratio' in details.credit) target.append(trackerCreditView({...row, ...details.credit, uploaded: details.properties.total_uploaded})); renderCleanupDetails(details.cleanup, row, target); document.querySelector('#policy-form').hidden = appRole === 'viewer' || (details.cleanup?.mode && details.cleanup.mode !== 'never'); try { const benefits = await api(`torrents/${row.hash}/benefits`); if (benefits.status === 'matched' && !details.credit?.tracker_benefits) { const flags = [benefits.freeleech === null ? null : `Freeleech ${benefits.freeleech} %`, benefits.doubleUpload ? t("Double upload") : null, benefits.featured ? 'Featured' : null, benefits.internal ? 'Internal' : null, benefits.refundable ? t("Refundable") : null].filter(Boolean); target.append(element('h3', t("Tracker benefits")), element('p', t("{0} · Exact hash match · {1}", {0: benefits.tracker, 1: flags.join(' · ') || t("No confirmed benefits")}), 'muted')); } } catch {} } catch (error) { target.replaceChildren(element('p', error.message)); }
 }
 function renderCleanupDetails(policy = {mode: 'never'}, row, target) {
-  target.append(element('h3', 'Automatisk oprydning'));
-  if (policy.mode === 'never') { target.append(element('p', 'Slået fra · torrent og filer bevares.', 'muted')); return; }
-  const goals = {time: `${policy.hours} timers aktiv seeding`, ratio: `krediteret uploadratio ${policy.ratio}`, both: `${policy.hours} timers aktiv seeding OG krediteret ratio ${policy.ratio}`, either: `${policy.hours} timers aktiv seeding ELLER krediteret ratio ${policy.ratio}`};
-  const state = {waiting: 'Afventer klargøring; torrenten holdes på pause', preparing: 'Klargøring blev afbrudt; kontrollér torrenten eller slå reglen fra', active: 'Overvåges · venter på målet og på tilsluttede downloadere', identity_mismatch: 'Oprydning blokeret: torrentens identitet kunne ikke bekræftes'};
-  target.append(element('p', `${policy.delete_files ? 'Fjern torrent og filer' : 'Fjern kun torrent · behold filer'} efter ${goals[policy.mode]}.`), element('p', policy.observationFailed ? 'Statuskontrol fejlede · oprydning afventer en ny, gyldig måling.' : state[policy.status] || 'Afventer kontrol', 'muted'));
+  target.append(element('h3', t("Automatic cleanup")));
+  if (policy.mode === 'never') { target.append(element('p', t("Disabled · torrent and files are preserved."), 'muted')); return; }
+  const goals = {time: t("{0} hours of active seeding", {0: policy.hours}), ratio: t("credited upload ratio {0}", {0: policy.ratio}), both: t("{0} hours of active seeding AND credited ratio {1}", {0: policy.hours, 1: policy.ratio}), either: t("{0} hours of active seeding OR credited ratio {1}", {0: policy.hours, 1: policy.ratio})};
+  const state = {waiting: t("Waiting for preparation; torrent is kept paused"), preparing: t("Preparation was interrupted; check the torrent or disable the rule"), active: t("Monitoring · waiting for the goal and connected downloaders"), identity_mismatch: t("Cleanup blocked: torrent identity could not be confirmed")};
+  target.append(element('p', t("{0} after {1}.", {0: policy.delete_files ? t("Remove torrent and files") : t("Remove torrent only · keep files"), 1: goals[policy.mode]})), element('p', policy.observationFailed ? t("Status check failed · cleanup is waiting for a new valid measurement.") : state[policy.status] || t("Waiting for check"), 'muted'));
   if (appRole !== 'viewer') {
-    const cancel = element('button', 'Slå automatisk oprydning fra');
-    cancel.onclick = async () => { cancel.disabled = true; try { const result = await api(`torrents/${row.hash}/cleanup/cancel`, {}); showNotification(result.stopLimitsRestored === false ? 'Oprydning slået fra. Stopmålet kunne ikke gendannes; indstil det under Detaljer, når klienten er klar.' : 'Automatisk oprydning slået fra. Torrent og filer bevares.', 'success'); await showDetails(row); } catch (error) {notify(error); cancel.disabled = false;} };
+    const cancel = element('button', t("Disable automatic cleanup"));
+    cancel.onclick = async () => { cancel.disabled = true; try { const result = await api(`torrents/${row.hash}/cleanup/cancel`, {}); showNotification(result.stopLimitsRestored === false ? t("Cleanup disabled. The stop goal could not be restored; set it under Details when the client is ready.") : t("Automatic cleanup disabled. Torrent and files are preserved."), 'success'); await showDetails(row); } catch (error) {notify(error); cancel.disabled = false;} };
     target.append(cancel);
   }
 }
 function trackerNumber(value) {
-  return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('da-DK', {maximumFractionDigits: 2}) : '—';
+  return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString(locale(), {maximumFractionDigits: 2}) : '—';
 }
 function trackerBytes(value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
   let amount = Math.abs(value), index = 0;
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
   while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index++; }
-  return `${value < 0 ? '−' : ''}${amount.toLocaleString('da-DK', {maximumFractionDigits: index ? 2 : 0})} ${units[index]}`;
+  return `${value < 0 ? '−' : ''}${amount.toLocaleString(locale(), {maximumFractionDigits: index ? 2 : 0})} ${units[index]}`;
 }
 function trackerCard(row) {
   const card = element('article', undefined, 'source-row tracker-card');
@@ -397,15 +402,15 @@ function trackerCard(row) {
   const identity = element('div');
   identity.append(element('h3', row.name), element('p', `NordicBytes${row.username ? ` · ${row.username}` : ''}`, 'muted'));
   const available = row.status === 'ok' && row.stats && typeof row.stats === 'object';
-  head.append(identity, element('span', available ? 'Forbundet' : 'Kontodata utilgængelige', `tracker-state${available ? ' ready' : ''}`));
+  head.append(identity, element('span', available ? t("Connected") : t("Account data unavailable"), `tracker-state${available ? ' ready' : ''}`));
   card.append(head);
   if (available) {
     const stats = element('dl', undefined, 'tracker-stats');
     for (const [label, field, format] of [
       ['Ratio', 'ratio', trackerNumber], ['Upload', 'uploaded', trackerBytes], ['Download', 'downloaded', trackerBytes],
-      ['Buffer', 'buffer', trackerBytes], ['Seeder', 'seeding', trackerNumber], ['Downloader', 'leeching', trackerNumber],
-      ['Shards / bonus', 'seedbonus', trackerNumber], ['Seeding-størrelse', 'seeding_size', trackerBytes],
-      ['Udgivelser', 'total_uploads', trackerNumber], ['Hit-and-runs', 'hit_and_runs', trackerNumber], ['Advarsler', 'warnings', trackerNumber],
+      ['Buffer', 'buffer', trackerBytes], [t("Seeding"), 'seeding', trackerNumber], [t("Downloading"), 'leeching', trackerNumber],
+      ['Shards / bonus', 'seedbonus', trackerNumber], [t("Seeding size"), 'seeding_size', trackerBytes],
+      [t("Releases"), 'total_uploads', trackerNumber], ['Hit-and-runs', 'hit_and_runs', trackerNumber], [t("Warnings"), 'warnings', trackerNumber],
     ]) {
       const metric = element('div', undefined, 'tracker-metric');
       metric.append(element('dt', label), element('dd', format(row.stats[field])));
@@ -414,9 +419,9 @@ function trackerCard(row) {
     }
     card.append(stats);
     const checked = new Date(row.checkedAt * 1000);
-    card.append(element('p', Number.isFinite(checked.getTime()) ? `Hentet ${checked.toLocaleString('da-DK', {dateStyle: 'short', timeStyle: 'short'})} · Kontrolleres automatisk hvert 5. minut` : 'Tidspunkt for kontotal er ukendt', 'tracker-updated muted'));
+    card.append(element('p', Number.isFinite(checked.getTime()) ? t("Retrieved {0} · Checked automatically every 5 minutes", {0: checked.toLocaleString(locale(), {dateStyle: 'short', timeStyle: 'short'})}) : t("Account statistics time is unknown"), 'tracker-updated muted'));
   } else {
-    card.append(element('p', 'Kontotallene kunne ikke hentes. Kontrollér API-nøglens adgang under Trackere. MediaSeed prøver igen automatisk.', 'muted'));
+    card.append(element('p', t("Account statistics could not be retrieved. Check the API key's access under Trackers. MediaSeed retries automatically."), 'muted'));
   }
   return card;
 }
@@ -429,25 +434,25 @@ async function refreshTrackerOverview() {
   if (appRole === 'viewer' || trackerOverviewLoading) return;
   trackerOverviewLoading = true;
   try { renderTrackerOverview(await api('trackers')); }
-  catch { document.querySelector('#tracker-account-list').replaceChildren(element('p', 'Trackerstatistik kunne ikke hentes. Prøver igen automatisk.', 'muted')); }
+  catch { document.querySelector('#tracker-account-list').replaceChildren(element('p', t("Tracker statistics could not be retrieved. Retrying automatically."), 'muted')); }
   finally { trackerOverviewLoading = false; }
 }
 async function loadSources(kind) {
-  const rows = await api(kind); const target = document.querySelector(kind === 'feeds' ? '#feed-list' : '#tracker-list'); target.replaceChildren(); if (!rows.length) target.append(element('p', kind === 'feeds' ? 'Ingen feeds' : 'Ingen konti', 'muted'));
+  const rows = await api(kind); const target = document.querySelector(kind === 'feeds' ? '#feed-list' : '#tracker-list'); target.replaceChildren(); if (!rows.length) target.append(element('p', kind === 'feeds' ? t("No feeds") : t("No accounts"), 'muted'));
   if (kind === 'trackers') {
     renderTrackerOverview(rows);
-    const select = document.querySelector('#tracker-account'); const previous = select.value; select.replaceChildren(element('option', 'Vælg konto')); select.firstChild.value = '';
+    const select = document.querySelector('#tracker-account'); const previous = select.value; select.replaceChildren(element('option', t("Choose account"))); select.firstChild.value = '';
     for (const row of rows) { const option = element('option', row.name); option.value = row.id; select.append(option); }
     select.value = rows.some(row => row.id === previous) ? previous : rows.length === 1 ? rows[0].id : '';
     document.querySelector('#tracker-search-submit').disabled = !rows.length;
   }
   for (const row of rows) {
     const item = kind === 'trackers' ? trackerCard(row) : element('article', undefined, 'source-row');
-    if (kind === 'feeds') item.append(element('h2', row.name), element('p', `${row.folder || '/downloads'} · Ratio ${row.ratio} · ${row.paused ? 'Pauset' : 'Aktiv'} · ${row.status || ''}`, 'muted'));
+    if (kind === 'feeds') item.append(element('h2', row.name), element('p', `${row.folder || '/downloads'} · Ratio ${row.ratio} · ${row.paused ? t("Paused") : t("Active")} · ${row.status || ''}`, 'muted'));
     const actions = element('div', undefined, 'actions');
     if (appRole === 'administrator') {
-      if (kind === 'feeds') actions.append(command(row.paused ? 'Aktivér' : 'Pause', async () => { await api(`feeds/${row.id}/state`, {enabled: row.paused}, 'PUT'); await loadSources('feeds'); showNotification(row.paused ? 'Feed aktiveret gennem VPN.' : 'Feed sat på pause. Eksisterende torrents bevares.', 'success'); }));
-      actions.append(command('Rediger', () => { const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); form.reset(); for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } form.querySelector('input[name="name"]').focus(); }), command('Fjern', async () => { if (!confirm(`Fjern ${row.name}? Filer og torrents bevares.`)) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); }));
+      if (kind === 'feeds') actions.append(command(row.paused ? 'Aktivér' : 'Pause', async () => { await api(`feeds/${row.id}/state`, {enabled: row.paused}, 'PUT'); await loadSources('feeds'); showNotification(row.paused ? t("Feed enabled through VPN.") : t("Feed paused. Existing torrents are preserved."), 'success'); }));
+      actions.append(command(t("Edit"), () => { const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); form.reset(); for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } form.querySelector('input[name="name"]').focus(); }), command(t("Remove"), async () => { if (!confirm(t("Remove {0}? Files and torrents are preserved.", {0: row.name}))) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); }));
     }
     item.append(actions); target.append(item);
   }
@@ -456,17 +461,17 @@ let trackerSearchGeneration = 0;
 document.querySelector('#tracker-account').onchange = () => { trackerSearchGeneration++; document.querySelector('#tracker-results').replaceChildren(); document.querySelector('#tracker-search-status').textContent = ''; };
 document.querySelector('#tracker-search').onsubmit = async event => {
   event.preventDefault(); const form = event.target; const account = form.elements.namedItem('account').value; if (!account) return;
-  const generation = ++trackerSearchGeneration; const button = document.querySelector('#tracker-search-submit'); const target = document.querySelector('#tracker-results'); const status = document.querySelector('#tracker-search-status'); button.disabled = true; target.replaceChildren(); status.textContent = 'Søger…';
+  const generation = ++trackerSearchGeneration; const button = document.querySelector('#tracker-search-submit'); const target = document.querySelector('#tracker-results'); const status = document.querySelector('#tracker-search-status'); button.disabled = true; target.replaceChildren(); status.textContent = t("Searching…");
   try {
     const response = await api(`trackers/${encodeURIComponent(account)}/search?query=${encodeURIComponent(form.elements.namedItem('query').value)}`);
     if (generation !== trackerSearchGeneration) return;
-    status.textContent = response.results.length ? `${response.results.length} resultater · Torrents tilføjes stoppet. Start kræver verificeret VPN.` : 'Ingen resultater';
+    status.textContent = response.results.length ? t("{0} results · Torrents are added paused. Starting requires a verified VPN.", {0: response.results.length}) : t("No results");
     for (const row of response.results) {
-      const item = element('article', undefined, 'source-row'); item.append(element('h2', row.name), element('p', `${row.size === null ? 'Ukendt størrelse' : bytes(row.size)} · Seeders ${row.seeders ?? '?'} · Leechers ${row.leechers ?? '?'}`, 'muted'));
-      const actions = element('div', undefined, 'actions'); const add = command('Tilføj stoppet', async () => {
+      const item = element('article', undefined, 'source-row'); item.append(element('h2', row.name), element('p', t("{0} · Seeders {1} · Leechers {2}", {0: row.size === null ? t("Unknown size") : bytes(row.size), 1: row.seeders ?? '?', 2: row.leechers ?? '?'}), 'muted'));
+      const actions = element('div', undefined, 'actions'); const add = command(t("Add paused"), async () => {
         if (!form.reportValidity()) return;
         await api(`trackers/${encodeURIComponent(account)}/torrents/${encodeURIComponent(row.id)}`, {ratio: Number(form.elements.namedItem('ratio').value)});
-        add.textContent = 'Tilføjet stoppet'; add.dataset.added = 'true'; showNotification('Torrent tilføjet stoppet. Download kræver verificeret VPN.', 'success'); await refresh();
+        add.textContent = t("Added paused"); add.dataset.added = 'true'; showNotification(t("Torrent added paused. Downloading requires a verified VPN."), 'success'); await refresh();
       });
       actions.append(add); item.append(actions); target.append(item);
     }
@@ -474,16 +479,16 @@ document.querySelector('#tracker-search').onsubmit = async event => {
   finally { button.disabled = document.querySelector('#tracker-account').options.length === 1; }
 };
 for (const [selector, kind] of [['#feed-form', 'feeds'], ['#tracker-form', 'trackers']]) {
-  const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { body.ratio = Number(body.ratio); body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); form.reset(); form.elements.namedItem('id').value = ''; await loadSources(kind); showNotification('Gemt', 'success'); } catch (error) { notify(error); } };
+  const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { body.ratio = Number(body.ratio); body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); form.reset(); form.elements.namedItem('id').value = ''; await loadSources(kind); showNotification(t("Saved palette"), 'success'); } catch (error) { notify(error); } };
   form.addEventListener('reset', () => { form.elements.namedItem('id').setAttribute('value', ''); });
 }
 for (const button of document.querySelectorAll('[data-view]')) button.onclick = async () => { message.textContent = ''; for (const other of document.querySelectorAll('[data-view]')) other.setAttribute('aria-pressed', String(other === button)); for (const section of document.querySelectorAll('.view')) section.hidden = section.id !== button.dataset.view; try { if (button.dataset.view === 'feeds' || button.dataset.view === 'trackers') await loadSources(button.dataset.view); else if (button.dataset.view === 'vpn') await refreshVpn(); } catch (error) { notify(error); } };
 document.querySelector('#close-details').onclick = () => dialog.close();
-document.querySelector('#policy-form').onsubmit = async event => { event.preventDefault(); try { await api(`torrents/${selectedHash}/policy`, {ratio: Number(event.target.elements.namedItem('ratio').value)}); document.querySelector('#detail-message').textContent = 'Seedingmål gemt'; } catch (error) { document.querySelector('#detail-message').textContent = error.message; } };
+document.querySelector('#policy-form').onsubmit = async event => { event.preventDefault(); try { await api(`torrents/${selectedHash}/policy`, {ratio: Number(event.target.elements.namedItem('ratio').value)}); document.querySelector('#detail-message').textContent = t("Seeding goal saved"); } catch (error) { document.querySelector('#detail-message').textContent = t(error.message); } };
 for (const selector of ['#search', '#filter', '#sort', '#source-filter']) document.querySelector(selector).addEventListener('input', renderTorrents);
 document.querySelector('#manage-trackers').onclick = () => document.querySelector('[data-view="trackers"]').click();
 function showWorkspace() { void refreshTrackerOverview(); document.body.classList.add('signed-in'); document.querySelector('#identity').hidden = true; document.querySelector('#workspace').hidden = false; document.querySelector('#logout').hidden = false; document.querySelector('#new-torrent').hidden = appRole === 'viewer'; document.querySelector('#policy-form').hidden = appRole === 'viewer'; for (const selector of ['#feed-form', '#tracker-form', '#vpn-form']) document.querySelector(selector).hidden = appRole !== 'administrator'; for (const selector of ['[data-view="feeds"]', '[data-view="trackers"]']) document.querySelector(selector).hidden = appRole === 'viewer'; refresh(); }
-document.querySelector('#login').onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(event.target)); try { if (needsSetup) { await api('auth/setup', body); needsSetup = false; } csrf = (await api('auth/login', body)).csrf; event.target.reset(); showWorkspace(); } catch (error) { notify(error); } };
+document.querySelector('#login').onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(event.target)); try { if (needsSetup) { await api('auth/setup', body); needsSetup = false; } csrf = (await api('auth/login', body)).csrf; const identity = await api('auth/me'); setLanguage(identity.language || 'en'); event.target.reset(); showWorkspace(); } catch (error) { notify(error); } };
 document.querySelector('#refresh').onclick = refresh;
 const addDialog = document.querySelector('#add-torrent');
 const addForm = document.querySelector('#add-torrent-form');
@@ -503,7 +508,7 @@ function updateCleanupFields() {
   }
   document.querySelector('#add-cleanup-action').disabled = !active;
   document.querySelector('#add-cleanup-warning').hidden = !active || !files;
-  document.querySelector('#add-seeding-help').textContent = active ? 'Den valgte oprydningsregel styrer seedingmålet. Vælg start nu eller tilføj på pause. Start kræver verificeret VPN.' : 'Vælg start nu eller tilføj på pause. Start kræver verificeret VPN. Stopmål: valgt krediteret ratio eller 49 timers seeding; torrent og filer bevares.';
+  document.querySelector('#add-seeding-help').textContent = active ? t("The selected cleanup rule controls the seeding goal. Choose start now or add paused. Starting requires a verified VPN.") : t("Choose start now or add paused. Starting requires a verified VPN. Stop goal: selected credited ratio or 49 hours of seeding; torrent and files are preserved.");
   const stop = addForm.elements.namedItem('ratio'); stop.disabled = active;
   const label = stop.closest?.('label'); if (label) label.hidden = active;
 }
@@ -562,10 +567,10 @@ document.addEventListener('drop', event => {
   event.preventDefault(); clearFileDrag();
   if (!canDropTorrent()) return;
   const files = event.dataTransfer.files;
-  if (files.length !== 1) { showNotification('Vælg én torrentfil.'); return; }
+  if (files.length !== 1) { showNotification(t("Choose one torrent file.")); return; }
   const file = files[0];
-  if (!file.name.toLowerCase().endsWith('.torrent')) { showNotification('Vælg en .torrent-fil.'); return; }
-  if (file.size > 4 * 1024 * 1024) { showNotification('Torrentfilen må højst være 4 MiB.'); return; }
+  if (!file.name.toLowerCase().endsWith('.torrent')) { showNotification(t("Choose a .torrent file.")); return; }
+  if (file.size > 4 * 1024 * 1024) { showNotification(t("Torrent files must not exceed 4 MiB.")); return; }
   openAdd();
   addForm.querySelector('[name="mode"][value="file"]').checked = true;
   droppedTorrent = file; fileInput.value = '';
@@ -578,16 +583,16 @@ addForm.onsubmit = async event => {
   const cleanup = addCleanupPolicy();
   const cleanupQuery = cleanup.mode === 'never' ? '' : `&cleanup_mode=${cleanup.mode}&cleanup_hours=${cleanup.hours}&cleanup_ratio=${cleanup.ratio}&cleanup_delete_files=${cleanup.delete_files}`;
   const file = droppedTorrent || fileInput.files[0];
-  if (fileMode && (!file || !file.name.toLowerCase().endsWith('.torrent'))) { showNotification('Vælg en .torrent-fil.'); return; }
-  if (fileMode && file.size > 4 * 1024 * 1024) { showNotification('Torrentfilen må højst være 4 MiB.'); return; }
+  if (fileMode && (!file || !file.name.toLowerCase().endsWith('.torrent'))) { showNotification(t("Choose a .torrent file.")); return; }
+  if (fileMode && file.size > 4 * 1024 * 1024) { showNotification(t("Torrent files must not exceed 4 MiB.")); return; }
   addingTorrent = true; const controls = [...addForm.elements, document.querySelector('#close-add')]; const disabledStates = controls.map(control => control.disabled); controls.forEach(control => { control.disabled = true; });
   try {
     let result;
     if (fileMode) {
       const response = await fetch(`/api/torrents/upload?filename=${encodeURIComponent(file.name)}&ratio=${ratio}${cleanupQuery}&start=${start}`, {method: 'POST', headers: {'Content-Type': 'application/x-bittorrent', 'X-MediaSeed-CSRF': csrf}, body: file});
-      result = await response.json(); if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Torrentfilen kunne ikke tilføjes.');
+      result = await response.json(); if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : t("The torrent file could not be added."));
     } else { result = await api('torrents', {url: addForm.elements.namedItem('url').value.trim(), ratio, start, ...(cleanup.mode === 'never' ? {} : {cleanup})}); }
-    addDialog.close(); showNotification((result.cleanupPending ? 'Torrent tilføjet på pause. Oprydningsreglen afventer klargøring; valgt start udføres derefter.' : result.startRequested ? (result.pending ? 'Magnetlink modtaget. Start er valgt; afventer metadata fra torrentnetværket.' : 'Torrent tilføjet. Start er anmodet gennem VPN.') : (result.pending ? 'Magnetlink modtaget på pause. Metadata afventer VPN.' : 'Torrent tilføjet på pause. Tryk Start, når du vil hente.')) + (result.webSourcesIgnored ? ' Ekstra webkilder i linket er udeladt; hash og trackere bruges.' : ''), 'success');
+    addDialog.close(); showNotification((result.cleanupPending ? t("Torrent added paused. The cleanup rule is awaiting preparation; your selected start will follow.") : result.startRequested ? (result.pending ? t("Magnet link received. Start selected; waiting for metadata from the torrent network.") : t("Torrent added. Start requested through VPN.")) : (result.pending ? t("Magnet link received paused. Metadata is waiting for VPN.") : t("Torrent added paused. Press Start when you want to download."))) + (result.webSourcesIgnored ? t(" Extra web sources in the link were omitted; the hash and trackers are used.") : ''), 'success');
     await refreshTorrents();
   } catch (error) { notify(error); }
   finally { addingTorrent = false; controls.forEach((control, index) => { control.disabled = disabledStates[index]; }); updateAddStart(); }
@@ -600,14 +605,21 @@ async function initializeLogin() {
     const status = await api('auth/status'); needsSetup = status.needsSetup;
     if (status.managed) {
       document.querySelector('#login').hidden = true;
-      try { const identity = await api('auth/me'); csrf = identity.csrf; appRole = identity.role || 'administrator'; showWorkspace(); }
+      try { const identity = await api('auth/me'); setLanguage(identity.language || 'en'); csrf = identity.csrf; appRole = identity.role || 'administrator'; showWorkspace(); }
       catch (error) { if (error.status === 401) location.replace(status.loginUrl); else notify(error); }
       return;
     }
-    document.querySelector('#identity-title').textContent = needsSetup ? 'En frisk begyndelse.' : 'Velkommen tilbage.';
-    document.querySelector('#identity-subtitle').textContent = needsSetup ? 'Opret din lokale MediaSeed-administrator.' : 'Log ind p\u00e5 MediaSeed.';
-    document.querySelector('#login-submit').textContent = needsSetup ? 'Opret administrator' : 'Log ind';
-    if (!needsSetup) { try { const identity = await api('auth/me'); csrf = identity.csrf; appRole = identity.role || 'administrator'; showWorkspace(); } catch {} }
+    document.querySelector('#identity-title').textContent = needsSetup ? t("A fresh start.") : t("Welcome back.");
+    document.querySelector('#identity-subtitle').textContent = needsSetup ? t("Create your local MediaSeed administrator.") : t("Sign in to MediaSeed.");
+    document.querySelector('#login-submit').textContent = needsSetup ? t("Create administrator") : t("Sign in");
+    if (!needsSetup) { try { const identity = await api('auth/me'); setLanguage(identity.language || 'en'); csrf = identity.csrf; appRole = identity.role || 'administrator'; showWorkspace(); } catch {} }
   } catch (error) { notify(error); }
 }
 void initializeLogin();
+
+const accountLanguage = document.querySelector('#account-language');
+if (accountLanguage) { accountLanguage.onchange = () => setLanguage(accountLanguage.value); setLanguage(accountLanguage.value || 'en'); }
+
+async function refreshAccountLanguage() { try { const identity = await api('auth/me'); setLanguage(identity.language || 'en'); } catch {} }
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshAccountLanguage(); });
+setInterval(() => { if (!document.hidden) void refreshAccountLanguage(); }, 60000);

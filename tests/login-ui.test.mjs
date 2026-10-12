@@ -25,7 +25,7 @@ for (const status of [401, 403, 503]) {
           : { detail: status === 401 ? 'Sign in required' : 'MediaHub unavailable or denied' },
       }),
     });
-    vm.runInContext(readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
+    vm.runInContext(readFileSync(new URL('../mediaseed/static/i18n.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
     await context.initializeLogin();
     assert.equal(find('#login').hidden, true);
     assert.equal(redirects.length > 0, status === 401);

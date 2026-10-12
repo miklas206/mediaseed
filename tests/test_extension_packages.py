@@ -32,7 +32,7 @@ def test_extension_packages_match_source_and_are_served(tmp_path):
                 assert "host_permissions" not in manifest
                 assert set(manifest["permissions"]) == {"storage", "contextMenus", "scripting", "activeTab"}
                 assert "externally_connectable" not in manifest
-                assert manifest["version"] == "1.2.1"
+                assert manifest["version"] == "1.2.2"
                 assert manifest["action"]["default_icon"] == manifest["icons"]
                 for size in (16, 32, 48, 128):
                     import struct
@@ -42,6 +42,6 @@ def test_extension_packages_match_source_and_are_served(tmp_path):
                 if browser == "chromium":
                     assert manifest["background"]["service_worker"] == "worker.js"
                 else:
-                    assert manifest["background"]["scripts"] == ["common.js", "bridge.js", "background.js"]
+                    assert manifest["background"]["scripts"] == ["i18n.js", "common.js", "bridge.js", "background.js"]
                 assert all(not x.startswith(("/", "..")) for x in archive.namelist())
                 assert archive.read("mediaseed.svg") == (root / "mediaseed" / "static" / "mediaseed.svg").read_text(encoding="utf-8").encode()

@@ -1,4 +1,3 @@
-/* Classic background script for Firefox/Safari; Chromium worker imports it. */
 const api = globalThis.browser || chrome;
 const MS = MediaSeedExtension;
 let busy = false;
@@ -14,14 +13,14 @@ async function pendingPut(item) {
 }
 async function pendingGet(id) {
   const value = temporary ? (await temporary.get(id))[id] : volatile.get(id);
-  if (!value || value.expires < Date.now()) throw Error('Tilføjelsen er udløbet. Vælg linket eller filen igen.');
+  if (!value || value.expires < Date.now()) throw Error(t("The addition expired. Choose the link or file again."));
   return value.item;
 }
 async function review(item) {
   const id = await pendingPut(item);
   await api.tabs.create({url: api.runtime.getURL('popup.html') + '?pending=' + id});
 }
-async function settings() { return {origin: '', sites: [], ...await api.storage.local.get(['origin', 'sites', 'defaults'])}; }
+async function settings() { return {origin: '', sites: [], language: 'da', ...await api.storage.local.get(['origin', 'sites', 'defaults', 'language'])}; }
 async function seedTab(origin) {
   const all = await api.tabs.query({});
   let tab = all.find(t => { try { return new URL(t.url).origin === origin; } catch { return false; } });
@@ -31,15 +30,15 @@ async function seedTab(origin) {
     if (current.status === 'complete') return current;
     await new Promise(resolve => setTimeout(resolve, 250));
   }
-  throw Error('MediaSeed svarer ikke. Åbn adressen og kontrollér forbindelsen/certifikatet.');
+  throw Error(t("MediaSeed is not responding. Open the address and check the connection/certificate."));
 }
 async function send(item) {
-  if (busy) throw Error('En tilføjelse er allerede i gang. Vent på svaret.');
+  if (busy) throw Error(t("An addition is already in progress. Wait for the response."));
   busy = true;
   try {
-    const config = await settings(), origin = MS.origin(config.origin);
-    if (!await api.permissions.contains({origins: [MS.pattern(origin)]})) throw Error('Gem MediaSeed-adressen og giv adgang først.');
-    if (!['check', 'magnet', 'file', 'link'].includes(item.kind)) throw Error('Ukendt kilde.');
+    const config = await settings(), origin = MS.origin(config.origin); setLanguage(config.language);
+    if (!await api.permissions.contains({origins: [MS.pattern(origin)]})) throw Error(t("Save the MediaSeed address and grant access first."));
+    if (!['check', 'magnet', 'file', 'link'].includes(item.kind)) throw Error(t("Unknown source."));
     const options = MS.defaults({...config.defaults, ...Object.fromEntries(['ratio', 'start', 'cleanup'].filter(k => item[k] !== undefined).map(k => [k, item[k]]))});
     item = {...item, ...options};
     if (item.kind === 'magnet') item.magnet = MS.magnet(item.magnet);
@@ -51,27 +50,28 @@ async function send(item) {
         const results = await api.scripting.executeScript({target: {tabId: source.id}, func: mediaSeedReadFile, args: [u.href]});
         data = results[0]?.result;
       } else {
-        if (!await api.permissions.contains({origins: [MS.pattern(u.origin)]})) throw Error('Giv adgang til torrentfilens hjemmeside via Tilføj-vinduet først.');
+        if (!await api.permissions.contains({origins: [MS.pattern(u.origin)]})) throw Error(t("Grant access to the torrent file's website in the Add window first."));
         data = await mediaSeedReadFile(u.href, false);
       }
-      if (!data) throw Error('Torrentfilen kunne ikke hentes.');
+      if (!data) throw Error(t("The torrent file could not be downloaded."));
       item = {...item, ...data, kind: 'file'};
     }
     if (item.kind === 'file') MS.file(item.name, MS.decode(item.base64));
     const tab = await seedTab(origin);
     const results = await api.scripting.executeScript({target: {tabId: tab.id}, func: mediaSeedBridge, args: [origin, item]});
     const result = results[0]?.result;
-    if (!result) throw Error('MediaSeed svarede ikke. Kontrollér listen før du prøver igen.');
+    if (!result) throw Error(t("MediaSeed did not respond. Check the list before trying again."));
     if (result.login) await api.tabs.update(tab.id, {active: true});
-    if (result.error) throw Error(result.error);
+    if (result.language) { setLanguage(result.language); await api.storage.local.set({language: result.language}); await api.contextMenus.update?.('mediaseed-add', {title: t('Add to MediaSeed')}); }
+    if (result.error) throw Error(t(result.error));
     return result;
   } finally { busy = false; }
 }
 function resultText(result) {
-  return result.cleanupPending ? 'Tilføjet på pause · oprydning klargøres før valgt start.' : result.pending ? 'Tilføjet · afventer metadata i MediaSeed.' : result.stopped ? 'Tilføjet på pause.' : 'Tilføjet · start anmodet i MediaSeed.';
+  return result.cleanupPending ? t("Added paused · preparing cleanup before the selected start.") : result.pending ? t("Added · waiting for metadata in MediaSeed.") : result.stopped ? t("Added paused.") : t("Added · start requested in MediaSeed.");
 }
 async function report(text, error = false) {
-  text = String(text).replace(/(?:https?:\/\/|magnet:\?)[^\s"'<>]+/gi, '[adresse]');
+  text = t(String(text)).replace(/(?:https?:\/\/|magnet:\?)[^\s"'<>]+/gi, '[adresse]');
   await api.storage.local.set({lastResult: {text, error, at: Date.now()}});
   await api.action?.setBadgeBackgroundColor({color: error ? '#b83e58' : '#147d65'});
   await api.action?.setBadgeText({text: error ? '!' : 'OK'});
@@ -84,7 +84,7 @@ async function direct(item, tab) {
     await api.action?.setBadgeText({text: '…'});
     result = await send(item);
   } catch (error) {
-    await report(error.message || 'Tilføjelsen mislykkedes.', true).catch(() => {});
+    await report(error.message || t("The addition failed."), true).catch(() => {});
     // Preserve the draft for a deliberate retry after setup/login; never retry POST.
     await review(item);
     return {error: error.message, reviewed: true};
@@ -101,8 +101,10 @@ async function inject(tab) {
   if (await api.permissions.contains({origins: [MS.pattern(origin)]})) await api.scripting.executeScript({target: {tabId: tab.id}, files: ['common.js', 'capture.js']});
 }
 api.tabs.onUpdated.addListener((id, info, tab) => { if (info.status === 'complete') inject(tab).catch(() => {}); });
-api.runtime.onInstalled.addListener(() => {
-  api.contextMenus.removeAll().then(() => api.contextMenus.create({id: 'mediaseed-add', title: 'Tilføj i MediaSeed', contexts: ['link']}));
+api.runtime.onInstalled.addListener(async () => {
+  const config = await settings(); setLanguage(config.language || 'da');
+  await api.contextMenus.removeAll();
+  api.contextMenus.create({id: 'mediaseed-add', title: t("Add to MediaSeed"), contexts: ['link']});
 });
 api.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId !== 'mediaseed-add') return;
@@ -115,15 +117,15 @@ async function handle(message, sender) {
   if (message?.type === 'capture') {
     const config = await settings();
     const source = new URL(sender.url).origin;
-    if (!sender.tab || sender.frameId !== 0 || source === config.origin || !config.sites.includes(source)) throw Error('Hjemmesiden er ikke aktiveret.');
-    if (!await api.permissions.contains({origins: [MS.pattern(source)]})) throw Error('Adgangen til hjemmesiden er fjernet.');
+    if (!sender.tab || sender.frameId !== 0 || source === config.origin || !config.sites.includes(source)) throw Error(t("This website is not enabled."));
+    if (!await api.permissions.contains({origins: [MS.pattern(source)]})) throw Error(t("Website access removed."));
     const item = message.url.startsWith('magnet:') ? {kind: 'magnet', magnet: MS.magnet(message.url)} : {kind: 'link', url: MS.webURL(message.url).href, sourceTab: sender.tab.id};
-    if (!MS.capturable(message.url, source)) throw Error('Kun torrentlinks kan fanges automatisk.');
+    if (!MS.capturable(message.url, source)) throw Error(t("Only torrent links can be captured automatically."));
     return await direct(item, sender.tab);
   }
   // Only our own extension pages may configure, read imports or send API requests.
-  if (sender.tab && !sender.url?.startsWith(api.runtime.getURL(''))) throw Error('Denne handling kræver udvidelsens eget vindue.');
-  if (!sender.url?.startsWith(api.runtime.getURL(''))) throw Error('Ukendt afsender.');
+  if (sender.tab && !sender.url?.startsWith(api.runtime.getURL(''))) throw Error(t("This action requires the extension's own window."));
+  if (!sender.url?.startsWith(api.runtime.getURL(''))) throw Error(t("Unknown sender."));
   if (message.type === 'pending') return {item: await pendingGet(message.id)};
   if (message.type === 'inject') { const tab = await api.tabs.get(message.tabId); await inject(tab); return {ok: true}; }
   if (message.type === 'send') {
@@ -132,8 +134,8 @@ async function handle(message, sender) {
     if (result.ok) await report(resultText(result)).catch(() => {});
     return result;
   }
-  throw Error('Ukendt handling.');
+  throw Error(t("Unknown action."));
 }
 api.runtime.onMessage.addListener((message, sender, respond) => {
-  handle(message, sender).then(respond, error => respond({error: error.message || 'Handlingen mislykkedes.'})); return true;
+  handle(message, sender).then(respond, error => respond({error: error.message || t("The action failed.")})); return true;
 });

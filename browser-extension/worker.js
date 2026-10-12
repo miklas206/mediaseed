@@ -1,1 +1,1 @@
-importScripts('common.js', 'bridge.js', 'background.js');
+importScripts('i18n.js', 'common.js', 'bridge.js', 'background.js');

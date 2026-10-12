@@ -7,13 +7,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT.parent / "mediaseed" / "static"
-FILES = ["common.js", "bridge.js", "background.js", "worker.js", "capture.js", "popup.js", "popup.html", "popup.css", "README.md"]
+FILES = ["i18n.js", "common.js", "bridge.js", "background.js", "worker.js", "capture.js", "popup.js", "popup.html", "popup.css", "README.md"]
 
 
 def package(browser):
     manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
     if browser != "chromium":
-        manifest["background"] = {"scripts": ["common.js", "bridge.js", "background.js"]}
+        manifest["background"] = {"scripts": ["i18n.js", "common.js", "bridge.js", "background.js"]}
     if browser == "firefox":
         manifest["browser_specific_settings"] = {"gecko": {
             "id": "mediaseed@mediahub.local", "strict_min_version": "140.0",
