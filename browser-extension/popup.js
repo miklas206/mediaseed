@@ -1,6 +1,19 @@
 const api = globalThis.browser || chrome, MS = MediaSeedExtension;
 const $ = id => document.getElementById(id);
 let selected = null, pending = new URL(location.href).searchParams.get('pending'), currentTab = null, adding = false;
+function cleanupPolicy() {
+  return {mode: $('cleanup-mode').value || 'never', hours: Number($('cleanup-hours').value || 49), ratio: Number($('cleanup-ratio').value || 1), delete_files: $('cleanup-action').value === 'files'};
+}
+function updateCleanup() {
+  const {mode, delete_files: files} = cleanupPolicy(), active = mode !== 'never';
+  $('cleanup-options').hidden = !active;
+  for (const [key, show] of [['hours', ['time', 'both', 'either'].includes(mode)], ['ratio', ['ratio', 'both', 'either'].includes(mode)]]) {
+    $('cleanup-' + key + '-field').hidden = !show; $('cleanup-' + key).disabled = !show;
+  }
+  $('cleanup-action').disabled = !active; $('cleanup-warning').hidden = !active || !files;
+  $('ratio').disabled = active; const label = $('ratio').closest?.('label'); if (label) label.hidden = active;
+}
+$('cleanup-mode').onchange = updateCleanup; $('cleanup-action').onchange = updateCleanup; updateCleanup();
 function status(text, error = false) { $('status').textContent = text; $('status').dataset.error = String(error); }
 async function message(value) { const result = await api.runtime.sendMessage(value); if (result?.error) throw Error(result.error); return result; }
 async function permission(origin) { if (!await api.permissions.request({origins: [MS.pattern(origin)]})) throw Error('Browseradgang blev ikke givet.'); }
@@ -38,13 +51,16 @@ $('add').onsubmit = async e => {
   try {
     let item = selected?.kind === 'file' || selected?.kind === 'link' ? {...selected} : {kind: 'magnet', magnet: MS.magnet($('magnet').value)};
     item.ratio = MS.ratio($('ratio').value); item.start = e.submitter?.value === 'start';
+    const cleanup = cleanupPolicy();
+    if (cleanup.mode !== 'never') item.cleanup = cleanup;
     adding = true; controls = [...document.querySelectorAll('button')]; controls.forEach(b => {b.disabled = true;});
     // Request only the specific source host, during this explicit user gesture.
     if (item.kind === 'link') await permission(MS.webURL(item.url).origin);
     status('Sender til MediaSeed…');
     const result = await message({type: 'send', item, pending});
-    status(result.pending ? 'Tilføjet · afventer torrentmetadata i MediaSeed.' : result.stopped ? 'Tilføjet på pause.' : 'Tilføjet · start anmodet. Følg fremdriften i MediaSeed.');
+    status(result.cleanupPending ? 'Tilføjet på pause · oprydningsreglen afventer klargøring. Valgt start udføres derefter.' : result.pending ? 'Tilføjet · afventer torrentmetadata i MediaSeed.' : result.stopped ? 'Tilføjet på pause.' : 'Tilføjet · start anmodet. Følg fremdriften i MediaSeed.');
     showItem(null); $('file').value = ''; pending = null;
+    $('cleanup-mode').value = 'never'; updateCleanup();
   } catch (err) { status(err.message, true); }
   finally { adding = false; controls?.forEach(b => {b.disabled = false;}); $('enable').disabled = !currentTab; }
 };

@@ -308,7 +308,19 @@ function detailTable(title, columns, rows) {
 async function showDetails(row) {
   selectedHash = row.hash; document.querySelector('#detail-name').textContent = row.name; document.querySelector('#detail-message').textContent = ''; const target = document.querySelector('#detail-data'); target.replaceChildren(element('p', 'Henter detaljer…'));
   document.querySelector('#policy-form input').value = Number(row.ratio_limit) >= 1 ? row.ratio_limit : 1; dialog.showModal();
-  try { const details = await api(`torrents/${row.hash}/details`); target.replaceChildren(element('p', `Downloadet ${bytes(details.properties.total_downloaded)} · Uploadet ${bytes(details.properties.total_uploaded)} · Seeding ${(Number(details.properties.seeding_time || 0) / 3600).toFixed(1)} timer`)); target.append(detailTable('Filer', [['name', 'Navn'], ['size', 'Bytes'], ['progress', 'Fremdrift']], details.files), detailTable('Trackere', [['host', 'Tracker'], ['status', 'Status'], ['num_peers', 'Peers']], details.trackers), detailTable('Peers', [['ip', 'IP'], ['client', 'Klient'], ['progress', 'Fremdrift']], details.peers)); try { const benefits = await api(`torrents/${row.hash}/benefits`); if (benefits.status === 'matched') { const flags = [benefits.freeleech === null ? null : `Freeleech ${benefits.freeleech} %`, benefits.doubleUpload ? 'Dobbelt upload' : null, benefits.featured ? 'Featured' : null, benefits.internal ? 'Internal' : null, benefits.refundable ? 'Refunderbar' : null].filter(Boolean); target.append(element('h3', 'Trackerfordele'), element('p', `${benefits.tracker} · Præcist hash-match · ${flags.join(' · ') || 'Ingen bekræftede fordele'}`, 'muted')); } } catch {} } catch (error) { target.replaceChildren(element('p', error.message)); }
+  try { const details = await api(`torrents/${row.hash}/details`); target.replaceChildren(element('p', `Downloadet ${bytes(details.properties.total_downloaded)} · Uploadet ${bytes(details.properties.total_uploaded)} · Seeding ${(Number(details.properties.seeding_time || 0) / 3600).toFixed(1)} timer`)); target.append(detailTable('Filer', [['name', 'Navn'], ['size', 'Bytes'], ['progress', 'Fremdrift']], details.files), detailTable('Trackere', [['host', 'Tracker'], ['status', 'Status'], ['num_peers', 'Peers']], details.trackers), detailTable('Peers', [['ip', 'IP'], ['client', 'Klient'], ['progress', 'Fremdrift']], details.peers)); renderCleanupDetails(details.cleanup, row, target); document.querySelector('#policy-form').hidden = appRole === 'viewer' || (details.cleanup?.mode && details.cleanup.mode !== 'never'); try { const benefits = await api(`torrents/${row.hash}/benefits`); if (benefits.status === 'matched') { const flags = [benefits.freeleech === null ? null : `Freeleech ${benefits.freeleech} %`, benefits.doubleUpload ? 'Dobbelt upload' : null, benefits.featured ? 'Featured' : null, benefits.internal ? 'Internal' : null, benefits.refundable ? 'Refunderbar' : null].filter(Boolean); target.append(element('h3', 'Trackerfordele'), element('p', `${benefits.tracker} · Præcist hash-match · ${flags.join(' · ') || 'Ingen bekræftede fordele'}`, 'muted')); } } catch {} } catch (error) { target.replaceChildren(element('p', error.message)); }
+}
+function renderCleanupDetails(policy = {mode: 'never'}, row, target) {
+  target.append(element('h3', 'Automatisk oprydning'));
+  if (policy.mode === 'never') { target.append(element('p', 'Slået fra · torrent og filer bevares.', 'muted')); return; }
+  const goals = {time: `${policy.hours} timers aktiv seeding`, ratio: `uploadratio ${policy.ratio}`, both: `${policy.hours} timers aktiv seeding OG ratio ${policy.ratio}`, either: `${policy.hours} timers aktiv seeding ELLER ratio ${policy.ratio}`};
+  const state = {waiting: 'Afventer klargøring; torrenten holdes på pause', preparing: 'Klargøring blev afbrudt; kontrollér torrenten eller slå reglen fra', active: 'Overvåges · venter på målet og på tilsluttede downloadere', identity_mismatch: 'Oprydning blokeret: torrentens identitet kunne ikke bekræftes'};
+  target.append(element('p', `${policy.delete_files ? 'Fjern torrent og filer' : 'Fjern kun torrent · behold filer'} efter ${goals[policy.mode]}.`), element('p', policy.observationFailed ? 'Statuskontrol fejlede · oprydning afventer en ny, gyldig måling.' : state[policy.status] || 'Afventer kontrol', 'muted'));
+  if (appRole !== 'viewer') {
+    const cancel = element('button', 'Slå automatisk oprydning fra');
+    cancel.onclick = async () => { cancel.disabled = true; try { const result = await api(`torrents/${row.hash}/cleanup/cancel`, {}); showNotification(result.stopLimitsRestored === false ? 'Oprydning slået fra. Stopmålet kunne ikke gendannes; indstil det under Detaljer, når klienten er klar.' : 'Automatisk oprydning slået fra. Torrent og filer bevares.', 'success'); await showDetails(row); } catch (error) {notify(error); cancel.disabled = false;} };
+    target.append(cancel);
+  }
 }
 async function loadSources(kind) {
   const rows = await api(kind); const target = document.querySelector(kind === 'feeds' ? '#feed-list' : '#tracker-list'); target.replaceChildren(); if (!rows.length) target.append(element('p', kind === 'feeds' ? 'Ingen feeds' : 'Ingen konti', 'muted'));
@@ -365,6 +377,24 @@ const fileInput = document.querySelector('#add-file');
 const fileField = document.querySelector('#file-field');
 let droppedTorrent = null;
 let addingTorrent = false;
+function addCleanupPolicy() {
+  return {mode: document.querySelector('#add-cleanup-mode').value || 'never', hours: Number(document.querySelector('#add-cleanup-hours').value || 49), ratio: Number(document.querySelector('#add-cleanup-ratio').value || 1), delete_files: document.querySelector('#add-cleanup-action').value === 'files'};
+}
+function updateCleanupFields() {
+  const {mode, delete_files: files} = addCleanupPolicy(), active = mode !== 'never';
+  document.querySelector('#add-cleanup-options').hidden = !active;
+  for (const [key, visible] of [['hours', ['time', 'both', 'either'].includes(mode)], ['ratio', ['ratio', 'both', 'either'].includes(mode)]]) {
+    document.querySelector(`#add-cleanup-${key}-field`).hidden = !visible;
+    document.querySelector(`#add-cleanup-${key}`).disabled = !visible;
+  }
+  document.querySelector('#add-cleanup-action').disabled = !active;
+  document.querySelector('#add-cleanup-warning').hidden = !active || !files;
+  document.querySelector('#add-seeding-help').textContent = active ? 'Den valgte oprydningsregel styrer seedingmålet. Vælg start nu eller tilføj på pause. Start kræver verificeret VPN.' : 'Vælg start nu eller tilføj på pause. Start kræver verificeret VPN. Stopmål: valgt ratio eller 49 timers seeding; torrent og filer bevares.';
+  const stop = addForm.elements.namedItem('ratio'); stop.disabled = active;
+  const label = stop.closest?.('label'); if (label) label.hidden = active;
+}
+document.querySelector('#add-cleanup-mode').onchange = updateCleanupFields;
+document.querySelector('#add-cleanup-action').onchange = updateCleanupFields;
 function setAddMode() {
   const fileMode = addForm.elements.namedItem('mode').value === 'file';
   document.querySelector('#magnet-field').hidden = fileMode; fileField.hidden = !fileMode;
@@ -381,6 +411,7 @@ function openAdd() {
   showNotification(''); addForm.reset(); droppedTorrent = null;
   document.querySelector('#file-name').textContent = ''; setAddMode();
   updateAddStart();
+  updateCleanupFields();
   addDialog.append(document.querySelector('.notifications')); addDialog.showModal();
 }
 document.querySelector('#new-torrent').onclick = openAdd;
@@ -430,6 +461,8 @@ addForm.onsubmit = async event => {
   event.preventDefault(); if (addingTorrent) return;
   const fileMode = addForm.elements.namedItem('mode').value === 'file'; const ratio = Number(addForm.elements.namedItem('ratio').value);
   const start = event.submitter?.value === 'start';
+  const cleanup = addCleanupPolicy();
+  const cleanupQuery = cleanup.mode === 'never' ? '' : `&cleanup_mode=${cleanup.mode}&cleanup_hours=${cleanup.hours}&cleanup_ratio=${cleanup.ratio}&cleanup_delete_files=${cleanup.delete_files}`;
   const file = droppedTorrent || fileInput.files[0];
   if (fileMode && (!file || !file.name.toLowerCase().endsWith('.torrent'))) { showNotification('Vælg en .torrent-fil.'); return; }
   if (fileMode && file.size > 4 * 1024 * 1024) { showNotification('Torrentfilen må højst være 4 MiB.'); return; }
@@ -437,10 +470,10 @@ addForm.onsubmit = async event => {
   try {
     let result;
     if (fileMode) {
-      const response = await fetch(`/api/torrents/upload?filename=${encodeURIComponent(file.name)}&ratio=${ratio}&start=${start}`, {method: 'POST', headers: {'Content-Type': 'application/x-bittorrent', 'X-MediaSeed-CSRF': csrf}, body: file});
+      const response = await fetch(`/api/torrents/upload?filename=${encodeURIComponent(file.name)}&ratio=${ratio}${cleanupQuery}&start=${start}`, {method: 'POST', headers: {'Content-Type': 'application/x-bittorrent', 'X-MediaSeed-CSRF': csrf}, body: file});
       result = await response.json(); if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Torrentfilen kunne ikke tilføjes.');
-    } else { result = await api('torrents', {url: addForm.elements.namedItem('url').value.trim(), ratio, start}); }
-    addDialog.close(); showNotification((result.startRequested ? (result.pending ? 'Magnetlink modtaget. Start er valgt; afventer metadata fra torrentnetværket.' : 'Torrent tilføjet. Start er anmodet gennem VPN.') : (result.pending ? 'Magnetlink modtaget på pause. Metadata afventer VPN.' : 'Torrent tilføjet på pause. Tryk Start, når du vil hente.')) + (result.webSourcesIgnored ? ' Ekstra webkilder i linket er udeladt; hash og trackere bruges.' : ''), 'success');
+    } else { result = await api('torrents', {url: addForm.elements.namedItem('url').value.trim(), ratio, start, ...(cleanup.mode === 'never' ? {} : {cleanup})}); }
+    addDialog.close(); showNotification((result.cleanupPending ? 'Torrent tilføjet på pause. Oprydningsreglen afventer klargøring; valgt start udføres derefter.' : result.startRequested ? (result.pending ? 'Magnetlink modtaget. Start er valgt; afventer metadata fra torrentnetværket.' : 'Torrent tilføjet. Start er anmodet gennem VPN.') : (result.pending ? 'Magnetlink modtaget på pause. Metadata afventer VPN.' : 'Torrent tilføjet på pause. Tryk Start, når du vil hente.')) + (result.webSourcesIgnored ? ' Ekstra webkilder i linket er udeladt; hash og trackere bruges.' : ''), 'success');
     await refreshTorrents();
   } catch (error) { notify(error); }
   finally { addingTorrent = false; controls.forEach((control, index) => { control.disabled = disabledStates[index]; }); updateAddStart(); }

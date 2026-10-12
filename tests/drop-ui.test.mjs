@@ -3,6 +3,23 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+test('cleanup choices expose the correct goals and send file-removal intent explicitly', async () => {
+  const {find, drag, form, uploads} = setup();
+  drag('drop', [torrent('Cleanup.torrent')]);
+  find('#add-cleanup-mode').value = 'both'; find('#add-cleanup-hours').value = '12';
+  find('#add-cleanup-ratio').value = '3'; find('#add-cleanup-action').value = 'files';
+  find('#add-cleanup-mode').onchange();
+  assert.equal(find('#add-cleanup-hours-field').hidden, false);
+  assert.equal(find('#add-cleanup-ratio-field').hidden, false);
+  assert.equal(find('#add-cleanup-warning').hidden, false);
+  await form.onsubmit({preventDefault() {}, submitter: {value: 'pause'}});
+  const params = new URL(uploads[0].url, 'https://synthetic.example').searchParams;
+  assert.equal(params.get('cleanup_mode'), 'both'); assert.equal(params.get('cleanup_hours'), '12');
+  assert.equal(params.get('cleanup_ratio'), '3'); assert.equal(params.get('cleanup_delete_files'), 'true');
+  find('#add-cleanup-mode').value = 'never'; find('#add-cleanup-mode').onchange();
+  assert.equal(find('#add-cleanup-options').hidden, true);
+});
+
 function setup() {
   const nodes = new Map(), listeners = new Map(), uploads = [];
   const create = () => {

@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from mediaseed.cleanup import CleanupManager, CleanupPolicy
 from mediaseed.features import add_stopped, install_features, queue_summary
 
 COOKIE = "mediaseed_session"
@@ -40,6 +41,7 @@ class Magnet(BaseModel):
     url: str = Field(min_length=20, max_length=8192)
     ratio: float = Field(default=1, ge=1, le=1000, allow_inf_nan=False)
     start: bool = False
+    cleanup: CleanupPolicy = Field(default_factory=CleanupPolicy)
 
     @field_validator("url")
     @classmethod
@@ -206,7 +208,9 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @asynccontextmanager
     async def lifespan(app):
-        workers = [asyncio.create_task(background()), asyncio.create_task(reconcile_disconnect())] if vpn_url else []
+        workers = [asyncio.create_task(cleanup.run())]
+        if vpn_url:
+            workers += [asyncio.create_task(background()), asyncio.create_task(reconcile_disconnect())]
         yield
         for worker in workers:
             worker.cancel()
@@ -314,7 +318,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             if selection["provider"] != "mediavpn" or selection["disconnect_pending"]:
                 raise HTTPException(409, "VÃ¦lg MediaVPN under VPN i MediaSeed fÃ¸rst. Downloads er blokeret.")
             if files:
-                query = urlencode({"ratio": float(payload.get("ratioLimit", 1)), "savepath": payload.get("savepath", "/downloads"), "category": payload.get("category", ""), "start": "true" if payload.get("stopped") == "false" else "false"})
+                query = urlencode({"ratio": float(payload.get("ratioLimit", 1)), "savepath": payload.get("savepath", "/downloads"), "category": payload.get("category", ""), "start": "true" if payload.get("stopped") == "false" else "false", "tags": payload.get("tags", "")})
                 result = await vpn_request("upload?" + query, "POST", content=files["torrents"][1])
             else:
                 result = await vpn_request("rpc", "POST", {"path": path.removeprefix("/api/v2/"), "method": method, "payload": payload or {}})
@@ -479,13 +483,13 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         ignored = any(key in params for key in ("xs", "as", "ws"))
         # Keep the info hash and trackers without allowing arbitrary HTTP file fetches.
         magnet = "magnet:?" + urlencode({key: value for key, value in params.items() if key not in {"xs", "as", "ws"}}, doseq=True) if ignored else body.url
-        result = await add_stopped(qbit, body.ratio, magnet=magnet, start=body.start, vpn_status=vpn_status)
+        result = await cleanup.add(add_stopped, body.cleanup, body.ratio, magnet=magnet, start=body.start, vpn_status=vpn_status)
         if ignored:
             result["webSourcesIgnored"] = True
         return result
 
     @app.post("/api/torrents/upload")
-    async def upload(request: Request, filename: str = Query(min_length=1, max_length=255), ratio: float = Query(default=1, ge=1, le=1000, allow_inf_nan=False), start: bool = Query(default=False), session=Depends(authorized)):
+    async def upload(request: Request, filename: str = Query(min_length=1, max_length=255), ratio: float = Query(default=1, ge=1, le=1000, allow_inf_nan=False), start: bool = Query(default=False), cleanup_mode: Literal["never", "time", "ratio", "both", "either"] = "never", cleanup_hours: float = Query(default=49, ge=1/60, le=87600, allow_inf_nan=False), cleanup_ratio: float = Query(default=1, ge=1, le=1000, allow_inf_nan=False), cleanup_delete_files: bool = False, session=Depends(authorized)):
         if not filename.lower().endswith(".torrent"):
             raise HTTPException(422, "Choose a .torrent file")
         if request.headers.get("content-type", "").split(";")[0] not in {"application/x-bittorrent", "application/octet-stream"}:
@@ -497,7 +501,8 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
                 raise HTTPException(413, "Torrent file exceeds 4 MiB")
         if not content.startswith(b"d") or not content.endswith(b"e"):
             raise HTTPException(422, "Invalid torrent file")
-        return await add_stopped(qbit, ratio, content=bytes(content), start=start, vpn_status=vpn_status)
+        policy = CleanupPolicy(mode=cleanup_mode, hours=cleanup_hours, ratio=cleanup_ratio, delete_files=cleanup_delete_files)
+        return await cleanup.add(add_stopped, policy, ratio, content=bytes(content), start=start, vpn_status=vpn_status)
 
     @app.post("/api/torrents/{action}")
     async def action(action: str, body: TorrentAction, session=Depends(authorized)):
@@ -517,7 +522,10 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             except (ValueError, AttributeError, TypeError):
                 raise HTTPException(503, "Cannot verify seeding progress") from None
         path = "delete" if action == "remove" else "stop"
-        await qbit("/api/v2/torrents/" + path, "POST", {"hashes": body.torrent_hash, "deleteFiles": "true" if action == "remove" and body.delete_files else "false"})
+        async with cleanup.lock:
+            await qbit("/api/v2/torrents/" + path, "POST", {"hashes": body.torrent_hash, "deleteFiles": "true" if action == "remove" and body.delete_files else "false"})
+            if action == "remove":
+                cleanup.forget(body.torrent_hash)
         return {"accepted": True} if action == "remove" else {"completed": True}
 
     @app.get("/api/torrents/{torrent_hash}/presence")
@@ -533,7 +541,15 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         except (ValueError, TypeError):
             raise HTTPException(503, "Cannot verify torrent removal") from None
 
-    background = install_features(app, authorized, database, qbit, vpn_status=vpn_status, data_dir=data)
+    cleanup = CleanupManager(database, qbit, vpn_status)
+
+    @app.post("/api/torrents/{identifier}/cleanup/cancel")
+    async def cancel_cleanup(identifier: str, session=Depends(authorized)):
+        if not re.fullmatch(r"[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", identifier):
+            raise HTTPException(422, "Invalid torrent hash")
+        return await cleanup.cancel(identifier.lower())
+
+    background = install_features(app, authorized, database, qbit, vpn_status=vpn_status, data_dir=data, cleanup=cleanup)
 
     @app.get("/")
     def home():

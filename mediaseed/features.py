@@ -74,11 +74,13 @@ def queue_summary(torrents):
     return {"limit": 8, "active": len(active), "waiting": waiting, "rssActive": rss, "manualActive": len(active) - rss, "boundedView": len(torrents) >= 500}
 
 
-async def add_stopped(qbit, ratio, content=None, magnet=None, start=False, vpn_status=None):
+async def add_stopped(qbit, ratio, content=None, magnet=None, start=False, vpn_status=None, tag=None):
     if start and (vpn_status is None or not (await vpn_status()).get("downloadsEnabled")):
         raise HTTPException(409, "Starting requires a verified VPN. Choose add on pause instead.")
     paused = "false" if start else "true"
-    payload = {"stopped": paused, "paused": paused, "savepath": "/downloads", "ratioLimit": str(ratio), "seedingTimeLimit": "2940"}
+    payload = {"stopped": paused, "paused": paused, "savepath": "/downloads", "ratioLimit": str(ratio), "seedingTimeLimit": "2940", "shareLimitAction": "Stop"}
+    if tag:
+        payload["tags"] = tag
     files = None
     if magnet is not None:
         payload["urls"] = magnet
@@ -104,7 +106,7 @@ async def add_stopped(qbit, ratio, content=None, magnet=None, start=False, vpn_s
 
 
 
-def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=None):
+def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=None, cleanup=None):
     tracker_cache = {}
     tracker_lock = asyncio.Lock()
     with database() as connection:
@@ -274,11 +276,14 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
             "files": [{key: row.get(key) for key in ("index", "name", "size", "progress", "priority")} for row in files[:1000]],
             "trackers": [{"host": urlsplit(row.get("url", "")).hostname or "DHT / PeX / LSD", "status": row.get("status"), "num_peers": row.get("num_peers")} for row in trackers[:100]],
             "peers": [{key: row.get(key) for key in ("ip", "port", "client", "progress", "dl_speed", "up_speed")} for row in list(peers.get("peers", {}).values())[:200]],
+            "cleanup": cleanup.public(identifier) if cleanup else {"mode": "never"},
         }
 
     @app.post("/api/torrents/{identifier}/policy")
     async def policy(identifier: str, body: SeedingPolicy, session=Depends(authorized)):
-        await qbit("/api/v2/torrents/setShareLimits", "POST", {"hashes": torrent_hash(identifier), "ratioLimit": str(body.ratio), "seedingTimeLimit": "2940", "inactiveSeedingTimeLimit": "-1"})
+        if cleanup and cleanup.public(identifier)["mode"] != "never":
+            raise HTTPException(409, "Cancel automatic cleanup before changing the stop ratio")
+        await qbit("/api/v2/torrents/setShareLimits", "POST", {"hashes": torrent_hash(identifier), "ratioLimit": str(body.ratio), "seedingTimeLimit": "2940", "inactiveSeedingTimeLimit": "-1", "shareLimitAction": "Stop"})
         return {"saved": True, "ratio": body.ratio, "seedingMinutes": 2940}
 
     @app.get("/api/feeds")

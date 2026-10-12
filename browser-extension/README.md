@@ -1,4 +1,4 @@
-# MediaSeed browserudvidelse 1.0.0
+# MediaSeed browserudvidelse 1.1.0
 
 Send et magnetlink eller en `.torrent`-fil til din egen MediaSeed. Udvidelsen bruger dit normale login i en MediaSeed-fane og gemmer ingen adgangskoder, sessionscookies eller CSRF-nøgler. Ingen analytics eller eksterne tjenester. Den sender kun den fil/det link, du selv vælger, til din konfigurerede MediaSeed.
 
@@ -20,6 +20,8 @@ Hent pakken fra **Browserudvidelse** øverst i MediaSeed. Siden foreslår en pak
 Hjemmesider med særlige downloadflows, omdirigeringer eller filadresser uden `.torrent` kan kræve, at du henter filen normalt først. Det gælder også private tracker-links, der ikke kan hentes i deres egen fanes login-session. Ingen automatisk gentagelse af POST ved timeout: kontrollér MediaSeed-listen før et nyt forsøg. Magnetmetadata kan være forsinket i torrentnetværket.
 
 ## Data og tilladelser
+
+Ved tilføjelse kan **Automatisk oprydning** vælges: aldrig, seedingtid, uploadratio, begge eller ét af målene. Vælg separat, om kun torrenten eller også filerne skal fjernes. Standard er aldrig. Reglen gemmes i MediaSeed og kan slås fra under Detaljer; browseren behøver ikke forblive åben. MediaSeed skal køre for at udføre oprydningen. Eksisterende udvidelser skal genindlæses/opdateres til 1.1.0 for at vise felterne.
 
 Kun MediaSeed-adressen og listen over aktiverede hjemmesider gemmes varigt lokalt. Browseren giver adgang til de enkelte hosts, når du beder om det; hosttilladelser gælder alle porte på samme host, mens udvidelsen selv kræver MediaSeeds præcise origin. Importer til gennemgang gemmes midlertidigt i browserens sessionlager (eller hukommelse, hvor sessionlager mangler), læses kun af udvidelsen og udløber efter ti minutter. Torrentlinket kan indeholde private tracker-parametre. Linkfangst sender ikke noget til MediaSeed, før du vælger en tilføjelsesknap. **Slå fra** stopper fangst; hostadgang kan også fjernes i browserens tilladelsesindstillinger.
 

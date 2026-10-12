@@ -37,7 +37,7 @@ Independent seedbox application for MediaHub, inspired by FjordSeed's separate-a
 - Automatic tracker poster lookup for exact infohash matches. Only approved TMDB image hosts are fetched without tracker credentials. Authenticated local cache: 2 MiB/image, 64 MiB total, 24-hour refresh and seven-day cleanup. Missing/mismatched posters do not produce guessed artwork.
 - Torrent details show fresh exact-hash tracker benefit evidence (freeleech, double upload, featured/internal/refundable) when supplied by NordicBytes. Evidence expires after five minutes; it does not invent Green-credit or tracker-accounted ratio.
 
-Remaining FjordSeed parity includes selected-badge RSS filters, durable Green-credit accounting, detailed benefit/ratio previews, opt-in automatic file deletion/archive, generic tracker support and generic installation/SSO provisioning. TCP relay and country/profile-generation UI remain MediaVPN follow-ups. These features are not implemented by this release.
+Remaining FjordSeed parity includes selected-badge RSS filters, durable Green-credit accounting, detailed benefit/ratio previews, verified archive moves, generic tracker support and generic installation/SSO provisioning. TCP relay and country/profile-generation UI remain MediaVPN follow-ups. These features are not implemented by this release.
 
 In managed SSO mode, opening MediaSeed automatically starts MediaHub login when
 the app session is missing. An active session at the configured hub origin logs
@@ -113,3 +113,5 @@ The opt-in scripts `tests/verify_runtime.py` and `tests/verify_rss_runtime.py` r
 `pytest tests -q` tests independent setup/login/logout, CSRF, host/origin rejection, filtered torrent reads, invalid hashes and the disabled start gate. Real VPN operation, Compose build and full feature parity are not covered by these tests.
 
 See [FjordSeed feature checklist](docs/fjordseed-feature-checklist.md) for the explicit remaining scope. Browser checks cover source creation/editing, masked credentials, search, torrent details and responsive layouts with synthetic data; no real VPN or tracker account was contacted.
+
+Automatic cleanup for new manual imports is documented in [automatic-cleanup.md](docs/automatic-cleanup.md). It defaults off and supports time, ratio, both/either goals, torrent-only removal or explicit file deletion, and cancellation under Details.

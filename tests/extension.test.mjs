@@ -41,6 +41,14 @@ test('bridge uses same-origin session and fresh CSRF; auth never returned', asyn
   await c.mediaSeedBridge('https://seed.example', {kind: 'file', name: 'test.torrent', base64: btoa('de'), ratio: 1, start: false});
   assert.equal(requests[1].path, '/api/torrents/upload?filename=test.torrent&ratio=1&start=false');
   assert.deepEqual([...requests[1].options.body], [100, 101]);
+  requests.length = 0;
+  const cleanup = {mode: 'both', hours: 24, ratio: 2, delete_files: true};
+  await c.mediaSeedBridge('https://seed.example', {kind: 'magnet', magnet: sample, ratio: 1, start: false, cleanup});
+  assert.deepEqual(JSON.parse(requests[1].options.body).cleanup, cleanup);
+  requests.length = 0;
+  await c.mediaSeedBridge('https://seed.example', {kind: 'file', name: 'test.torrent', base64: btoa('de'), ratio: 1, start: false, cleanup});
+  const query = new URL(requests[1].path, 'https://synthetic.example').searchParams;
+  assert.equal(query.get('cleanup_mode'), 'both'); assert.equal(query.get('cleanup_delete_files'), 'true');
 });
 test('bridge refuses changed origin, expired login, viewer and unverified VPN; no POST retries', async () => {
   let calls = 0;
