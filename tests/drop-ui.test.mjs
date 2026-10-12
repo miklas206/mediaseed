@@ -31,12 +31,14 @@ function setup() {
   });
   vm.runInContext(readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
   context.refresh = async () => {};
+  const refreshTorrents = context.refreshTorrents;
+  context.refreshTorrents = async () => {};
   function drag(type, files = [], types = ['Files']) {
     const event = {dataTransfer: {types, files}, prevented: false, preventDefault() {this.prevented = true;}};
     for (const fn of listeners.get(type) || []) fn(event);
     return event;
   }
-  return {find, body, context, drag, uploads, form, ratio, mode};
+  return {find, body, context, drag, uploads, form, ratio, mode, refreshTorrents};
 }
 const torrent = (name = 'Sintel.torrent', size = 100) => ({name, size});
 
@@ -82,4 +84,27 @@ test('signed-out, viewer and busy states block file drops and browser navigation
     assert.equal(drag('drop', [torrent()]).prevented, true);
     assert.ok(!find('#add-torrent').open);
   }
+});
+
+test('addition refreshes the list during a busy status poll and ignores an older list response', async () => {
+  const {find, context, drag, form, refreshTorrents} = setup();
+  // Exercise the actual list loader, keeping the other status endpoints pending.
+  context.refreshTorrents = refreshTorrents;
+  const pending = [];
+  context.api = async path => {
+    assert.equal(path, 'torrents');
+    return new Promise(resolve => pending.push(resolve));
+  };
+  context.renderTorrents = () => {};
+  vm.runInContext('refreshing = true', context);
+  const oldRequest = context.refreshTorrents();
+  drag('drop', [torrent()]);
+  const submission = form.onsubmit({preventDefault() {}});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(find('#add-torrent').open, false);
+  assert.equal(pending.length, 2, 'addition must request a fresh list even while polling');
+  pending[1]([{hash: 'a'.repeat(40), name: 'New torrent'}]);
+  await submission;
+  pending[0]([]); await oldRequest;
+  assert.equal(vm.runInContext('torrents[0].name', context), 'New torrent');
 });
