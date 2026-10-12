@@ -95,6 +95,14 @@ th { color: var(--muted); font-weight: 550; }
 .input-mode input { width: 16px; min-height: 16px; margin: 0; accent-color: var(--accent); }
 .file-drop { padding: 16px; border: 1px dashed var(--line); border-radius: 6px; overflow-wrap: anywhere; }
 .file-drop.dragging { border-color: var(--accent); background: var(--accent-bg); }
+body.torrent-dragging::after {
+  content: "Slip din torrentfil her for at åbne Tilføj torrent";
+  position: fixed; inset: 16px; z-index: 100; pointer-events: none;
+  display: grid; place-items: center; padding: 24px; text-align: center;
+  color: var(--accent); background: var(--surface); opacity: .96;
+  border: 2px dashed var(--accent); border-radius: 12px;
+  font-size: clamp(18px, 3vw, 26px); font-weight: 600;
+}
 .file-drop input { padding: 8px; }
 @media(max-width: 540px) { .downloads-heading { align-items: flex-start; flex-direction: column; } .downloads-heading .actions { width: 100%; } }
 dt { color: var(--muted); margin-top: 24px; }

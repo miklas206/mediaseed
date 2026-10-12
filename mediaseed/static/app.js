@@ -321,7 +321,13 @@ function setAddMode() {
   fileInput.disabled = !fileMode; fileInput.required = fileMode && !droppedTorrent;
 }
 for (const radio of addForm.querySelectorAll('[name="mode"]')) radio.onchange = setAddMode;
-document.querySelector('#new-torrent').onclick = () => { showNotification(''); addForm.reset(); droppedTorrent = null; document.querySelector('#file-name').textContent = ''; setAddMode(); addDialog.append(document.querySelector('.notifications')); addDialog.showModal(); };
+function openAdd() {
+  if (addDialog.open) return;
+  showNotification(''); addForm.reset(); droppedTorrent = null;
+  document.querySelector('#file-name').textContent = ''; setAddMode();
+  addDialog.append(document.querySelector('.notifications')); addDialog.showModal();
+}
+document.querySelector('#new-torrent').onclick = openAdd;
 addDialog.addEventListener('close', () => { document.body.append(document.querySelector('.notifications')); });
 function closeAdd() { if (!addingTorrent) addDialog.close(); }
 document.querySelector('#close-add').onclick = closeAdd; document.querySelector('#cancel-add').onclick = closeAdd;
@@ -329,7 +335,41 @@ addDialog.addEventListener('cancel', event => { if (addingTorrent) event.prevent
 fileInput.onchange = () => { droppedTorrent = null; document.querySelector('#file-name').textContent = fileInput.files[0]?.name || ''; setAddMode(); };
 fileField.ondragover = event => { event.preventDefault(); if (!addingTorrent) fileField.classList.add('dragging'); };
 fileField.ondragleave = () => fileField.classList.remove('dragging');
-fileField.ondrop = event => { event.preventDefault(); fileField.classList.remove('dragging'); if (addingTorrent) return; if (event.dataTransfer.files.length !== 1) { showNotification('Vælg én torrentfil.'); return; } droppedTorrent = event.dataTransfer.files[0]; fileInput.value = ''; document.querySelector('#file-name').textContent = droppedTorrent.name; setAddMode(); };
+function canDropTorrent() { return document.body.classList.contains('signed-in') && appRole !== 'viewer' && !addingTorrent; }
+function isFileDrag(event) { return Array.from(event.dataTransfer?.types || []).includes('Files') || event.dataTransfer?.files?.length > 0; }
+let fileDragDepth = 0;
+function clearFileDrag() {
+  fileDragDepth = 0; document.body.classList.remove('torrent-dragging'); fileField.classList.remove('dragging');
+}
+document.addEventListener('dragenter', event => {
+  if (!isFileDrag(event)) return;
+  event.preventDefault(); fileDragDepth++;
+  if (canDropTorrent()) document.body.classList.add('torrent-dragging');
+});
+document.addEventListener('dragover', event => {
+  if (!isFileDrag(event)) return;
+  event.preventDefault(); event.dataTransfer.dropEffect = canDropTorrent() ? 'copy' : 'none';
+});
+document.addEventListener('dragleave', event => {
+  if (!isFileDrag(event)) return;
+  if (--fileDragDepth <= 0) clearFileDrag();
+});
+document.addEventListener('dragend', clearFileDrag);
+document.addEventListener('visibilitychange', () => { if (document.hidden) clearFileDrag(); });
+document.addEventListener('drop', event => {
+  if (!isFileDrag(event)) return;
+  event.preventDefault(); clearFileDrag();
+  if (!canDropTorrent()) return;
+  const files = event.dataTransfer.files;
+  if (files.length !== 1) { showNotification('Vælg én torrentfil.'); return; }
+  const file = files[0];
+  if (!file.name.toLowerCase().endsWith('.torrent')) { showNotification('Vælg en .torrent-fil.'); return; }
+  if (file.size > 4 * 1024 * 1024) { showNotification('Torrentfilen må højst være 4 MiB.'); return; }
+  openAdd();
+  addForm.querySelector('[name="mode"][value="file"]').checked = true;
+  droppedTorrent = file; fileInput.value = '';
+  document.querySelector('#file-name').textContent = file.name; setAddMode();
+});
 addForm.onsubmit = async event => {
   event.preventDefault(); if (addingTorrent) return;
   const fileMode = addForm.elements.namedItem('mode').value === 'file'; const ratio = Number(addForm.elements.namedItem('ratio').value);
