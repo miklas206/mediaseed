@@ -16,6 +16,14 @@ Country comes from MediaVPN's provider geofeed match for the current public IP;
 missing location is unknown, never guessed from profile names or generic GeoIP.
 Country geolocation does not prove physical location.
 
+The signed-in page polls `/api/dashboard` every five seconds. A single bounded
+torrent read supplies the list, traffic and queue counters alongside fresh VPN
+status. Client version refreshes in the background every five minutes and local
+storage every minute. Slow auxiliary reads cannot hold up the dashboard, and
+failed client reads remain distinct from an empty torrent list. Action checks
+and VPN readiness are never cached; additions, start and stop refresh the list
+directly, with stale list responses prevented from overwriting a newer result.
+
 Independent seedbox application for MediaHub, inspired by FjordSeed's separate-app model. This repository is an early preview, not a replacement for the existing Seedbox installation.
 
 ## Implemented

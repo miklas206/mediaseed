@@ -67,6 +67,13 @@ class TrackerSettings(BaseModel):
     api_key: str = Field(default="", max_length=512)
 
 
+def queue_summary(torrents):
+    active = [row for row in torrents if isinstance(row, dict) and row.get("state") in {"downloading", "stalledDL", "metaDL", "forcedDL"}]
+    waiting = sum(isinstance(row, dict) and row.get("state") == "queuedDL" for row in torrents)
+    rss = sum(str(row.get("category", "")).startswith("MediaSeed-RSS-") for row in active)
+    return {"limit": 8, "active": len(active), "waiting": waiting, "rssActive": rss, "manualActive": len(active) - rss, "boundedView": len(torrents) >= 500}
+
+
 async def add_stopped(qbit, ratio, content=None, magnet=None, start=False, vpn_status=None):
     if start and (vpn_status is None or not (await vpn_status()).get("downloadsEnabled")):
         raise HTTPException(409, "Starting requires a verified VPN. Choose add on pause instead.")
@@ -243,10 +250,7 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         torrents = await read_json("/api/v2/torrents/info", {"limit": 500})
         if not isinstance(torrents, list):
             raise HTTPException(503, "Invalid queue response")
-        active = [row for row in torrents if isinstance(row, dict) and row.get("state") in {"downloading", "stalledDL", "metaDL", "forcedDL"}]
-        waiting = sum(isinstance(row, dict) and row.get("state") == "queuedDL" for row in torrents)
-        rss = sum(str(row.get("category", "")).startswith("MediaSeed-RSS-") for row in active)
-        return {"limit": 8, "active": len(active), "waiting": waiting, "rssActive": rss, "manualActive": len(active) - rss, "boundedView": len(torrents) >= 500}
+        return queue_summary(torrents)
 
     @app.get("/api/runtime")
     async def runtime(session=Depends(authorized)):

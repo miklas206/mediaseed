@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from mediaseed.features import add_stopped, install_features
+from mediaseed.features import add_stopped, install_features, queue_summary
 
 COOKIE = "mediaseed_session"
 HASHER = PasswordHasher()
@@ -436,8 +436,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
                 await disconnect_vpn()
         return await vpn_status(discover=True)
 
-    @app.get("/api/torrents")
-    async def torrents(session=Depends(authorized)):
+    async def read_torrents():
         response = await qbit("/api/v2/torrents/info", payload={"limit": 500})
         allowed = {"hash", "name", "progress", "state", "dlspeed", "upspeed", "ratio", "eta", "size", "seeding_time", "ratio_limit", "category", "num_seeds", "num_leechs", "downloaded", "uploaded"}
         try:
@@ -456,6 +455,23 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             return result
         except (ValueError, AttributeError):
             raise HTTPException(503, "Invalid torrent client response") from None
+
+    @app.get("/api/torrents")
+    async def torrents(session=Depends(authorized)):
+        return await read_torrents()
+
+    @app.get("/api/dashboard")
+    async def dashboard(session=Depends(authorized)):
+        async def snapshot():
+            try:
+                return await read_torrents()
+            except HTTPException:
+                return None
+
+        # One authorized request and one bounded torrent read for list, queue and traffic.
+        # VPN evidence remains fresh; no readiness or action results are cached.
+        observed, rows = await asyncio.gather(vpn_status(), snapshot())
+        return {"runtime": observed, "torrents": rows, "queue": queue_summary(rows) if rows is not None else None}
 
     @app.post("/api/torrents")
     async def add(body: Magnet, session=Depends(authorized)):

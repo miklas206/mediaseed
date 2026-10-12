@@ -30,6 +30,7 @@ function setup() {
     },
   });
   vm.runInContext(readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
+  const refresh = context.refresh;
   context.refresh = async () => {};
   const refreshTorrents = context.refreshTorrents;
   context.refreshTorrents = async () => {};
@@ -38,7 +39,7 @@ function setup() {
     for (const fn of listeners.get(type) || []) fn(event);
     return event;
   }
-  return {find, body, context, drag, uploads, form, ratio, mode, refreshTorrents};
+  return {find, body, context, drag, uploads, form, ratio, mode, refreshTorrents, refresh};
 }
 const torrent = (name = 'Sintel.torrent', size = 100) => ({name, size});
 
@@ -120,4 +121,29 @@ test('addition refreshes the list during a busy status poll and ignores an older
   await submission;
   pending[0]([]); await oldRequest;
   assert.equal(vm.runInContext('torrents[0].name', context), 'New torrent');
+});
+
+test('dashboard renders in one request without waiting for slow auxiliary data or fetching the list twice', async () => {
+  const {find, context, refresh} = setup();
+  const requests = [];
+  find('#filter').value = find('#source-filter').value = 'all'; find('#sort').value = 'name';
+  context.api = async path => {
+    requests.push(path);
+    if (path !== 'dashboard') return new Promise(() => {});
+    return {runtime: {provider: 'mediavpn', ready: true, downloadsEnabled: true, checkedAt: Date.now()/1000},
+      torrents: [{hash: 'a'.repeat(40), name: 'Synthetic', dlspeed: 4096, upspeed: 0}],
+      queue: {active: 1, limit: 8, waiting: 0, rssActive: 0, manualActive: 1}};
+  };
+  await refresh();
+  assert.equal(find('#connection-flow').dataset.download, 'true');
+  assert.match(find('#queue-status').textContent, /1\/8/);
+  assert.match(find('#count').textContent, /1 af 1/);
+  assert.deepEqual(requests, ['dashboard', 'client', 'storage']);
+  await refresh();
+  assert.deepEqual(requests, ['dashboard', 'client', 'storage', 'dashboard']);
+  context.api = async () => {throw new Error('unavailable');};
+  await refresh();
+  assert.equal(find('#connection-flow').dataset.state, 'unknown');
+  assert.equal(find('#connection-flow').dataset.download, 'false');
+  assert.equal(vm.runInContext('refreshing', context), false);
 });

@@ -6,6 +6,9 @@ let downloadsEnabled = false;
 let refreshing = false;
 let torrentListRequest = 0;
 let clientLabel = 'qBittorrent';
+let torrentSnapshotValid = false;
+let clientRefreshAt = 0;
+let storageRefreshAt = 0;
 const pendingRemovals = new Map();
 let appRole = 'administrator';
 let vpnDraft = false;
@@ -46,7 +49,7 @@ async function torrentAction(row, action, deleteFiles = false) {
   if (action === 'remove') {
     pendingRemovals.set(row.hash, {confirmed: false});
     renderTorrents();
-  } else await refresh();
+  } else await refreshTorrents();
   return true;
 }
 async function confirmRemoval(row) {
@@ -118,31 +121,57 @@ function renderTransferSummary() {
   const traffic = torrentTraffic();
   document.querySelector('#transfer').textContent = traffic ? `${clientLabel} · Download ${bytes(traffic.dl_info_speed)}/s · Upload ${bytes(traffic.up_info_speed)}/s · ${downloadsEnabled ? 'VPN verificeret' : 'Downloads blokeret indtil VPN er verificeret'}${torrents.length === 500 ? ' · Trafik for de 500 viste torrents' : ''}` : `${clientLabel} · afventer trafikmåling`;
 }
-async function refreshTorrents() {
-  const request = ++torrentListRequest;
-  try {
-    const rows = await api('torrents');
-    if (request !== torrentListRequest) return;
+function applyTorrentSnapshot(rows, request) {
+  if (request !== torrentListRequest) return;
+  torrentSnapshotValid = Array.isArray(rows);
+  if (torrentSnapshotValid) {
     torrents = rows;
     for (const [hash, removal] of pendingRemovals) if (removal.confirmed && !torrents.some(row => row.hash === hash)) pendingRemovals.delete(hash);
     renderTorrents();
     renderTraffic(torrentTraffic()); renderTransferSummary();
-  } catch (error) {
-    if (request !== torrentListRequest) return;
+  } else {
     torrents = []; renderTorrents(); document.querySelector('#count').textContent = 'Torrentklient utilgængelig';
     renderTraffic(); document.querySelector('#transfer').textContent = 'Torrentklient utilgængelig · afventer trafikmåling';
   }
 }
+async function refreshTorrents() {
+  const request = ++torrentListRequest;
+  try { applyTorrentSnapshot(await api('torrents'), request); }
+  catch { applyTorrentSnapshot(null, request); }
+}
+async function refreshAuxiliary() {
+  const tasks = [];
+  if (Date.now() >= clientRefreshAt) {
+    clientRefreshAt = Date.now() + 300000;
+    tasks.push((async () => {
+      try { const client = await api('client'); clientLabel = `${client.name} ${client.version}`; }
+      catch { clientLabel = 'qBittorrent'; clientRefreshAt = Date.now() + 30000; }
+      if (torrentSnapshotValid) renderTransferSummary();
+    })());
+  }
+  if (Date.now() >= storageRefreshAt) {
+    storageRefreshAt = Date.now() + 60000;
+    tasks.push((async () => {
+      const storage = document.querySelector('#storage'); storage.hidden = false;
+      try { const capacity = await api('storage'); storage.textContent = `Lokal storage: ${bytes(capacity.freeBytes)} ledig af ${bytes(capacity.totalBytes)}${capacity.lowSpace ? ' · Lav diskplads' : ''}${capacity.writable ? '' : ' · Ikke skrivbar'}`; }
+      catch { storage.textContent = 'Lokal storage utilgængelig'; storageRefreshAt = Date.now() + 30000; }
+    })());
+  }
+  await Promise.allSettled(tasks);
+}
 async function refresh() {
   if (refreshing) return; refreshing = true;
-  try { const runtime = await api('runtime'); downloadsEnabled = runtime.downloadsEnabled === true; renderConnection(runtime); } catch { downloadsEnabled = false; renderConnection({unavailable: true}); }
-  updateAddStart();
-  await refreshTorrents();
-  try { const client = await api('client'); clientLabel = `${client.name} ${client.version}`; } catch { clientLabel = 'qBittorrent'; }
-  try { const queue = await api('queue'); document.querySelector('#queue-status').textContent = `Kø: ${queue.active}/${queue.limit} aktive · ${queue.waiting} ventende · RSS ${queue.rssActive} · Manuelle ${queue.manualActive}${queue.boundedView ? ' · Begrænset til 500 torrents' : ''}`; } catch { document.querySelector('#queue-status').textContent = 'Køstatus utilgængelig'; }
-  const storage = document.querySelector('#storage'); storage.hidden = false;
-  try { const capacity = await api('storage'); storage.textContent = `Lokal storage: ${bytes(capacity.freeBytes)} ledig af ${bytes(capacity.totalBytes)}${capacity.lowSpace ? ' · Lav diskplads' : ''}${capacity.writable ? '' : ' · Ikke skrivbar'}`; } catch { storage.textContent = 'Lokal storage utilgængelig'; }
-  refreshing = false;
+  const request = ++torrentListRequest;
+  try {
+    const snapshot = await api('dashboard');
+    downloadsEnabled = snapshot.runtime.downloadsEnabled === true; renderConnection(snapshot.runtime);
+    applyTorrentSnapshot(snapshot.torrents, request);
+    const queue = snapshot.queue;
+    if (request === torrentListRequest) document.querySelector('#queue-status').textContent = queue ? `Kø: ${queue.active}/${queue.limit} aktive · ${queue.waiting} ventende · RSS ${queue.rssActive} · Manuelle ${queue.manualActive}${queue.boundedView ? ' · Begrænset til 500 torrents' : ''}` : 'Køstatus utilgængelig';
+  } catch {
+    downloadsEnabled = false; renderConnection({unavailable: true}); applyTorrentSnapshot(null, request);
+    document.querySelector('#queue-status').textContent = 'Køstatus utilgængelig';
+  } finally { updateAddStart(); refreshing = false; void refreshAuxiliary(); }
 }
 
 function countryFlag(country) {
@@ -417,7 +446,7 @@ addForm.onsubmit = async event => {
   finally { addingTorrent = false; controls.forEach((control, index) => { control.disabled = disabledStates[index]; }); updateAddStart(); }
 };
 document.querySelector('#logout').onclick = async () => { try { await api('auth/logout', {}); location.reload(); } catch (error) { notify(error); } };
-setInterval(() => { if (!document.hidden && document.body.classList.contains('signed-in')) { if (!document.querySelector('#vpn').hidden) refreshVpn().catch(() => {}); if (!document.querySelector('#feeds').hidden) loadSources('feeds').catch(() => {}); refresh(); } }, 10000);
+setInterval(() => { if (!document.hidden && document.body.classList.contains('signed-in')) { if (!document.querySelector('#vpn').hidden) refreshVpn().catch(() => {}); if (!document.querySelector('#feeds').hidden) loadSources('feeds').catch(() => {}); refresh(); } }, 5000);
 async function initializeLogin() {
   try {
     const status = await api('auth/status'); needsSetup = status.needsSetup;
