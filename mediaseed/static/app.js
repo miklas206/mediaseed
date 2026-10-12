@@ -361,16 +361,70 @@ function renderCleanupDetails(policy = {mode: 'never'}, row, target) {
     target.append(cancel);
   }
 }
+function trackerNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('da-DK', {maximumFractionDigits: 2}) : '—';
+}
+function trackerBytes(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  let amount = Math.abs(value), index = 0;
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+  while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index++; }
+  return `${value < 0 ? '−' : ''}${amount.toLocaleString('da-DK', {maximumFractionDigits: index ? 2 : 0})} ${units[index]}`;
+}
+function trackerCard(row) {
+  const card = element('article', undefined, 'source-row tracker-card');
+  const head = element('div', undefined, 'tracker-card-heading');
+  const identity = element('div');
+  identity.append(element('h3', row.name), element('p', `NordicBytes${row.username ? ` · ${row.username}` : ''}`, 'muted'));
+  const available = row.status === 'ok' && row.stats && typeof row.stats === 'object';
+  head.append(identity, element('span', available ? 'Forbundet' : 'Kontodata utilgængelige', `tracker-state${available ? ' ready' : ''}`));
+  card.append(head);
+  if (available) {
+    const stats = element('dl', undefined, 'tracker-stats');
+    for (const [label, field, format] of [
+      ['Ratio', 'ratio', trackerNumber], ['Upload', 'uploaded', trackerBytes], ['Download', 'downloaded', trackerBytes],
+      ['Buffer', 'buffer', trackerBytes], ['Seeder', 'seeding', trackerNumber], ['Downloader', 'leeching', trackerNumber],
+      ['Shards / bonus', 'seedbonus', trackerNumber], ['Seeding-størrelse', 'seeding_size', trackerBytes],
+      ['Udgivelser', 'total_uploads', trackerNumber], ['Hit-and-runs', 'hit_and_runs', trackerNumber], ['Advarsler', 'warnings', trackerNumber],
+    ]) {
+      const metric = element('div', undefined, 'tracker-metric');
+      metric.append(element('dt', label), element('dd', format(row.stats[field])));
+      if (['hit_and_runs', 'warnings'].includes(field) && Number.isFinite(row.stats[field]) && row.stats[field] > 0) metric.classList.add('attention');
+      stats.append(metric);
+    }
+    card.append(stats);
+    const checked = new Date(row.checkedAt * 1000);
+    card.append(element('p', Number.isFinite(checked.getTime()) ? `Hentet ${checked.toLocaleString('da-DK', {dateStyle: 'short', timeStyle: 'short'})} · Kontrolleres automatisk hvert 5. minut` : 'Tidspunkt for kontotal er ukendt', 'tracker-updated muted'));
+  } else {
+    card.append(element('p', 'Kontotallene kunne ikke hentes. Kontrollér API-nøglens adgang under Trackere. MediaSeed prøver igen automatisk.', 'muted'));
+  }
+  return card;
+}
+function renderTrackerOverview(rows) {
+  document.querySelector('#tracker-overview').hidden = !rows.length;
+  document.querySelector('#tracker-account-list').replaceChildren(...rows.map(trackerCard));
+}
+let trackerOverviewLoading = false;
+async function refreshTrackerOverview() {
+  if (appRole === 'viewer' || trackerOverviewLoading) return;
+  trackerOverviewLoading = true;
+  try { renderTrackerOverview(await api('trackers')); }
+  catch { document.querySelector('#tracker-account-list').replaceChildren(element('p', 'Trackerstatistik kunne ikke hentes. Prøver igen automatisk.', 'muted')); }
+  finally { trackerOverviewLoading = false; }
+}
 async function loadSources(kind) {
   const rows = await api(kind); const target = document.querySelector(kind === 'feeds' ? '#feed-list' : '#tracker-list'); target.replaceChildren(); if (!rows.length) target.append(element('p', kind === 'feeds' ? 'Ingen feeds' : 'Ingen konti', 'muted'));
   if (kind === 'trackers') {
+    renderTrackerOverview(rows);
     const select = document.querySelector('#tracker-account'); const previous = select.value; select.replaceChildren(element('option', 'Vælg konto')); select.firstChild.value = '';
     for (const row of rows) { const option = element('option', row.name); option.value = row.id; select.append(option); }
     select.value = rows.some(row => row.id === previous) ? previous : rows.length === 1 ? rows[0].id : '';
     document.querySelector('#tracker-search-submit').disabled = !rows.length;
   }
   for (const row of rows) {
-    const item = element('article', undefined, 'source-row'); item.append(element('h2', row.name), element('p', kind === 'feeds' ? `${row.folder || '/downloads'} · Ratio ${row.ratio} · ${row.paused ? 'Pauset' : 'Aktiv'} · ${row.status || ''}` : row.status === 'ok' ? `NordicBytes · ${row.username || ''} · Ratio ${row.stats.ratio ?? '?'} · Upload ${bytes(row.stats.uploaded)} · Download ${bytes(row.stats.downloaded)} · Bonus ${row.stats.seedbonus ?? '?'} · Advarsler ${row.stats.warnings ?? '?'}` : 'NordicBytes · Kontodata utilgængelige', 'muted')); const actions = element('div', undefined, 'actions');
+    const item = kind === 'trackers' ? trackerCard(row) : element('article', undefined, 'source-row');
+    if (kind === 'feeds') item.append(element('h2', row.name), element('p', `${row.folder || '/downloads'} · Ratio ${row.ratio} · ${row.paused ? 'Pauset' : 'Aktiv'} · ${row.status || ''}`, 'muted'));
+    const actions = element('div', undefined, 'actions');
     if (appRole === 'administrator') {
       if (kind === 'feeds') actions.append(command(row.paused ? 'Aktivér' : 'Pause', async () => { await api(`feeds/${row.id}/state`, {enabled: row.paused}, 'PUT'); await loadSources('feeds'); showNotification(row.paused ? 'Feed aktiveret gennem VPN.' : 'Feed sat på pause. Eksisterende torrents bevares.', 'success'); }));
       actions.append(command('Rediger', () => { const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); form.reset(); for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } form.querySelector('input[name="name"]').focus(); }), command('Fjern', async () => { if (!confirm(`Fjern ${row.name}? Filer og torrents bevares.`)) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); }));
@@ -407,7 +461,8 @@ for (const button of document.querySelectorAll('[data-view]')) button.onclick = 
 document.querySelector('#close-details').onclick = () => dialog.close();
 document.querySelector('#policy-form').onsubmit = async event => { event.preventDefault(); try { await api(`torrents/${selectedHash}/policy`, {ratio: Number(event.target.elements.namedItem('ratio').value)}); document.querySelector('#detail-message').textContent = 'Seedingmål gemt'; } catch (error) { document.querySelector('#detail-message').textContent = error.message; } };
 for (const selector of ['#search', '#filter', '#sort', '#source-filter']) document.querySelector(selector).addEventListener('input', renderTorrents);
-function showWorkspace() { document.body.classList.add('signed-in'); document.querySelector('#identity').hidden = true; document.querySelector('#workspace').hidden = false; document.querySelector('#logout').hidden = false; document.querySelector('#new-torrent').hidden = appRole === 'viewer'; document.querySelector('#policy-form').hidden = appRole === 'viewer'; for (const selector of ['#feed-form', '#tracker-form', '#vpn-form']) document.querySelector(selector).hidden = appRole !== 'administrator'; for (const selector of ['[data-view="feeds"]', '[data-view="trackers"]']) document.querySelector(selector).hidden = appRole === 'viewer'; refresh(); }
+document.querySelector('#manage-trackers').onclick = () => document.querySelector('[data-view="trackers"]').click();
+function showWorkspace() { void refreshTrackerOverview(); document.body.classList.add('signed-in'); document.querySelector('#identity').hidden = true; document.querySelector('#workspace').hidden = false; document.querySelector('#logout').hidden = false; document.querySelector('#new-torrent').hidden = appRole === 'viewer'; document.querySelector('#policy-form').hidden = appRole === 'viewer'; for (const selector of ['#feed-form', '#tracker-form', '#vpn-form']) document.querySelector(selector).hidden = appRole !== 'administrator'; for (const selector of ['[data-view="feeds"]', '[data-view="trackers"]']) document.querySelector(selector).hidden = appRole === 'viewer'; refresh(); }
 document.querySelector('#login').onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(event.target)); try { if (needsSetup) { await api('auth/setup', body); needsSetup = false; } csrf = (await api('auth/login', body)).csrf; event.target.reset(); showWorkspace(); } catch (error) { notify(error); } };
 document.querySelector('#refresh').onclick = refresh;
 const addDialog = document.querySelector('#add-torrent');
@@ -519,6 +574,7 @@ addForm.onsubmit = async event => {
 };
 document.querySelector('#logout').onclick = async () => { try { await api('auth/logout', {}); location.reload(); } catch (error) { notify(error); } };
 setInterval(() => { if (!document.hidden && document.body.classList.contains('signed-in')) { if (!document.querySelector('#vpn').hidden) refreshVpn().catch(() => {}); if (!document.querySelector('#feeds').hidden) loadSources('feeds').catch(() => {}); refresh(); } }, 5000);
+setInterval(() => { if (!document.hidden && document.body.classList.contains('signed-in')) { if (!document.querySelector('#trackers').hidden) loadSources('trackers').catch(() => {}); else if (!document.querySelector('#downloads').hidden) void refreshTrackerOverview(); } }, 60000);
 async function initializeLogin() {
   try {
     const status = await api('auth/status'); needsSetup = status.needsSetup;

@@ -332,7 +332,7 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
                         for field in ("uploaded", "downloaded", "ratio", "buffer", "seeding", "leeching", "seedbonus", "hit_and_runs", "seeding_size", "total_uploads"):
                             value = data["stats"].get(field)
                             stats[field] = value if type(value) in (int, float) and math.isfinite(value) else None
-                        warnings = data["stats"].get("warnings", {})
+                        warnings = data["stats"].get("warnings")
                         stats["warnings"] = sum(value for key, value in warnings.items() if key in {"hnr", "manual"} and type(value) is int and value >= 0) if isinstance(warnings, dict) else None
                         public = {"status": "ok", "stats": stats, "username": str(data.get("username", ""))[:80], "checkedAt": time.time()}
                     except (HTTPException, ValueError, TypeError):

@@ -78,6 +78,29 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); }
 .settings-form { max-width: 680px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 28px 0 36px; }
 .settings-form .actions { grid-column: 1 / -1; }
 .source-row { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 20px; margin: 14px 0; }
+#tracker-overview { margin-bottom: 32px; }
+#tracker-overview h2 { font-size: 18px; }
+.tracker-explanation, .tracker-updated { font-size: 12px; line-height: 1.6; }
+.tracker-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.tracker-card-heading > div { min-width: 0; }
+.tracker-card h3 { font-size: 16px; margin: 0; overflow-wrap: anywhere; }
+.tracker-card-heading p { margin: 6px 0 0; font-size: 12px; overflow-wrap: anywhere; }
+.tracker-state { font-size: 11px; border: 1px solid var(--line); border-radius: 20px; padding: 5px 9px; color: var(--muted); }
+.tracker-state.ready { color: var(--healthy); background: var(--healthy-bg); border-color: color-mix(in srgb, var(--healthy) 30%, var(--line)); }
+.tracker-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 18px 0 12px; gap: 0; }
+.tracker-metric { min-width: 0; padding: 14px 12px 14px 0; border-top: 1px solid var(--line); }
+.tracker-metric dt { color: var(--muted); font-size: 12px; margin: 0; }
+.tracker-metric dd { margin: 7px 0 0; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.tracker-metric:first-child dd { color: var(--accent); }
+.tracker-metric.attention dd { color: var(--danger); }
+.tracker-updated { margin: 12px 0 0; }
+.tracker-card .actions { margin-top: 18px; }
+@media (max-width: 600px) {
+  .tracker-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tracker-card { padding: 16px; }
+  .tracker-metric dd { font-size: 18px; }
+  #tracker-overview > .heading { flex-wrap: wrap; }
+}
 dialog { background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 14px; width: min(800px, calc(100% - 24px)); max-height: calc(100dvh - 48px); padding: 28px; box-shadow: var(--shadow-overlay); }
 dialog::backdrop { background: #080d15b3; }
 dialog h2 { font-size: 20px; }

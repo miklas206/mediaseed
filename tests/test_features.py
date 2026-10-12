@@ -258,6 +258,20 @@ def test_tracker_statistics_are_bounded_private_and_cached(tmp_path, monkeypatch
         assert len(requests) == 2
 
 
+def test_missing_tracker_warnings_are_unknown_not_zero(tmp_path, monkeypatch):
+    from mediaseed import features
+    original = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"stats": {"ratio": 0, "downloaded": 0}}))
+    monkeypatch.setattr(features.httpx, "AsyncClient", lambda **kwargs: original(**kwargs, transport=transport))
+    with TestClient(create_app(tmp_path, "http://testserver")) as client:
+        sign_in(client)
+        client.post("/api/trackers", json={"name": "Test", "api_key": "synthetic-key"})
+        stats = client.get("/api/trackers").json()[0]["stats"]
+        assert stats["warnings"] is None
+        assert stats["uploaded"] is None
+        assert stats["ratio"] == 0
+
+
 def test_mediavpn_proxy_requires_fresh_readiness_for_start(tmp_path, monkeypatch):
     import base64
     import json
