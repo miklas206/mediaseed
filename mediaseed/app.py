@@ -477,6 +477,18 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         observed, rows = await asyncio.gather(vpn_status(), snapshot())
         return {"runtime": observed, "torrents": rows, "queue": queue_summary(rows) if rows is not None else None}
 
+    @app.get("/api/hub/overview")
+    async def hub_overview(request: Request):
+        scheme, _, token = request.headers.get("Authorization", "").partition(" ")
+        if not hub_url or scheme.lower() != "bearer" or not 40 <= len(token) <= 128:
+            raise HTTPException(401, "MediaHub overview authorization required")
+        identity = await hub_request("session?packageId=org.mediahub.mediaseed", token=token)
+        if identity.get("scope") != "overview" or identity.get("role") not in {"administrator", "user", "viewer"}:
+            raise HTTPException(403, "MediaHub overview access denied")
+        snapshot = await dashboard(session=identity)
+        observed = snapshot["runtime"]
+        return {"checkedAt": time.time(), "ready": bool(observed.get("downloadsEnabled")), "country": observed.get("country"), "torrents": snapshot["torrents"], "queue": snapshot["queue"], "trackers": app.state.tracker_overview()}
+
     @app.post("/api/torrents")
     async def add(body: Magnet, session=Depends(authorized)):
         params = parse_qs(urlsplit(body.url).query, keep_blank_values=True, max_num_fields=100)

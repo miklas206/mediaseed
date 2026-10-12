@@ -373,4 +373,15 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
                 pass
             await asyncio.sleep(15)
 
+    def tracker_overview():
+        # Overview must not fetch third-party APIs or expose credentials/URLs.
+        result = []
+        for account in rows("trackers")[:10]:
+            cached = tracker_cache.get(account["id"])
+            fresh = cached and cached["key"] == account["api_key"] and time.monotonic() - cached["checked"] < 360
+            public = cached["public"] if fresh else {}
+            result.append({"name": account["name"], "status": public.get("status", "pending"), "stats": public.get("stats"), "checkedAt": public.get("checkedAt")})
+        return result
+
+    app.state.tracker_overview = tracker_overview
     return background

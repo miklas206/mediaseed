@@ -115,3 +115,5 @@ The opt-in scripts `tests/verify_runtime.py` and `tests/verify_rss_runtime.py` r
 See [FjordSeed feature checklist](docs/fjordseed-feature-checklist.md) for the explicit remaining scope. Browser checks cover source creation/editing, masked credentials, search, torrent details and responsive layouts with synthetic data; no real VPN or tracker account was contacted.
 
 Automatic cleanup for new manual imports is documented in [automatic-cleanup.md](docs/automatic-cleanup.md). It defaults off and supports time, ratio, both/either goals, torrent-only removal or explicit file deletion, and cancellation under Details.
+
+Managed MediaHub Overview uses `GET /api/hub/overview` with a short-lived, package-bound SSO bearer scoped to `overview`. It rechecks hub session and app role, returns the existing bounded dashboard snapshot and cached tracker statistics, and never fetches tracker APIs on demand. API keys, account URLs and usernames are excluded. The bearer does not create an app login or authorize torrent changes.
