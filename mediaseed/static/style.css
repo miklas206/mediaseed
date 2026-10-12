@@ -103,3 +103,30 @@ footer { position: fixed; bottom: 0; width: 100%; min-height: 42px; display: fle
 .footer-version { margin-left: 5px; }
 @media(max-width: 540px) { .topbar { padding: 14px 16px; gap: 10px; } .topbar .brand { gap: 8px; } .topbar .brand strong { font-size: 20px; } .topbar .beta-badge { display: none; } .signed-in .app-main { padding: 22px 16px 96px; } .login-screen { padding: 24px 16px 96px; } .login-panel { padding: 28px 24px; } .login-panel .brand { margin-bottom: 32px; } .toolbar, .settings-form { grid-template-columns: 1fr; } dialog { padding: 20px; } nav { gap: 4px; } nav button { padding: 8px 10px; min-width: 64px; } footer { padding: 10px 16px; } .torrent { padding: 16px; } }
 @media(prefers-reduced-motion: reduce) { button { transition: none; } }
+
+.connection-flow { margin-bottom: 24px; padding: 20px 24px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.connection-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px 24px; flex-wrap: wrap; }
+.connection-title { color: var(--muted); font-size: 12px; }
+#connection-status { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+#connection-status::before { content: ''; width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--muted); }
+.connection-route { display: grid; grid-template-columns: minmax(70px, 1fr) minmax(16px, 1fr) minmax(90px, 1fr) minmax(16px, 1fr) minmax(70px, 1fr); align-items: start; margin: 22px auto; max-width: 650px; }
+.connection-node { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; text-align: center; }
+.connection-node strong { font-size: 13px; }
+.connection-node > span:last-child { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.connection-icon { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 4px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); font-size: 25px; }
+.connection-icon svg { width: 25px; height: 25px; }
+.connection-link { position: relative; height: 2px; margin-top: 22px; background: var(--line); overflow: visible; }
+.connection-link i { position: absolute; top: -2px; left: 0; width: 6px; height: 6px; border-radius: 50%; opacity: 0; background: var(--healthy); }
+.connection-details { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px 20px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.connection-note { text-align: center; margin: 10px 0 0; font-size: 11px; color: var(--muted); }
+.connection-flow[data-state="active"] { border-color: color-mix(in srgb, var(--healthy) 35%, var(--line)); }
+.connection-flow[data-state="active"] #connection-status { color: var(--healthy); }
+.connection-flow[data-state="active"] #connection-status::before { background: var(--healthy); box-shadow: 0 0 0 4px var(--healthy-bg); }
+.connection-flow[data-state="active"] .connection-vpn .connection-icon { color: var(--healthy); border-color: var(--healthy); background: var(--healthy-bg); }
+.connection-flow[data-state="active"] .connection-link i { animation: connection-travel 2.4s linear infinite; }
+.connection-flow[data-state="active"] .connection-link i:nth-child(2) { animation-delay: -1.2s; }
+.connection-flow[data-state="blocked"] #connection-status { color: var(--danger); }
+.connection-flow[data-state="blocked"] #connection-status::before { background: var(--danger); }
+@keyframes connection-travel { 0% { left: 0; opacity: 0; } 15%, 85% { opacity: .9; } 100% { left: calc(100% - 6px); opacity: 0; } }
+@media(max-width: 540px) { .connection-flow { padding: 16px 12px; } .connection-route { grid-template-columns: minmax(60px, 1fr) minmax(10px, .4fr) minmax(78px, 1fr) minmax(10px, .4fr) minmax(60px, 1fr); } .connection-node > span:last-child { font-size: 11px; } }
+@media(prefers-reduced-motion: reduce) { .connection-flow[data-state="active"] .connection-link i { animation: none; } .connection-flow[data-state="active"] .connection-link i:first-child { left: 50%; opacity: .8; } }

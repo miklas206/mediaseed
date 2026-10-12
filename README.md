@@ -1,5 +1,14 @@
 # MediaSeed
 
+The connection panel above the app tabs shows MediaSeed → MediaVPN → Internet,
+the observed VPN country, public IP, forwarded port and latest check time. Motion
+appears only while the selected MediaSeed VPN route is verified and downloads
+are enabled. A failed request or a missing refresh for 30 seconds removes the
+connected state. Reduced-motion preferences disable animation. The flow depicts
+connection readiness, not measured throughput. Country is reported by Gluetun's
+public-IP status; missing location is shown as unknown and is never guessed from
+the uploaded profile name. Country geolocation does not prove physical location.
+
 Independent seedbox application for MediaHub, inspired by FjordSeed's separate-app model. This repository is an early preview, not a replacement for the existing Seedbox installation.
 
 ## Implemented

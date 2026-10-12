@@ -177,6 +177,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             "profiles": [], "integrationAvailable": configured,
             "disconnectPending": bool(selection["disconnect_pending"]),
             "publicIp": None, "forwardedPort": None,
+            "country": None, "checkedAt": time.time(),
             "reason": "MediaVPN er ikke valgt. Downloads er blokeret."
         }
         if not selection["provider"] and not discover:

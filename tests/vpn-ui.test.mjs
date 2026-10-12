@@ -32,6 +32,8 @@ test('shipped provider markup supports profile choice, polling, explicit connect
     return nodes.get(selector);
   };
   const requests = [];
+  let now = Date.now();
+  class Clock extends Date { static now() { return now; } }
   const html = readFileSync(new URL('../mediaseed/static/index.html', import.meta.url), 'utf8');
   const providerMarkup = html.match(/<select id="vpn-provider"[^>]*>(.*?)<\/select>/s)[1];
   for (const match of providerMarkup.matchAll(/<option value="([^"]*)">([^<]*)<\/option>/g)) {
@@ -40,7 +42,8 @@ test('shipped provider markup supports profile choice, polling, explicit connect
   }
   const state = { provider: null, integrationAvailable: true, profiles: [{ id: 'a'.repeat(24), name: 'Synthetic VPN' }] };
   const context = vm.createContext({
-    document: { querySelector: find, querySelectorAll: () => [], createElement: () => new Element(), body: new Element() },
+    Date: Clock,
+    document: { querySelector: find, querySelectorAll: () => [], createElement: () => new Element(), body: new Element(), addEventListener() {} },
     setInterval() {}, setTimeout() {}, clearTimeout() {},
     fetch: async (url, options = {}) => {
       requests.push([url, options]);
@@ -79,4 +82,23 @@ test('shipped provider markup supports profile choice, polling, explicit connect
   state.integrationAvailable = false;
   await context.refreshVpn();
   assert.equal(find('#vpn-provider').querySelector('option[value="mediavpn"]').disabled, true);
+  for (const id of ['connection-flow', 'connection-status', 'connection-country', 'connection-ip', 'connection-port', 'connection-checked']) assert.ok(html.includes(`id="${id}"`));
+  const connected = {provider: 'mediavpn', ready: true, downloadsEnabled: true, checkedAt: now / 1000, country: 'Sweden', publicIp: '203.0.113.7', forwardedPort: 43210};
+  context.renderConnection(connected);
+  assert.equal(find('#connection-flow').dataset.state, 'active');
+  assert.equal(find('#connection-country').textContent, 'Sverige');
+  assert.equal(find('#connection-ip').textContent, '203.0.113.7');
+  assert.equal(find('#connection-port').textContent, 'VPN-port 43210');
+  context.renderConnection({...connected, country: null});
+  assert.equal(find('#connection-country').textContent, 'Land ukendt');
+  now += 31000; context.expireConnection();
+  assert.equal(find('#connection-flow').dataset.state, 'unknown');
+  assert.equal(find('#connection-country').textContent, 'Afventer forbindelse');
+  assert.equal(find('#connection-ip').textContent, 'Downloads blokeret');
+  context.renderConnection({...connected, checkedAt: now / 1000, ready: false});
+  assert.equal(find('#connection-flow').dataset.state, 'blocked');
+  context.renderConnection({...connected, checkedAt: (now - 100000) / 1000});
+  assert.equal(find('#connection-flow').dataset.state, 'unknown');
+  context.renderConnection({provider: null, checkedAt: now / 1000});
+  assert.equal(find('#connection-flow').dataset.state, 'disconnected');
 });

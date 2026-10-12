@@ -6,6 +6,7 @@ let downloadsEnabled = false;
 let refreshing = false;
 let appRole = 'administrator';
 let vpnDraft = false;
+let vpnFreshUntil = 0;
 const message = document.querySelector('#message');
 const dialog = document.querySelector('#torrent-details');
 let notificationTimer;
@@ -58,7 +59,7 @@ function renderTorrents() {
 }
 async function refresh() {
   if (refreshing) return; refreshing = true;
-  try { const runtime = await api('runtime'); downloadsEnabled = runtime.downloadsEnabled === true; } catch { downloadsEnabled = false; }
+  try { const runtime = await api('runtime'); downloadsEnabled = runtime.downloadsEnabled === true; renderConnection(runtime); } catch { downloadsEnabled = false; renderConnection({unavailable: true}); }
   try { torrents = await api('torrents'); renderTorrents(); } catch (error) { torrents = []; renderTorrents(); document.querySelector('#count').textContent = 'Torrentklient utilgængelig'; }
   try { const client = await api('client'); const transfer = await api('transfer'); document.querySelector('#transfer').textContent = `${client.name} ${client.version} · Download ${bytes(transfer.dl_info_speed)}/s · Upload ${bytes(transfer.up_info_speed)}/s · ${downloadsEnabled ? 'VPN verificeret' : 'Downloads blokeret indtil VPN er verificeret'}`; } catch { document.querySelector('#transfer').textContent = 'qBittorrent ikke tilsluttet · downloads blokeret'; }
   try { const queue = await api('queue'); document.querySelector('#queue-status').textContent = `Kø: ${queue.active}/${queue.limit} aktive · ${queue.waiting} ventende · RSS ${queue.rssActive} · Manuelle ${queue.manualActive}${queue.boundedView ? ' · Begrænset til 500 torrents' : ''}`; } catch { document.querySelector('#queue-status').textContent = 'Køstatus utilgængelig'; }
@@ -66,6 +67,32 @@ async function refresh() {
   try { const capacity = await api('storage'); storage.textContent = `Lokal storage: ${bytes(capacity.freeBytes)} ledig af ${bytes(capacity.totalBytes)}${capacity.lowSpace ? ' · Lav diskplads' : ''}${capacity.writable ? '' : ' · Ikke skrivbar'}`; } catch { storage.textContent = 'Lokal storage utilgængelig'; }
   refreshing = false;
 }
+
+function countryLabel(country) {
+  if (!country) return 'Land ukendt';
+  const codes = {'United States': 'US', 'United Kingdom': 'GB', 'Netherlands': 'NL', 'Sweden': 'SE', 'Denmark': 'DK', 'Norway': 'NO', 'Finland': 'FI', 'Germany': 'DE', 'Switzerland': 'CH', 'France': 'FR', 'Canada': 'CA', 'Romania': 'RO', 'Poland': 'PL', 'Spain': 'ES', 'Japan': 'JP', 'Singapore': 'SG', 'Australia': 'AU'};
+  const code = codes[country] || (/^[A-Z]{2}$/.test(country) ? country : null);
+  try { return code ? new Intl.DisplayNames(['da'], {type: 'region'}).of(code) : country; } catch { return country; }
+}
+function renderConnection(state) {
+  const checked = Number(state.checkedAt);
+  const fresh = Number.isFinite(checked) && Math.abs(Date.now() - checked * 1000) < 90000;
+  const active = state.provider === 'mediavpn' && state.ready === true && state.downloadsEnabled === true && fresh;
+  const unavailable = state.unavailable || (state.ready && !fresh);
+  const status = active ? 'active' : unavailable ? 'unknown' : state.provider || state.disconnectPending ? 'blocked' : 'disconnected';
+  document.querySelector('#connection-flow').dataset.state = status;
+  document.querySelector('#connection-status').textContent = active ? 'Forbundet · VPN verificeret' : unavailable ? 'Status kan ikke verificeres' : state.disconnectPending ? 'Frakobling afventer' : state.provider ? 'Forbindelsen er blokeret' : 'Ingen VPN valgt';
+  document.querySelector('#connection-country').textContent = active ? countryLabel(state.country) : 'Afventer forbindelse';
+  document.querySelector('#connection-ip').textContent = active ? state.publicIp || 'IP ukendt' : 'Downloads blokeret';
+  document.querySelector('#connection-port').textContent = active ? `VPN-port ${state.forwardedPort || 'ukendt'}` : state.provider ? 'Kontrollér forbindelsen under VPN' : 'Vælg VPN under VPN-fanen';
+  document.querySelector('#connection-checked').textContent = fresh ? `Kontrolleret ${new Date(checked * 1000).toLocaleTimeString('da-DK')}` : 'Afventer statuskontrol';
+  vpnFreshUntil = active ? Date.now() + 30000 : 0;
+}
+function expireConnection() {
+  if (vpnFreshUntil && Date.now() >= vpnFreshUntil) { downloadsEnabled = false; renderConnection({unavailable: true}); }
+}
+setInterval(expireConnection, 1000);
+document.addEventListener('visibilitychange', () => { expireConnection(); if (!document.hidden && document.body.classList.contains('signed-in')) void refresh(); });
 
 function updateVpnChoice() {
   const selected = document.querySelector('#vpn-provider').value === 'mediavpn';
@@ -77,6 +104,7 @@ function updateVpnChoice() {
 }
 async function refreshVpn() {
   const state = await api('vpn');
+  renderConnection(state);
   const provider = document.querySelector('#vpn-provider');
   if (!vpnDraft) provider.value = state.provider || '';
   provider.querySelector('option[value="mediavpn"]').disabled = !state.integrationAvailable;
@@ -108,7 +136,7 @@ document.querySelector('#vpn-disconnect').onclick = async () => {
   try { await api('vpn', {enabled: false, provider: null}, 'PUT'); vpnDraft = false; await refreshVpn(); await refresh(); showNotification('MediaVPN frakoblet. Downloads er blokeret. Data bevares.', 'success'); }
   catch (error) { notify(error); button.disabled = false; }
 };
-document.querySelector('#vpn-refresh').onclick = () => refreshVpn().catch(notify);
+document.querySelector('#vpn-refresh').onclick = () => refreshVpn().catch(error => { renderConnection({unavailable: true}); notify(error); });
 function detailTable(title, columns, rows) {
   const section = element('section'); section.append(element('h3', title)); if (!rows.length) { section.append(element('p', 'Ingen data', 'muted')); return section; }
   const table = element('table'); const heading = element('tr'); for (const [, label] of columns) heading.append(element('th', label)); const head = element('thead'); head.append(heading); table.append(head);

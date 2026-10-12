@@ -1,5 +1,6 @@
 import base64
 import json
+import time
 
 import httpx
 from fastapi.testclient import TestClient
@@ -14,7 +15,7 @@ def integration(tmp_path, monkeypatch):
     token.write_text("synthetic-token")
     monkeypatch.setenv("MEDIASEED_VPN_URL", "http://mediavpn")
     monkeypatch.setenv("MEDIASEED_VPN_TOKEN_FILE", str(token))
-    state = {"enabled": True, "profileId": "a" * 24, "ready": True, "downloadsEnabled": True, "profiles": [{"id": "a" * 24, "name": "Test VPN"}]}
+    state = {"enabled": True, "profileId": "a" * 24, "ready": True, "downloadsEnabled": True, "country": "Sweden", "checkedAt": time.time(), "profiles": [{"id": "a" * 24, "name": "Test VPN"}]}
     calls = []
     original = httpx.AsyncClient
 
@@ -41,6 +42,7 @@ def test_installation_and_discovery_never_select_or_enable_vpn(tmp_path, monkeyp
         assert status["provider"] is None and status["enabled"] is False
         assert not status["downloadsEnabled"] and not status["ready"]
         assert status["profiles"] and status["integrationAvailable"]
+        assert status["country"] is None and status["checkedAt"]
         assert client.post("/api/torrents/start", json={"torrent_hash": "a" * 40}).status_code == 409
         assert client.get("/api/torrents").status_code == 409
         assert not any(method != "GET" for method, _ in calls)
@@ -52,7 +54,8 @@ def test_explicit_selection_persists_and_disconnect_releases_it(tmp_path, monkey
     data = tmp_path / "data"
     with TestClient(create_app(data, "http://testserver")) as client:
         sign_in(client)
-        assert client.put("/api/vpn", json={"provider": "mediavpn", "enabled": True, "profileId": "a" * 24}).json()["ready"]
+        connected = client.put("/api/vpn", json={"provider": "mediavpn", "enabled": True, "profileId": "a" * 24}).json()
+        assert connected["ready"] and connected["country"] == "Sweden" and connected["checkedAt"]
         assert client.post("/api/torrents/start", json={"torrent_hash": "a" * 40}).status_code == 200
         cookies, headers = dict(client.cookies), dict(client.headers)
     with TestClient(create_app(data, "http://testserver"), cookies=cookies, headers=headers) as client:
