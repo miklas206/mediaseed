@@ -19,8 +19,9 @@ def package(browser):
             "id": "mediaseed@mediahub.local", "strict_min_version": "140.0",
             "data_collection_permissions": {"required": ["none"]},
         }}
-    contents = {name: (ROOT / name).read_bytes() for name in FILES}
-    contents["mediaseed.svg"] = (STATIC / "mediaseed.svg").read_bytes()
+    # Git's Windows checkout may use CRLF; packages must match on Linux too.
+    contents = {name: (ROOT / name).read_text(encoding="utf-8").encode() for name in FILES}
+    contents["mediaseed.svg"] = (STATIC / "mediaseed.svg").read_text(encoding="utf-8").encode()
     contents["manifest.json"] = (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode()
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:

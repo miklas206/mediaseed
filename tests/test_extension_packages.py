@@ -37,4 +37,4 @@ def test_extension_packages_match_source_and_are_served(tmp_path):
                 else:
                     assert manifest["background"]["scripts"] == ["common.js", "bridge.js", "background.js"]
                 assert all(not x.startswith(("/", "..")) for x in archive.namelist())
-                assert archive.read("mediaseed.svg") == (root / "mediaseed" / "static" / "mediaseed.svg").read_bytes()
+                assert archive.read("mediaseed.svg") == (root / "mediaseed" / "static" / "mediaseed.svg").read_text(encoding="utf-8").encode()
