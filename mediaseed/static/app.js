@@ -4,6 +4,7 @@ let torrents = [];
 let selectedHash = '';
 let downloadsEnabled = false;
 let refreshing = false;
+let appRole = 'administrator';
 const message = document.querySelector('#message');
 const dialog = document.querySelector('#torrent-details');
 let notificationTimer;
@@ -50,7 +51,7 @@ function renderTorrents() {
     if (typeof row.cover === 'string' && /^\/api\/covers\/(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(row.cover)) { const cover = element('img', undefined, 'torrent-cover'); cover.src = row.cover; cover.alt = ''; cover.width = 64; cover.height = 96; cover.loading = 'lazy'; cover.onerror = () => cover.remove(); item.append(cover); }
     const status = element('p', `${Math.round(Number(row.progress || 0) * 100)} % · ${row.state || ''} · ${bytes(row.size)} · Ratio ${Number(row.ratio || 0).toFixed(2)}`);
     const speeds = element('p', `Download ${bytes(row.dlspeed)}/s · Upload ${bytes(row.upspeed)}/s · Seeding ${(Number(row.seeding_time || 0) / 3600).toFixed(1)} timer`);
-    const actions = element('div', undefined, 'actions'); const start = command('Start', () => torrentAction(row, 'start')); start.disabled = !downloadsEnabled; actions.append(command('Detaljer', () => showDetails(row)), start, command('Stop', () => torrentAction(row, 'stop')), command('Fjern torrent', () => torrentAction(row, 'remove')));
+    const actions = element('div', undefined, 'actions'); actions.append(command('Detaljer', () => showDetails(row))); if (appRole !== 'viewer') { const start = command('Start', () => torrentAction(row, 'start')); start.disabled = !downloadsEnabled; actions.append(start, command('Stop', () => torrentAction(row, 'stop')), command('Fjern torrent', () => torrentAction(row, 'remove'))); }
     item.append(element('h2', row.name), progress, status, speeds, actions); target.append(item);
   }
 }
@@ -97,8 +98,11 @@ async function loadSources(kind) {
   }
   for (const row of rows) {
     const item = element('article', undefined, 'source-row'); item.append(element('h2', row.name), element('p', kind === 'feeds' ? `${row.folder || '/downloads'} · Ratio ${row.ratio} · ${row.paused ? 'Pauset' : 'Aktiv'} · ${row.status || ''}` : row.status === 'ok' ? `NordicBytes · ${row.username || ''} · Ratio ${row.stats.ratio ?? '?'} · Upload ${bytes(row.stats.uploaded)} · Download ${bytes(row.stats.downloaded)} · Bonus ${row.stats.seedbonus ?? '?'} · Advarsler ${row.stats.warnings ?? '?'}` : 'NordicBytes · Kontodata utilgængelige', 'muted')); const actions = element('div', undefined, 'actions');
-    if (kind === 'feeds') actions.append(command(row.paused ? 'Aktivér' : 'Pause', async () => { await api(`feeds/${row.id}/state`, {enabled: row.paused}, 'PUT'); await loadSources('feeds'); showNotification(row.paused ? 'Feed aktiveret gennem VPN.' : 'Feed sat på pause. Eksisterende torrents bevares.', 'success'); }));
-    actions.append(command('Rediger', () => { const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); form.reset(); for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } form.querySelector('input[name="name"]').focus(); }), command('Fjern', async () => { if (!confirm(`Fjern ${row.name}? Filer og torrents bevares.`)) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); })); item.append(actions); target.append(item);
+    if (appRole === 'administrator') {
+      if (kind === 'feeds') actions.append(command(row.paused ? 'Aktivér' : 'Pause', async () => { await api(`feeds/${row.id}/state`, {enabled: row.paused}, 'PUT'); await loadSources('feeds'); showNotification(row.paused ? 'Feed aktiveret gennem VPN.' : 'Feed sat på pause. Eksisterende torrents bevares.', 'success'); }));
+      actions.append(command('Rediger', () => { const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); form.reset(); for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } form.querySelector('input[name="name"]').focus(); }), command('Fjern', async () => { if (!confirm(`Fjern ${row.name}? Filer og torrents bevares.`)) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); }));
+    }
+    item.append(actions); target.append(item);
   }
 }
 let trackerSearchGeneration = 0;
@@ -130,7 +134,7 @@ for (const button of document.querySelectorAll('[data-view]')) button.onclick = 
 document.querySelector('#close-details').onclick = () => dialog.close();
 document.querySelector('#policy-form').onsubmit = async event => { event.preventDefault(); try { await api(`torrents/${selectedHash}/policy`, {ratio: Number(event.target.elements.namedItem('ratio').value)}); document.querySelector('#detail-message').textContent = 'Seedingmål gemt'; } catch (error) { document.querySelector('#detail-message').textContent = error.message; } };
 for (const selector of ['#search', '#filter', '#sort', '#source-filter']) document.querySelector(selector).addEventListener('input', renderTorrents);
-function showWorkspace() { document.body.classList.add('signed-in'); document.querySelector('#identity').hidden = true; document.querySelector('#workspace').hidden = false; document.querySelector('#logout').hidden = false; refresh(); }
+function showWorkspace() { document.body.classList.add('signed-in'); document.querySelector('#identity').hidden = true; document.querySelector('#workspace').hidden = false; document.querySelector('#logout').hidden = false; document.querySelector('#new-torrent').hidden = appRole === 'viewer'; document.querySelector('#policy-form').hidden = appRole === 'viewer'; for (const selector of ['#feed-form', '#tracker-form', '#vpn-form']) document.querySelector(selector).hidden = appRole !== 'administrator'; for (const selector of ['[data-view="feeds"]', '[data-view="trackers"]']) document.querySelector(selector).hidden = appRole === 'viewer'; refresh(); }
 document.querySelector('#login').onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(event.target)); try { if (needsSetup) { await api('auth/setup', body); needsSetup = false; } csrf = (await api('auth/login', body)).csrf; event.target.reset(); showWorkspace(); } catch (error) { notify(error); } };
 document.querySelector('#refresh').onclick = refresh;
 const addDialog = document.querySelector('#add-torrent');
@@ -174,4 +178,4 @@ addForm.onsubmit = async event => {
 };
 document.querySelector('#logout').onclick = async () => { try { await api('auth/logout', {}); location.reload(); } catch (error) { notify(error); } };
 setInterval(() => { if (!document.hidden && document.body.classList.contains('signed-in')) { if (!document.querySelector('#vpn').hidden) refreshVpn().catch(() => {}); if (!document.querySelector('#feeds').hidden) loadSources('feeds').catch(() => {}); refresh(); } }, 10000);
-(async () => { try { needsSetup = (await api('auth/status')).needsSetup; document.querySelector('#identity-title').textContent = needsSetup ? 'En frisk begyndelse.' : 'Velkommen tilbage.'; document.querySelector('#identity-subtitle').textContent = needsSetup ? 'Opret din lokale MediaSeed-administrator.' : 'Log ind på MediaSeed.'; document.querySelector('#login-submit').textContent = needsSetup ? 'Opret administrator' : 'Log ind'; if (!needsSetup) { try { csrf = (await api('auth/me')).csrf; showWorkspace(); } catch {} } } catch (error) { notify(error); } })();
+(async () => { try { const status = await api('auth/status'); needsSetup = status.needsSetup; document.querySelector('#identity-title').textContent = needsSetup ? 'En frisk begyndelse.' : 'Velkommen tilbage.'; document.querySelector('#identity-subtitle').textContent = needsSetup ? 'Opret din lokale MediaSeed-administrator.' : 'Log ind p\u00e5 MediaSeed.'; document.querySelector('#login-submit').textContent = needsSetup ? 'Opret administrator' : 'Log ind'; if (status.managed) { document.querySelector('#login').hidden = true; const link = element('a', 'Log ind med MediaHub', 'primary'); link.href = '/auth/hub/start'; document.querySelector('#login').after(link); } if (!needsSetup) { try { const identity = await api('auth/me'); csrf = identity.csrf; appRole = identity.role || 'administrator'; showWorkspace(); } catch {} } } catch (error) { notify(error); } })();

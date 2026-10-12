@@ -1,0 +1,38 @@
+services:
+  app:
+    command:
+      - uvicorn
+      - mediaseed.app:create_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "18800"
+      - --ssl-certfile
+      - /app-tls/cert.pem
+      - --ssl-keyfile
+      - /app-tls/key.pem
+      - --no-access-log
+    environment:
+      MEDIASEED_HUB_URL: ${MEDIASEED_HUB_URL:?Set the trusted HTTPS MediaHub origin}
+      MEDIASEED_HUB_CA_FILE: /hub-trust/ca.pem
+      MEDIASEED_BASE_URL: ${MEDIASEED_BASE_URL:?Set the HTTPS MediaSeed origin}
+    volumes:
+      - type: bind
+        source: ${MEDIASEED_TLS_PATH:?Set the protected app TLS directory}
+        target: /app-tls
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MEDIASEED_HUB_CA_PATH:?Set the public MediaHub CA certificate}
+        target: /hub-trust/ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,ssl,urllib.request; urllib.request.urlopen(os.environ['MEDIASEED_BASE_URL'] + '/healthz', context=ssl.create_default_context(cafile=os.environ['MEDIASEED_HUB_CA_FILE']), timeout=3)"

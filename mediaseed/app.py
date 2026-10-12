@@ -1,24 +1,26 @@
-import hashlib
-import base64
 import asyncio
+import base64
+import hashlib
 import os
 import re
 import secrets
-import sqlite3
 import shutil
+import sqlite3
+import ssl
 import time
-from contextlib import contextmanager, asynccontextmanager, suppress
+from contextlib import asynccontextmanager, contextmanager, suppress
 from pathlib import Path
-from urllib.parse import urlsplit, parse_qs, urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+
 from mediaseed.features import add_stopped, install_features
 
 COOKIE = "mediaseed_session"
@@ -67,7 +69,7 @@ class VpnSettings(BaseModel):
     profileId: str | None = Field(default=None, pattern=r"^[a-f0-9]{24}$")
 
 
-def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, transport=None, downloads_dir=None):
+def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, transport=None, downloads_dir=None, hub_transport=None):
     data = Path(data_dir or os.environ.get("MEDIASEED_DATA", "/data"))
     data.mkdir(parents=True, exist_ok=True, mode=0o700)
     downloads = Path(downloads_dir or os.environ.get("MEDIASEED_DOWNLOADS", str(data / "downloads")))
@@ -86,6 +88,23 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
     password = qbit_password or (Path(password_file).read_text().strip() if password_file else None)
     vpn_url = os.environ.get("MEDIASEED_VPN_URL", "").rstrip("/")
     vpn_token_file = os.environ.get("MEDIASEED_VPN_TOKEN_FILE")
+    hub_url = os.environ.get("MEDIASEED_HUB_URL", "").rstrip("/")
+    hub_parsed = urlsplit(hub_url)
+    if hub_url and (parsed.scheme != "https" or hub_parsed.scheme != "https" or not hub_parsed.hostname or hub_parsed.path or hub_parsed.query or hub_parsed.fragment or hub_parsed.username or hub_parsed.password):
+        raise ValueError("Managed SSO requires HTTPS app and hub origins")
+    hub_ca = os.environ.get("MEDIASEED_HUB_CA_FILE")
+    hub_tls = ssl.create_default_context(cafile=hub_ca) if hub_ca else True
+
+    async def hub_request(path, method="GET", payload=None, token=None):
+        try:
+            async with httpx.AsyncClient(base_url=hub_url, verify=hub_tls, timeout=5, follow_redirects=False, trust_env=False, transport=hub_transport) as client:
+                response = await client.request(method, "/api/v1/sso/" + path, json=payload, headers={"Authorization": "Bearer " + token} if token else {})
+                if response.status_code in {401, 403}:
+                    raise HTTPException(response.status_code, "MediaHub access denied")
+                response.raise_for_status()
+                return response.json()["data"]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            raise HTTPException(503, "MediaHub authentication unavailable") from None
 
     async def vpn_request(path, method="GET", payload=None, content=None):
         if not vpn_url or not vpn_token_file:
@@ -116,6 +135,8 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             CREATE TABLE IF NOT EXISTS accounts (username TEXT PRIMARY KEY, password TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS sessions (digest TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS attempts (address TEXT PRIMARY KEY, count INTEGER NOT NULL, started REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS hub_attempts (digest TEXT PRIMARY KEY, verifier TEXT NOT NULL, expires REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS hub_sessions (digest TEXT PRIMARY KEY, token TEXT NOT NULL, user_id TEXT NOT NULL);
         """)
     (data / "mediaseed.sqlite").chmod(0o600)
     @asynccontextmanager
@@ -144,16 +165,70 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             response.headers["Cache-Control"] = "no-store"
         return response
 
-    def authorized(request: Request):
+    async def authorized(request: Request):
         token = request.cookies.get(COOKIE, "")
         digest = hashlib.sha256(token.encode()).hexdigest()
         with database() as connection:
             session = connection.execute("SELECT * FROM sessions WHERE digest=? AND expires>?", (digest, time.time())).fetchone()
+            managed = connection.execute("SELECT * FROM hub_sessions WHERE digest=?", (digest,)).fetchone()
         if not session:
             raise HTTPException(401, "Sign in required")
+        public = {"role": "administrator"}
+        if hub_url:
+            if not managed:
+                raise HTTPException(401, "Sign in through MediaHub")
+            public = await hub_request("session?packageId=org.mediahub.mediaseed", token=managed["token"])
+            if public.get("id") != managed["user_id"] or public.get("role") not in {"administrator", "user", "viewer"}:
+                raise HTTPException(403, "MediaHub access denied")
+            if request.method not in {"GET", "HEAD", "OPTIONS"} and request.url.path != "/api/auth/logout":
+                if public["role"] == "viewer":
+                    raise HTTPException(403, "Read-only app access")
+                tracker_admin = request.url.path == "/api/trackers" or (request.url.path.startswith("/api/trackers/") and request.method == "PUT")
+                if public["role"] != "administrator" and (tracker_admin or request.url.path == "/api/vpn" or request.url.path.startswith(("/api/accounts", "/api/feeds", "/api/settings", "/api/runtime"))):
+                    raise HTTPException(403, "App administrator access required")
         if request.method not in {"GET", "HEAD", "OPTIONS"} and not secrets.compare_digest(request.headers.get("X-MediaSeed-CSRF", ""), session["csrf"]):
             raise HTTPException(403, "Session verification failed")
-        return dict(session)
+        return {**dict(session), **public}
+
+    @app.get("/auth/hub/start")
+    def hub_start():
+        if not hub_url:
+            raise HTTPException(409, "MediaHub SSO is not configured")
+        state, verifier = secrets.token_urlsafe(48), secrets.token_urlsafe(48)
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+        with database() as connection:
+            connection.execute("DELETE FROM hub_attempts WHERE expires<=?", (time.time(),))
+            if connection.execute("SELECT COUNT(*) FROM hub_attempts").fetchone()[0] >= 1000:
+                raise HTTPException(429, "Try again later")
+            connection.execute("INSERT INTO hub_attempts VALUES (?,?,?)", (hashlib.sha256(state.encode()).hexdigest(), verifier, time.time() + 300))
+        response = RedirectResponse(hub_url + "/api/v1/sso/authorize?" + urlencode({"packageId": "org.mediahub.mediaseed", "state": state, "challenge": challenge}), status_code=303)
+        response.set_cookie("mediaseed_sso_state", state, httponly=True, secure=True, samesite="lax", max_age=300, path="/auth/hub")
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.get("/auth/hub/callback")
+    async def hub_callback(request: Request, code: str = Query(min_length=40, max_length=128), state: str = Query(min_length=43, max_length=128)):
+        if not hub_url or not secrets.compare_digest(state, request.cookies.get("mediaseed_sso_state", "")):
+            raise HTTPException(403, "Login verification failed")
+        with database() as connection:
+            attempt = connection.execute("DELETE FROM hub_attempts WHERE digest=? AND expires>? RETURNING verifier", (hashlib.sha256(state.encode()).hexdigest(), time.time())).fetchone()
+        if not attempt:
+            raise HTTPException(401, "Login attempt expired")
+        identity = await hub_request("exchange", "POST", {"packageId": "org.mediahub.mediaseed", "code": code, "verifier": attempt["verifier"]})
+        public = identity.get("user", {})
+        if not isinstance(identity.get("token"), str) or not isinstance(identity.get("expires"), int) or not isinstance(public.get("id"), str) or public.get("role") not in {"administrator", "user", "viewer"}:
+            raise HTTPException(503, "Invalid MediaHub identity")
+        token, csrf = secrets.token_urlsafe(48), secrets.token_urlsafe(32)
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        with database() as connection:
+            connection.execute("DELETE FROM sessions WHERE expires<=?", (time.time(),))
+            connection.execute("DELETE FROM hub_sessions WHERE digest NOT IN (SELECT digest FROM sessions)")
+            connection.execute("INSERT INTO sessions VALUES (?,?,?)", (digest, csrf, min(identity["expires"], time.time() + 43200)))
+            connection.execute("INSERT INTO hub_sessions VALUES (?,?,?)", (digest, identity["token"], public["id"]))
+        response = RedirectResponse("/", status_code=303, headers={"Cache-Control": "no-store"})
+        response.set_cookie(COOKIE, token, httponly=True, secure=True, samesite="strict", max_age=43200)
+        response.delete_cookie("mediaseed_sso_state", path="/auth/hub")
+        return response
 
     async def qbit(path, method="GET", payload=None, files=None):
         if vpn_url:
@@ -190,11 +265,15 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/api/auth/status")
     def status():
+        if hub_url:
+            return {"needsSetup": False, "managed": True, "loginUrl": "/auth/hub/start"}
         with database() as connection:
             return {"needsSetup": connection.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0}
 
     @app.post("/api/auth/setup")
     def setup(body: Credentials):
+        if hub_url:
+            raise HTTPException(403, "Users are managed by MediaHub")
         with database() as connection:
             connection.execute("BEGIN IMMEDIATE")
             if connection.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]:
@@ -204,6 +283,8 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.post("/api/auth/login")
     def login(body: Credentials, request: Request, response: Response):
+        if hub_url:
+            raise HTTPException(403, "Sign in through MediaHub")
         address = request.client.host if request.client else "local"
         now = time.time()
         with database() as connection:
@@ -228,7 +309,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/api/auth/me")
     def me(session=Depends(authorized)):
-        return {"csrf": session["csrf"]}
+        return {key: session[key] for key in ("csrf", "id", "username", "role") if key in session}
 
     @app.get("/api/storage")
     def storage(session=Depends(authorized)):
@@ -242,6 +323,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
     def logout(response: Response, session=Depends(authorized)):
         with database() as connection:
             connection.execute("DELETE FROM sessions WHERE digest=?", (session["digest"],))
+            connection.execute("DELETE FROM hub_sessions WHERE digest=?", (session["digest"],))
         response.delete_cookie(COOKIE)
         return {"signedOut": True}
 
