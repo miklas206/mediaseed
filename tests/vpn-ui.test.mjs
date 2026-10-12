@@ -89,6 +89,42 @@ test('shipped provider markup supports profile choice, polling, explicit connect
   assert.equal(find('#connection-country').textContent, 'Sverige');
   assert.equal(find('#connection-ip').textContent, '203.0.113.7');
   assert.equal(find('#connection-port').textContent, 'VPN-port 43210');
+  const flow = find('#connection-flow');
+  context.renderTraffic({dl_info_speed: 0, up_info_speed: 2048});
+  assert.equal(flow.dataset.upload, 'true');
+  assert.equal(flow.dataset.download, 'false');
+  assert.match(find('#connection-activity').textContent, /MediaSeed → MediaVPN → Internet/);
+  assert.match(find('#connection-upload').textContent, /2.0 KiB\/s/);
+  context.renderTraffic({dl_info_speed: 4096, up_info_speed: 0});
+  assert.equal(flow.dataset.upload, 'false');
+  assert.equal(flow.dataset.download, 'true');
+  assert.match(find('#connection-activity').textContent, /Internet → MediaVPN → MediaSeed/);
+  context.renderTraffic({dl_info_speed: 1, up_info_speed: 1});
+  assert.equal(flow.dataset.upload, 'true');
+  assert.equal(flow.dataset.download, 'true');
+  context.renderTraffic({dl_info_speed: 0, up_info_speed: 0});
+  assert.equal(flow.dataset.upload, 'false');
+  assert.equal(flow.dataset.download, 'false');
+  assert.match(find('#connection-activity').textContent, /ingen aktiv overførsel/);
+  for (const transfer of [undefined, {dl_info_speed: -1, up_info_speed: 10}, {dl_info_speed: Infinity, up_info_speed: 10}, {dl_info_speed: null, up_info_speed: 10}, {dl_info_speed: 10}]) {
+    context.renderTraffic(transfer);
+    assert.equal(flow.dataset.upload, 'false');
+    assert.equal(flow.dataset.download, 'false');
+  }
+  context.renderTraffic({dl_info_speed: 100, up_info_speed: 0});
+  now += 31000;
+  context.renderConnection({...connected, checkedAt: now / 1000});
+  context.expireConnection(); // VPN polling must not extend a stale traffic measurement.
+  assert.equal(flow.dataset.state, 'active');
+  assert.equal(flow.dataset.download, 'false');
+  assert.equal(flow.dataset.upload, 'false');
+  assert.equal((html.match(/class="binary-lane binary-upload"/g) || []).length, 2);
+  assert.equal((html.match(/class="binary-lane binary-download"/g) || []).length, 2);
+  const css = readFileSync(new URL('../mediaseed/static/style.css', import.meta.url), 'utf8');
+  assert.match(css, /data-upload="true"[^}]+binary-upload b \{ animation: binary-travel/);
+  assert.match(css, /data-download="true"[^}]+binary-download b \{ animation: binary-travel[^}]+reverse/);
+  assert.match(css, /prefers-reduced-motion: reduce[^\n]+binary-lane b \{ animation: none/);
+  connected.checkedAt = now / 1000;
   context.renderConnection({...connected, country: null});
   assert.equal(find('#connection-country').textContent, 'Land ukendt');
   now += 31000; context.expireConnection();
@@ -97,6 +133,9 @@ test('shipped provider markup supports profile choice, polling, explicit connect
   assert.equal(find('#connection-ip').textContent, 'Downloads blokeret');
   context.renderConnection({...connected, checkedAt: now / 1000, ready: false});
   assert.equal(find('#connection-flow').dataset.state, 'blocked');
+  context.renderTraffic({dl_info_speed: 100, up_info_speed: 100});
+  assert.equal(flow.dataset.upload, 'false');
+  assert.equal(flow.dataset.download, 'false');
   context.renderConnection({...connected, checkedAt: (now - 100000) / 1000});
   assert.equal(find('#connection-flow').dataset.state, 'unknown');
   context.renderConnection({provider: null, checkedAt: now / 1000});

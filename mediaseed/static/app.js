@@ -7,6 +7,7 @@ let refreshing = false;
 let appRole = 'administrator';
 let vpnDraft = false;
 let vpnFreshUntil = 0;
+let trafficFreshUntil = 0;
 const message = document.querySelector('#message');
 const dialog = document.querySelector('#torrent-details');
 let notificationTimer;
@@ -61,7 +62,7 @@ async function refresh() {
   if (refreshing) return; refreshing = true;
   try { const runtime = await api('runtime'); downloadsEnabled = runtime.downloadsEnabled === true; renderConnection(runtime); } catch { downloadsEnabled = false; renderConnection({unavailable: true}); }
   try { torrents = await api('torrents'); renderTorrents(); } catch (error) { torrents = []; renderTorrents(); document.querySelector('#count').textContent = 'Torrentklient utilgængelig'; }
-  try { const client = await api('client'); const transfer = await api('transfer'); document.querySelector('#transfer').textContent = `${client.name} ${client.version} · Download ${bytes(transfer.dl_info_speed)}/s · Upload ${bytes(transfer.up_info_speed)}/s · ${downloadsEnabled ? 'VPN verificeret' : 'Downloads blokeret indtil VPN er verificeret'}`; } catch { document.querySelector('#transfer').textContent = 'qBittorrent ikke tilsluttet · downloads blokeret'; }
+  try { const client = await api('client'); const transfer = await api('transfer'); renderTraffic(transfer); document.querySelector('#transfer').textContent = `${client.name} ${client.version} · Download ${bytes(transfer.dl_info_speed)}/s · Upload ${bytes(transfer.up_info_speed)}/s · ${downloadsEnabled ? 'VPN verificeret' : 'Downloads blokeret indtil VPN er verificeret'}`; } catch { renderTraffic(); document.querySelector('#transfer').textContent = 'qBittorrent ikke tilsluttet · downloads blokeret'; }
   try { const queue = await api('queue'); document.querySelector('#queue-status').textContent = `Kø: ${queue.active}/${queue.limit} aktive · ${queue.waiting} ventende · RSS ${queue.rssActive} · Manuelle ${queue.manualActive}${queue.boundedView ? ' · Begrænset til 500 torrents' : ''}`; } catch { document.querySelector('#queue-status').textContent = 'Køstatus utilgængelig'; }
   const storage = document.querySelector('#storage'); storage.hidden = false;
   try { const capacity = await api('storage'); storage.textContent = `Lokal storage: ${bytes(capacity.freeBytes)} ledig af ${bytes(capacity.totalBytes)}${capacity.lowSpace ? ' · Lav diskplads' : ''}${capacity.writable ? '' : ' · Ikke skrivbar'}`; } catch { storage.textContent = 'Lokal storage utilgængelig'; }
@@ -87,9 +88,24 @@ function renderConnection(state) {
   document.querySelector('#connection-port').textContent = active ? `VPN-port ${state.forwardedPort || 'ukendt'}` : state.provider ? 'Kontrollér forbindelsen under VPN' : 'Vælg VPN under VPN-fanen';
   document.querySelector('#connection-checked').textContent = fresh ? `Kontrolleret ${new Date(checked * 1000).toLocaleTimeString('da-DK')}` : 'Afventer statuskontrol';
   vpnFreshUntil = active ? Date.now() + 30000 : 0;
+  if (!active) renderTraffic();
+}
+function renderTraffic(transfer) {
+  const flow = document.querySelector('#connection-flow');
+  const active = flow.dataset.state === 'active';
+  const down = Number(transfer?.dl_info_speed);
+  const up = Number(transfer?.up_info_speed);
+  const measured = active && typeof transfer?.dl_info_speed === 'number' && typeof transfer?.up_info_speed === 'number' && Number.isFinite(down) && Number.isFinite(up) && down >= 0 && up >= 0;
+  flow.dataset.upload = String(measured && up > 0);
+  flow.dataset.download = String(measured && down > 0);
+  document.querySelector('#connection-download').textContent = measured ? `↓ Download · ${bytes(down)}/s` : '↓ Download · afventer trafikmåling';
+  document.querySelector('#connection-upload').textContent = measured ? `↑ Upload · ${bytes(up)}/s` : '↑ Upload · afventer trafikmåling';
+  document.querySelector('#connection-activity').textContent = !active ? 'Trafik kræver en verificeret VPN-forbindelse.' : !measured ? 'Afventer en frisk trafikmåling.' : down > 0 && up > 0 ? 'Henter og sender · begge retninger er aktive.' : down > 0 ? 'Henter · Internet → MediaVPN → MediaSeed' : up > 0 ? 'Seeder · MediaSeed → MediaVPN → Internet' : 'VPN klar · ingen aktiv overførsel.';
+  trafficFreshUntil = measured ? Date.now() + 30000 : 0;
 }
 function expireConnection() {
   if (vpnFreshUntil && Date.now() >= vpnFreshUntil) { downloadsEnabled = false; renderConnection({unavailable: true}); }
+  if (trafficFreshUntil && Date.now() >= trafficFreshUntil) renderTraffic();
 }
 setInterval(expireConnection, 1000);
 document.addEventListener('visibilitychange', () => { expireConnection(); if (!document.hidden && document.body.classList.contains('signed-in')) void refresh(); });
