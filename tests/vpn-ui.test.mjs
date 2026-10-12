@@ -19,16 +19,25 @@ class Element {
   setAttribute() {}
   addEventListener() {}
   querySelectorAll() { return []; }
-  querySelector() { return this.option ||= new Element(); }
+  querySelector(selector) {
+    const value = selector.match(/^option\[value="([^"]*)"\]$/)?.[1];
+    return this.children.find(child => child.value === value) || null;
+  }
 }
 
-test('provider/profile choice survives polling and only explicit submit connects', async () => {
+test('shipped provider markup supports profile choice, polling, explicit connect and disconnect', async () => {
   const nodes = new Map();
   const find = selector => {
     if (!nodes.has(selector)) nodes.set(selector, new Element());
     return nodes.get(selector);
   };
   const requests = [];
+  const html = readFileSync(new URL('../mediaseed/static/index.html', import.meta.url), 'utf8');
+  const providerMarkup = html.match(/<select id="vpn-provider"[^>]*>(.*?)<\/select>/s)[1];
+  for (const match of providerMarkup.matchAll(/<option value="([^"]*)">([^<]*)<\/option>/g)) {
+    const option = new Element(); option.value = match[1]; option.textContent = match[2];
+    find('#vpn-provider').append(option);
+  }
   const state = { provider: null, integrationAvailable: true, profiles: [{ id: 'a'.repeat(24), name: 'Synthetic VPN' }] };
   const context = vm.createContext({
     document: { querySelector: find, querySelectorAll: () => [], createElement: () => new Element(), body: new Element() },
@@ -48,6 +57,7 @@ test('provider/profile choice survives polling and only explicit submit connects
   assert.equal(find('#vpn-provider').value, '');
   assert.equal(find('#vpn-profile').value, '');
   assert.equal(find('#vpn-profile-field').hidden, true);
+  assert.equal(find('#vpn-provider').querySelector('option[value="mediavpn"]').disabled, false);
   assert.equal(requests.some(([, options]) => options.method === 'PUT'), false);
 
   find('#vpn-provider').value = 'mediavpn'; find('#vpn-provider').onchange();
@@ -66,4 +76,7 @@ test('provider/profile choice survives polling and only explicit submit connects
   assert.equal(state.provider, null);
   assert.equal(find('#vpn-provider').value, '');
   assert.equal(find('#vpn-profile-field').hidden, true);
+  state.integrationAvailable = false;
+  await context.refreshVpn();
+  assert.equal(find('#vpn-provider').querySelector('option[value="mediavpn"]').disabled, true);
 });
