@@ -67,8 +67,11 @@ class TrackerSettings(BaseModel):
     api_key: str = Field(default="", max_length=512)
 
 
-async def add_stopped(qbit, ratio, content=None, magnet=None):
-    payload = {"stopped": "true", "paused": "true", "savepath": "/downloads", "ratioLimit": str(ratio), "seedingTimeLimit": "2940"}
+async def add_stopped(qbit, ratio, content=None, magnet=None, start=False, vpn_status=None):
+    if start and (vpn_status is None or not (await vpn_status()).get("downloadsEnabled")):
+        raise HTTPException(409, "Starting requires a verified VPN. Choose add on pause instead.")
+    paused = "false" if start else "true"
+    payload = {"stopped": paused, "paused": paused, "savepath": "/downloads", "ratioLimit": str(ratio), "seedingTimeLimit": "2940"}
     files = None
     if magnet is not None:
         payload["urls"] = magnet
@@ -77,17 +80,21 @@ async def add_stopped(qbit, ratio, content=None, magnet=None):
     response = await qbit("/api/v2/torrents/add", "POST", payload, files=files)
     accepted = response.status_code == 204 or response.text.strip() == "Ok."
     pending = False
-    if not accepted:
-        try:
-            outcome = response.json()
-            if isinstance(outcome, dict) and outcome.get("failure_count") == 0:
-                accepted = outcome.get("success_count") == 1 and outcome.get("pending_count") == 0
-                pending = magnet is not None and outcome.get("success_count") == 0 and outcome.get("pending_count") == 1
-        except ValueError:
-            pass
+    outcome = {}
+    try:
+        outcome = response.json()
+    except ValueError:
+        pass
+    if not accepted and isinstance(outcome, dict) and outcome.get("failure_count") == 0:
+        accepted = outcome.get("success_count") == 1 and outcome.get("pending_count") == 0
+        pending = magnet is not None and outcome.get("success_count") == 0 and outcome.get("pending_count") == 1
     if not accepted and not pending:
         raise HTTPException(502, "Torrent client rejected the torrent file")
-    return {"added": accepted, "pending": pending, "stopped": True, "downloadsEnabled": False}
+    result = {"added": accepted, "pending": pending, "stopped": not start, "downloadsEnabled": start}
+    if start:
+        result["startRequested"] = True
+    return result
+
 
 
 def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=None):

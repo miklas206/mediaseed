@@ -55,8 +55,21 @@ test('page drop opens a populated dialog, preserves its draft, and uploads only 
   assert.equal(ratio.value, '3'); assert.equal(find('#add-torrent').openCount, 1);
   await form.onsubmit({preventDefault() {}});
   assert.equal(uploads.length, 1); assert.equal(uploads[0].body, replacement);
-  assert.match(uploads[0].url, /filename=Other.TORRENT&ratio=3$/);
+  assert.match(uploads[0].url, /filename=Other.TORRENT&ratio=3&start=false$/);
   assert.equal(find('#add-torrent').open, false);
+});
+
+test('start button submits the explicit start choice; pause remains available without VPN', async () => {
+  const {find, context, drag, form, uploads} = setup();
+  drag('drop', [torrent()]);
+  assert.equal(find('#add-start').disabled, true);
+  assert.equal(find('#add-start-help').hidden, false);
+  find('#add-torrent').close();
+  vm.runInContext('downloadsEnabled = true', context);
+  drag('drop', [torrent()]);
+  assert.equal(find('#add-start').disabled, false);
+  await form.onsubmit({preventDefault() {}, submitter: {value: 'start'}});
+  assert.match(uploads[0].url, /&start=true$/);
 });
 
 test('invalid drops never open the dialog or upload; leaving clears the cue', () => {

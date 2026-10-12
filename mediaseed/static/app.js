@@ -34,6 +34,7 @@ async function api(path, body, method) {
 }
 function notify(error) { showNotification(errorLabels[error.message] || error.message); }
 Object.assign(errorLabels, {'Invalid torrent file': 'Filen er ikke en gyldig torrentfil.', 'Choose a .torrent file': 'Vælg en .torrent-fil.', 'Torrent file exceeds 4 MiB': 'Torrentfilen må højst være 4 MiB.'});
+errorLabels['Starting requires a verified VPN. Choose add on pause instead.'] = 'Start kræver en verificeret VPN. Du kan vælge Tilføj på pause.';
 function element(tag, text, className) { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; }
 function bytes(value) { const number = Number(value || 0); for (const [divisor, unit] of [[1073741824, 'GiB'], [1048576, 'MiB'], [1024, 'KiB']]) if (number >= divisor) return `${(number / divisor).toFixed(1)} ${unit}`; return `${number} B`; }
 function state(row) { if (/error|missing/i.test(row.state)) return 'error'; if (/stopped|paused/i.test(row.state)) return 'stopped'; if (Number(row.progress) >= 1) return 'seeding'; return 'downloading'; }
@@ -124,6 +125,7 @@ async function refreshTorrents() {
 async function refresh() {
   if (refreshing) return; refreshing = true;
   try { const runtime = await api('runtime'); downloadsEnabled = runtime.downloadsEnabled === true; renderConnection(runtime); } catch { downloadsEnabled = false; renderConnection({unavailable: true}); }
+  updateAddStart();
   await refreshTorrents();
   try { const client = await api('client'); const transfer = await api('transfer'); renderTraffic(transfer); document.querySelector('#transfer').textContent = `${client.name} ${client.version} · Download ${bytes(transfer.dl_info_speed)}/s · Upload ${bytes(transfer.up_info_speed)}/s · ${downloadsEnabled ? 'VPN verificeret' : 'Downloads blokeret indtil VPN er verificeret'}`; } catch { renderTraffic(); document.querySelector('#transfer').textContent = 'qBittorrent ikke tilsluttet · downloads blokeret'; }
   try { const queue = await api('queue'); document.querySelector('#queue-status').textContent = `Kø: ${queue.active}/${queue.limit} aktive · ${queue.waiting} ventende · RSS ${queue.rssActive} · Manuelle ${queue.manualActive}${queue.boundedView ? ' · Begrænset til 500 torrents' : ''}`; } catch { document.querySelector('#queue-status').textContent = 'Køstatus utilgængelig'; }
@@ -334,11 +336,16 @@ function setAddMode() {
   document.querySelector('#add-magnet').disabled = fileMode; document.querySelector('#add-magnet').required = !fileMode;
   fileInput.disabled = !fileMode; fileInput.required = fileMode && !droppedTorrent;
 }
+function updateAddStart() {
+  if (!addingTorrent) document.querySelector('#add-start').disabled = !downloadsEnabled;
+  document.querySelector('#add-start-help').hidden = downloadsEnabled;
+}
 for (const radio of addForm.querySelectorAll('[name="mode"]')) radio.onchange = setAddMode;
 function openAdd() {
   if (addDialog.open) return;
   showNotification(''); addForm.reset(); droppedTorrent = null;
   document.querySelector('#file-name').textContent = ''; setAddMode();
+  updateAddStart();
   addDialog.append(document.querySelector('.notifications')); addDialog.showModal();
 }
 document.querySelector('#new-torrent').onclick = openAdd;
@@ -387,6 +394,7 @@ document.addEventListener('drop', event => {
 addForm.onsubmit = async event => {
   event.preventDefault(); if (addingTorrent) return;
   const fileMode = addForm.elements.namedItem('mode').value === 'file'; const ratio = Number(addForm.elements.namedItem('ratio').value);
+  const start = event.submitter?.value === 'start';
   const file = droppedTorrent || fileInput.files[0];
   if (fileMode && (!file || !file.name.toLowerCase().endsWith('.torrent'))) { showNotification('Vælg en .torrent-fil.'); return; }
   if (fileMode && file.size > 4 * 1024 * 1024) { showNotification('Torrentfilen må højst være 4 MiB.'); return; }
@@ -394,13 +402,13 @@ addForm.onsubmit = async event => {
   try {
     let result;
     if (fileMode) {
-      const response = await fetch(`/api/torrents/upload?filename=${encodeURIComponent(file.name)}&ratio=${ratio}`, {method: 'POST', headers: {'Content-Type': 'application/x-bittorrent', 'X-MediaSeed-CSRF': csrf}, body: file});
+      const response = await fetch(`/api/torrents/upload?filename=${encodeURIComponent(file.name)}&ratio=${ratio}&start=${start}`, {method: 'POST', headers: {'Content-Type': 'application/x-bittorrent', 'X-MediaSeed-CSRF': csrf}, body: file});
       result = await response.json(); if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Torrentfilen kunne ikke tilføjes.');
-    } else { result = await api('torrents', {url: addForm.elements.namedItem('url').value.trim(), ratio}); }
-    addDialog.close(); showNotification((result.pending ? 'Magnetlink modtaget. Metadata afventer VPN.' : 'Torrent tilføjet på pause. Tryk Start, når du vil hente.') + (result.webSourcesIgnored ? ' Ekstra webkilder i linket er udeladt; hash og trackere bruges.' : ''), 'success');
+    } else { result = await api('torrents', {url: addForm.elements.namedItem('url').value.trim(), ratio, start}); }
+    addDialog.close(); showNotification((result.startRequested ? (result.pending ? 'Magnetlink modtaget. Start er valgt; afventer metadata fra torrentnetværket.' : 'Torrent tilføjet. Start er anmodet gennem VPN.') : (result.pending ? 'Magnetlink modtaget på pause. Metadata afventer VPN.' : 'Torrent tilføjet på pause. Tryk Start, når du vil hente.')) + (result.webSourcesIgnored ? ' Ekstra webkilder i linket er udeladt; hash og trackere bruges.' : ''), 'success');
     await refreshTorrents();
   } catch (error) { notify(error); }
-  finally { addingTorrent = false; controls.forEach((control, index) => { control.disabled = disabledStates[index]; }); }
+  finally { addingTorrent = false; controls.forEach((control, index) => { control.disabled = disabledStates[index]; }); updateAddStart(); }
 };
 document.querySelector('#logout').onclick = async () => { try { await api('auth/logout', {}); location.reload(); } catch (error) { notify(error); } };
 setInterval(() => { if (!document.hidden && document.body.classList.contains('signed-in')) { if (!document.querySelector('#vpn').hidden) refreshVpn().catch(() => {}); if (!document.querySelector('#feeds').hidden) loadSources('feeds').catch(() => {}); refresh(); } }, 10000);

@@ -39,6 +39,7 @@ class Magnet(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     url: str = Field(min_length=20, max_length=8192)
     ratio: float = Field(default=1, ge=1, le=1000, allow_inf_nan=False)
+    start: bool = False
 
     @field_validator("url")
     @classmethod
@@ -313,7 +314,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             if selection["provider"] != "mediavpn" or selection["disconnect_pending"]:
                 raise HTTPException(409, "VÃ¦lg MediaVPN under VPN i MediaSeed fÃ¸rst. Downloads er blokeret.")
             if files:
-                query = urlencode({"ratio": float(payload.get("ratioLimit", 1)), "savepath": payload.get("savepath", "/downloads"), "category": payload.get("category", "")})
+                query = urlencode({"ratio": float(payload.get("ratioLimit", 1)), "savepath": payload.get("savepath", "/downloads"), "category": payload.get("category", ""), "start": "true" if payload.get("stopped") == "false" else "false"})
                 result = await vpn_request("upload?" + query, "POST", content=files["torrents"][1])
             else:
                 result = await vpn_request("rpc", "POST", {"path": path.removeprefix("/api/v2/"), "method": method, "payload": payload or {}})
@@ -462,13 +463,13 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         ignored = any(key in params for key in ("xs", "as", "ws"))
         # Keep the info hash and trackers without allowing arbitrary HTTP file fetches.
         magnet = "magnet:?" + urlencode({key: value for key, value in params.items() if key not in {"xs", "as", "ws"}}, doseq=True) if ignored else body.url
-        result = await add_stopped(qbit, body.ratio, magnet=magnet)
+        result = await add_stopped(qbit, body.ratio, magnet=magnet, start=body.start, vpn_status=vpn_status)
         if ignored:
             result["webSourcesIgnored"] = True
         return result
 
     @app.post("/api/torrents/upload")
-    async def upload(request: Request, filename: str = Query(min_length=1, max_length=255), ratio: float = Query(default=1, ge=1, le=1000, allow_inf_nan=False), session=Depends(authorized)):
+    async def upload(request: Request, filename: str = Query(min_length=1, max_length=255), ratio: float = Query(default=1, ge=1, le=1000, allow_inf_nan=False), start: bool = Query(default=False), session=Depends(authorized)):
         if not filename.lower().endswith(".torrent"):
             raise HTTPException(422, "Choose a .torrent file")
         if request.headers.get("content-type", "").split(";")[0] not in {"application/x-bittorrent", "application/octet-stream"}:
@@ -480,7 +481,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
                 raise HTTPException(413, "Torrent file exceeds 4 MiB")
         if not content.startswith(b"d") or not content.endswith(b"e"):
             raise HTTPException(422, "Invalid torrent file")
-        return await add_stopped(qbit, ratio, content=bytes(content))
+        return await add_stopped(qbit, ratio, content=bytes(content), start=start, vpn_status=vpn_status)
 
     @app.post("/api/torrents/{action}")
     async def action(action: str, body: TorrentAction, session=Depends(authorized)):
