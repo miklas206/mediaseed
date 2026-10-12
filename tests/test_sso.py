@@ -11,8 +11,11 @@ def test_managed_login_and_live_permissions(tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIASEED_HUB_BROWSER_URL", "https://public-hub.example")
     role = ["viewer"]
     allowed = [True]
+    online = [True]
 
     def handler(request):
+        if not online[0]:
+            raise httpx.ConnectError("Synthetic hub outage")
         assert request.url.host == "hub.example"
         if request.url.path.endswith("origin"):
             return httpx.Response(200, json={"data": {"origin": "https://seed.example"}})
@@ -45,6 +48,10 @@ def test_managed_login_and_live_permissions(tmp_path, monkeypatch):
         assert client.get("/api/auth/me").json()["role"] == "user"
         allowed[0] = False
         assert client.get("/api/storage").status_code == 403
+        online[0] = False
+        response = client.get("/", headers={"Host": "custom.example"})
+        assert response.status_code == 503
+        assert response.json()["detail"] == "MediaHub authentication unavailable"
 
 
 def test_sso_requires_https(tmp_path, monkeypatch):
