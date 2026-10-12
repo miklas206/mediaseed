@@ -95,9 +95,11 @@ th { color: var(--muted); font-weight: 550; }
 #add-torrent-form { margin-top: 18px; gap: 16px; }
 .input-mode { display: flex; gap: 8px; border: 0; padding: 0; margin: 0; min-width: 0; }
 .input-mode legend { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
-.input-mode label { display: flex; align-items: center; flex: 1; gap: 8px; border: 1px solid var(--line); border-radius: 6px; padding: 10px; cursor: pointer; }
+.input-mode label { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 16px 28px; cursor: pointer; }
+.input-mode .source-icon { width: 28px; height: 28px; flex-shrink: 0; }
+.input-mode label:focus-within { outline: 2px solid var(--accent); outline-offset: 3px; }
 .input-mode label:has(input:checked) { background: var(--accent-bg); border-color: var(--accent-line); color: var(--accent); }
-.input-mode input { width: 16px; min-height: 16px; margin: 0; accent-color: var(--accent); }
+.input-mode input { position: absolute; top: 10px; right: 10px; width: 16px; min-height: 16px; margin: 0; accent-color: var(--accent); }
 .file-drop { padding: 16px; border: 1px dashed var(--line); border-radius: 6px; overflow-wrap: anywhere; }
 .file-drop.dragging { border-color: var(--accent); background: var(--accent-bg); }
 body.torrent-dragging::after {
