@@ -11,7 +11,15 @@ Independent seedbox application for MediaHub, inspired by FjordSeed's separate-a
 - Automatic tracker poster lookup for exact infohash matches. Only approved TMDB image hosts are fetched without tracker credentials. Authenticated local cache: 2 MiB/image, 64 MiB total, 24-hour refresh and seven-day cleanup. Missing/mismatched posters do not produce guessed artwork.
 - Torrent details show fresh exact-hash tracker benefit evidence (freeleech, double upload, featured/internal/refundable) when supplied by NordicBytes. Evidence expires after five minutes; it does not invent Green-credit or tracker-accounted ratio.
 
-Remaining FjordSeed parity includes selected-badge RSS filters, durable Green-credit accounting, detailed benefit/ratio previews, opt-in automatic file deletion/archive, generic tracker support and generic installation/SSO. TCP relay and country/profile-generation UI remain MediaVPN follow-ups. These features are not implemented by this release.
+Remaining FjordSeed parity includes selected-badge RSS filters, durable Green-credit accounting, detailed benefit/ratio previews, opt-in automatic file deletion/archive, generic tracker support and generic installation/SSO provisioning. TCP relay and country/profile-generation UI remain MediaVPN follow-ups. These features are not implemented by this release.
+
+In managed SSO mode, opening MediaSeed automatically starts MediaHub login when
+the app session is missing. An active session at the configured hub origin logs
+in as the same user without another password prompt. Denied access or an
+unavailable hub displays an error without a redirect loop. No first manual app
+login is required; standalone login remains available outside managed mode.
+Set `MEDIASEED_HUB_BROWSER_URL` to the public HTTPS hub origin when it differs
+from `MEDIASEED_HUB_URL`, which remains the verified server-side identity endpoint.
 
 - Independent FastAPI runtime, SQLite account database and static application UI.
 - Administrator setup, Argon2 password storage, expiring HttpOnly sessions, CSRF protection, login throttling and strict host/origin checks.

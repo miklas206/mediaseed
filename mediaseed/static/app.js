@@ -209,4 +209,19 @@ addForm.onsubmit = async event => {
 };
 document.querySelector('#logout').onclick = async () => { try { await api('auth/logout', {}); location.reload(); } catch (error) { notify(error); } };
 setInterval(() => { if (!document.hidden && document.body.classList.contains('signed-in')) { if (!document.querySelector('#vpn').hidden) refreshVpn().catch(() => {}); if (!document.querySelector('#feeds').hidden) loadSources('feeds').catch(() => {}); refresh(); } }, 10000);
-(async () => { try { const status = await api('auth/status'); needsSetup = status.needsSetup; document.querySelector('#identity-title').textContent = needsSetup ? 'En frisk begyndelse.' : 'Velkommen tilbage.'; document.querySelector('#identity-subtitle').textContent = needsSetup ? 'Opret din lokale MediaSeed-administrator.' : 'Log ind p\u00e5 MediaSeed.'; document.querySelector('#login-submit').textContent = needsSetup ? 'Opret administrator' : 'Log ind'; if (status.managed) { document.querySelector('#login').hidden = true; const link = element('a', 'Log ind med MediaHub', 'primary'); link.href = '/auth/hub/start'; document.querySelector('#login').after(link); } if (!needsSetup) { try { const identity = await api('auth/me'); csrf = identity.csrf; appRole = identity.role || 'administrator'; showWorkspace(); } catch {} } } catch (error) { notify(error); } })();
+async function initializeLogin() {
+  try {
+    const status = await api('auth/status'); needsSetup = status.needsSetup;
+    if (status.managed) {
+      document.querySelector('#login').hidden = true;
+      try { const identity = await api('auth/me'); csrf = identity.csrf; appRole = identity.role || 'administrator'; showWorkspace(); }
+      catch (error) { if (error.status === 401) location.replace(status.loginUrl); else notify(error); }
+      return;
+    }
+    document.querySelector('#identity-title').textContent = needsSetup ? 'En frisk begyndelse.' : 'Velkommen tilbage.';
+    document.querySelector('#identity-subtitle').textContent = needsSetup ? 'Opret din lokale MediaSeed-administrator.' : 'Log ind p\u00e5 MediaSeed.';
+    document.querySelector('#login-submit').textContent = needsSetup ? 'Opret administrator' : 'Log ind';
+    if (!needsSetup) { try { const identity = await api('auth/me'); csrf = identity.csrf; appRole = identity.role || 'administrator'; showWorkspace(); } catch {} }
+  } catch (error) { notify(error); }
+}
+void initializeLogin();

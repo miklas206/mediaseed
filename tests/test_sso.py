@@ -8,10 +8,12 @@ from mediaseed.app import create_app
 
 def test_managed_login_and_live_permissions(tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIASEED_HUB_URL", "https://hub.example")
+    monkeypatch.setenv("MEDIASEED_HUB_BROWSER_URL", "https://public-hub.example")
     role = ["viewer"]
     allowed = [True]
 
     def handler(request):
+        assert request.url.host == "hub.example"
         if request.url.path.endswith("exchange"):
             return httpx.Response(200, json={"data": {"token": "t" * 64, "expires": int(time.time()) + 3600, "user": {"id": "member", "username": "member", "role": role[0]}}})
         assert request.headers["Authorization"] == "Bearer " + "t" * 64
@@ -27,6 +29,7 @@ def test_managed_login_and_live_permissions(tmp_path, monkeypatch):
         assert client.post("/api/auth/login", json=credentials).status_code == 403
         start = client.get("/auth/hub/start", follow_redirects=False)
         assert start.status_code == 303
+        assert urlsplit(start.headers["location"]).netloc == "public-hub.example"
         state = parse_qs(urlsplit(start.headers["location"]).query)["state"][0]
         assert client.get("/auth/hub/callback", params={"state": "wrong" * 12, "code": "c" * 64}, follow_redirects=False).status_code == 403
         callback = client.get("/auth/hub/callback", params={"state": state, "code": "c" * 64}, follow_redirects=False)

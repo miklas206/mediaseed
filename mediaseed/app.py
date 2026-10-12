@@ -91,9 +91,13 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
     vpn_url = os.environ.get("MEDIASEED_VPN_URL", "").rstrip("/")
     vpn_token_file = os.environ.get("MEDIASEED_VPN_TOKEN_FILE")
     hub_url = os.environ.get("MEDIASEED_HUB_URL", "").rstrip("/")
+    hub_browser_url = os.environ.get("MEDIASEED_HUB_BROWSER_URL", hub_url).rstrip("/")
     hub_parsed = urlsplit(hub_url)
     if hub_url and (parsed.scheme != "https" or hub_parsed.scheme != "https" or not hub_parsed.hostname or hub_parsed.path or hub_parsed.query or hub_parsed.fragment or hub_parsed.username or hub_parsed.password):
         raise ValueError("Managed SSO requires HTTPS app and hub origins")
+    browser_hub = urlsplit(hub_browser_url)
+    if hub_url and (browser_hub.scheme != "https" or not browser_hub.hostname or browser_hub.path or browser_hub.query or browser_hub.fragment or browser_hub.username or browser_hub.password):
+        raise ValueError("Managed SSO requires an HTTPS browser hub origin")
     hub_ca = os.environ.get("MEDIASEED_HUB_CA_FILE")
     hub_tls = ssl.create_default_context(cafile=hub_ca) if hub_ca else True
 
@@ -255,7 +259,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             if connection.execute("SELECT COUNT(*) FROM hub_attempts").fetchone()[0] >= 1000:
                 raise HTTPException(429, "Try again later")
             connection.execute("INSERT INTO hub_attempts VALUES (?,?,?)", (hashlib.sha256(state.encode()).hexdigest(), verifier, time.time() + 300))
-        response = RedirectResponse(hub_url + "/api/v1/sso/authorize?" + urlencode({"packageId": "org.mediahub.mediaseed", "state": state, "challenge": challenge}), status_code=303)
+        response = RedirectResponse(hub_browser_url + "/api/v1/sso/authorize?" + urlencode({"packageId": "org.mediahub.mediaseed", "state": state, "challenge": challenge}), status_code=303)
         response.set_cookie("mediaseed_sso_state", state, httponly=True, secure=True, samesite="lax", max_age=300, path="/auth/hub")
         response.headers["Cache-Control"] = "no-store"
         return response

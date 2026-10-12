@@ -15,6 +15,7 @@ services:
       - --no-access-log
     environment:
       MEDIASEED_HUB_URL: ${MEDIASEED_HUB_URL:?Set the trusted HTTPS MediaHub origin}
+      MEDIASEED_HUB_BROWSER_URL: ${MEDIASEED_HUB_BROWSER_URL:-${MEDIASEED_HUB_URL}}
       MEDIASEED_HUB_CA_FILE: /hub-trust/ca.pem
       MEDIASEED_BASE_URL: ${MEDIASEED_BASE_URL:?Set the HTTPS MediaSeed origin}
     volumes:
