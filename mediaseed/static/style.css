@@ -135,10 +135,7 @@ footer { position: fixed; bottom: 0; width: 100%; min-height: 42px; display: fle
 .binary-lane { position: absolute; inset: 0 0 50%; overflow: hidden; visibility: hidden; }
 .binary-download { inset: 50% 0 0; color: var(--accent); }
 .binary-upload { color: var(--healthy); }
-.binary-lane b { position: absolute; left: 0; top: 2px; font: 600 12px/18px ui-monospace, Consolas, monospace; letter-spacing: .4px; white-space: nowrap; opacity: 0; text-shadow: 0 0 2px currentColor; mask-image: linear-gradient(90deg, transparent, #000 30%); }
-.binary-download b { mask-image: linear-gradient(270deg, transparent, #000 30%); }
-.binary-lane b::after { content: ''; position: absolute; right: 0; top: 5px; width: 1px; height: 9px; background: #dcfff0; box-shadow: 0 0 4px currentColor; }
-.binary-download b::after { right: auto; left: 0; background: #dcfaff; }
+.binary-lane b { position: absolute; left: 0; top: 2px; font: 600 12px/18px ui-monospace, Consolas, monospace; letter-spacing: 0; white-space: nowrap; opacity: .85; text-shadow: 0 0 2px currentColor; }
 .connection-traffic { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 20px; margin: 0 0 16px; font: 12px ui-monospace, Consolas, monospace; color: var(--muted); }
 .connection-traffic > span { padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .connection-flow[data-download="true"] #connection-download { color: var(--accent); border-color: var(--accent-line); }
@@ -151,11 +148,10 @@ footer { position: fixed; bottom: 0; width: 100%; min-height: 42px; display: fle
 .connection-flow[data-state="active"] .connection-vpn .connection-icon { color: var(--healthy); border-color: var(--healthy); background: var(--healthy-bg); box-shadow: 0 0 0 5px var(--surface), 0 0 0 6px var(--line), 0 0 24px var(--healthy-bg); }
 .connection-flow[data-state="active"][data-upload="true"] .binary-upload,
 .connection-flow[data-state="active"][data-download="true"] .binary-download { visibility: visible; }
-.connection-flow[data-state="active"][data-upload="true"] .binary-upload b { animation: binary-travel var(--flight, 1s) linear var(--phase, 0s) infinite; }
-.connection-flow[data-state="active"][data-download="true"] .binary-download b { animation: binary-travel var(--flight, 1s) linear var(--phase, 0s) infinite reverse; }
+.connection-flow[data-state="active"][data-upload="true"] .binary-upload b { animation: binary-travel 2.4s linear infinite; }
+.connection-flow[data-state="active"][data-download="true"] .binary-download b { animation: binary-travel 2.4s linear infinite reverse; }
 .connection-flow[data-state="blocked"] #connection-status { color: var(--danger); }
 .connection-flow[data-state="blocked"] #connection-status::before { background: var(--danger); }
-@keyframes binary-travel { 0% { left: 0; transform: translateX(-100%); opacity: 0; } 12%, 88% { opacity: var(--glow, .8); } 100% { left: 100%; transform: translateX(0); opacity: 0; } }
+@keyframes binary-travel { from { transform: translateX(-12ch); } to { transform: translateX(0); } }
 @media(max-width: 540px) { .connection-flow { padding: 16px 12px; } .connection-route { grid-template-columns: minmax(60px, 1fr) minmax(10px, .4fr) minmax(78px, 1fr) minmax(10px, .4fr) minmax(60px, 1fr); } .connection-node > span:last-child { font-size: 11px; } }
-@media(max-width: 540px) { .binary-lane b:not(:first-child) { display: none; } }
-@media(prefers-reduced-motion: reduce) { .connection-flow[data-state="active"][data-upload] .binary-lane b { animation: none; } .binary-lane b:first-child { left: 0; opacity: .8; } .binary-lane b:not(:first-child) { display: none; } }
+@media(prefers-reduced-motion: reduce) { .connection-flow[data-state="active"][data-upload] .binary-lane b { animation: none; } }

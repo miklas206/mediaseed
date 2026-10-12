@@ -13,6 +13,7 @@ test('removal choice survives early-seeding confirmation and streams regenerate 
   });
   const find = selector => {if (!nodes.has(selector)) nodes.set(selector, create()); return nodes.get(selector);};
   const lanes = Array.from({length: 4}, create);
+  lanes.forEach((lane, index) => {lane.classList.contains = name => name === 'binary-download' && index % 2 === 1;});
   const requests = [];
   const confirmations = [];
   let refuseOnce = true;
@@ -37,11 +38,17 @@ test('removal choice survives early-seeding confirmation and streams regenerate 
   assert.equal(context.countryFlag('DE').src, '/static/flags/de.svg');
   assert.equal(context.countryFlag(null), null);
   for (const lane of lanes) {
-    assert.equal(lane.children.length, 2);
+    assert.equal(lane.children.length, 1, 'one continuous strip prevents packet overlap');
     for (const packet of lane.children) {
-      assert.match(packet.textContent, /^[01]{8,12}$/);
+      assert.match(packet.textContent, /^[01]{96}$/);
       const seen = new Set([packet.textContent]);
-      for (let i = 0; i < 10; i++) {packet.listeners.animationiteration(); seen.add(packet.textContent);}
+      for (let i = 0; i < 10; i++) {
+        const previous = packet.textContent;
+        packet.listeners.animationiteration(); seen.add(packet.textContent);
+        assert.match(packet.textContent, /^[01]{96}$/);
+        if (lane.classList.contains('binary-download')) assert.equal(packet.textContent.slice(0, -12), previous.slice(12));
+        else assert.equal(packet.textContent.slice(12), previous.slice(0, -12));
+      }
       assert.ok(seen.size > 5);
     }
   }

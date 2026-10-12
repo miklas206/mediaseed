@@ -210,23 +210,18 @@ function expireConnection() {
   if (trafficFreshUntil && Date.now() >= trafficFreshUntil) renderTraffic();
 }
 // Decorative bits follow measured activity; they never represent torrent content.
-function randomizeStream(packet) {
-  const count = 8 + Math.floor(Math.random() * 5);
-  packet.textContent = Array.from({length: count}, () => Math.random() < .5 ? '0' : '1').join('');
+function randomBits(count) { return Array.from({length: count}, () => Math.random() < .5 ? '0' : '1').join(''); }
+function advanceStream(stream, download) {
+  // Replace only the 12 characters that moved outside the clipped lane.
+  // The remaining text stays aligned when the CSS animation loops.
+  stream.textContent = download ? stream.textContent.slice(12) + randomBits(12) : randomBits(12) + stream.textContent.slice(0, -12);
 }
 function initializeStreams() {
   for (const lane of document.querySelectorAll('.binary-lane')) {
     lane.replaceChildren();
-    const flight = 2.35 + Math.random() * .3;
-    const phase = Math.random() * flight;
-    for (let index = 0; index < 2; index++) {
-      const packet = element('b');
-      randomizeStream(packet);
-      packet.style.setProperty('--flight', `${flight.toFixed(2)}s`);
-      packet.style.setProperty('--phase', `${(-index * flight / 2 - phase).toFixed(2)}s`);
-      packet.addEventListener('animationiteration', () => randomizeStream(packet));
-      lane.append(packet);
-    }
+    const stream = element('b', randomBits(96));
+    stream.addEventListener('animationiteration', () => advanceStream(stream, lane.classList.contains('binary-download')));
+    lane.append(stream);
   }
 }
 initializeStreams();

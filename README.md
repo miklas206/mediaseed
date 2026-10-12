@@ -4,8 +4,11 @@ The connection panel above the app tabs shows MediaSeed → MediaVPN → Interne
 the observed VPN country, public IP, forwarded port and latest check time.
 Binary streams follow measured qBittorrent transfer speeds: green upload moves
 toward Internet; blue download moves toward MediaSeed. Simultaneous transfers
-use separate lanes, and idle traffic stops both. Motion also requires a verified
-VPN route with downloads enabled. Missing or invalid traffic measurements stop
+use separate lanes, and idle traffic stops both. Each lane uses one continuous,
+gap-free binary strip. Twelve characters move past every 2.4 seconds, then fresh
+random bits replace only the offscreen part so the visible text stays aligned
+at the animation boundary. Motion also requires a verified VPN route with
+downloads enabled. Missing or invalid traffic measurements stop
 the streams, independently of connection readiness, after at most 30 seconds.
 A failed VPN request or missing VPN refresh for 30 seconds clears connected
 state. Reduced-motion preferences replace motion with static binary text.
