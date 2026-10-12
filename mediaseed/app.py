@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from mediaseed.cleanup import CleanupManager, CleanupPolicy
+from mediaseed.tracker_credit import TrackerCredit
 from mediaseed.features import add_stopped, install_features, queue_summary
 
 COOKIE = "mediaseed_session"
@@ -208,7 +209,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @asynccontextmanager
     async def lifespan(app):
-        workers = [asyncio.create_task(cleanup.run())]
+        workers = [asyncio.create_task(cleanup.run()), asyncio.create_task(credit.run())]
         if vpn_url:
             workers += [asyncio.create_task(background()), asyncio.create_task(reconcile_disconnect())]
         yield
@@ -313,6 +314,9 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         return response
 
     async def qbit(path, method="GET", payload=None, files=None):
+        return await credit.request(path, method, payload, files)
+
+    async def raw_qbit(path, method="GET", payload=None, files=None):
         if vpn_url:
             selection = vpn_selection()
             if selection["provider"] != "mediavpn" or selection["disconnect_pending"]:
@@ -448,10 +452,12 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             if not isinstance(rows, list):
                 raise ValueError()
             result = []
-            for row in rows[:500]:
+            credits = credit.observe_many(rows[:500])
+            for row, credited in zip(rows[:500], credits):
                 public = {key: value for key, value in row.items() if key in allowed}
                 identifier = str(row.get("hash", ""))
                 if re.fullmatch(r"[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", identifier):
+                    public.update(credited)
                     cached = data / "cover-cache" / (hashlib.sha256(identifier.lower().encode()).hexdigest() + ".img")
                     if cached.is_file():
                         public["cover"] = "/api/covers/" + identifier.lower()
@@ -529,8 +535,9 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             properties = await qbit("/api/v2/torrents/properties", payload={"hash": body.torrent_hash})
             try:
                 observed = properties.json()
-                if float(observed.get("share_ratio", 0)) < 1 and int(observed.get("seeding_time", 0)) < 49 * 3600:
-                    raise HTTPException(409, "Early stop: ratio is below 1 and seeding time is below 49 hours. Explicit confirmation required.")
+                credited = credit.observe({"hash": body.torrent_hash, "uploaded": observed.get("total_uploaded"), "downloaded": observed.get("total_downloaded"), "ratio": observed.get("share_ratio"), "added_on": observed.get("addition_date")})
+                if float(credited.get("credited_ratio", observed.get("share_ratio", 0))) < float(credited.get("ratio_limit", 1)) and int(credited.get("seeding_time", observed.get("seeding_time", 0))) < 49 * 3600:
+                    raise HTTPException(409, "Early stop: credited ratio is below the selected goal and seeding time is below 49 hours. Explicit confirmation required.")
             except (ValueError, AttributeError, TypeError):
                 raise HTTPException(503, "Cannot verify seeding progress") from None
         path = "delete" if action == "remove" else "stop"
@@ -553,7 +560,9 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         except (ValueError, TypeError):
             raise HTTPException(503, "Cannot verify torrent removal") from None
 
-    cleanup = CleanupManager(database, qbit, vpn_status)
+    credit = TrackerCredit(database, data, raw_qbit)
+    cleanup = CleanupManager(database, qbit, vpn_status, credit=credit)
+    credit.cleanup = cleanup.public
 
     @app.post("/api/torrents/{identifier}/cleanup/cancel")
     async def cancel_cleanup(identifier: str, session=Depends(authorized)):
@@ -561,7 +570,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             raise HTTPException(422, "Invalid torrent hash")
         return await cleanup.cancel(identifier.lower())
 
-    background = install_features(app, authorized, database, qbit, vpn_status=vpn_status, data_dir=data, cleanup=cleanup)
+    background = install_features(app, authorized, database, qbit, vpn_status=vpn_status, data_dir=data, cleanup=cleanup, credit=credit)
 
     @app.get("/")
     def home():

@@ -77,6 +77,7 @@ function confirmEarlyAction(row, action, deleteFiles) {
   if (earlyConfirmation) return Promise.resolve(false);
   document.querySelector('#early-title').textContent = action === 'remove' ? 'Fjern før seedingmålet er nået?' : 'Stop før seedingmålet er nået?';
   document.querySelector('#early-name').textContent = row.name;
+  document.querySelector('#early-help').textContent = `Torrenten har endnu ikke nået den valgte ${'credited_ratio' in row ? 'krediterede ' : ''}uploadratio på ${trackerNumber(Number(row.ratio_limit) >= 1 ? row.ratio_limit : 1)} eller 49 timers seeding. Vil du fortsætte alligevel?`;
   document.querySelector('#early-consequence').textContent = action === 'remove' ? (deleteFiles ? 'Torrenten og de downloadede filer slettes. Det kan ikke fortrydes.' : 'Torrenten fjernes. De downloadede filer bliver bevaret.') : 'Torrenten stoppes. Torrenten og de downloadede filer bliver bevaret.';
   document.querySelector('#confirm-early').textContent = action === 'remove' ? 'Fjern alligevel' : 'Stop alligevel';
   document.querySelector('#cancel-early').textContent = action === 'remove' ? 'Behold torrent' : 'Fortsæt seeding';
@@ -128,10 +129,12 @@ function renderTorrents() {
   for (const row of rows) {
     const item = element('article', undefined, 'torrent'); const progress = element('progress'); progress.max = 1; progress.value = Math.max(0, Math.min(1, Number(row.progress || 0))); progress.setAttribute('aria-label', 'Fremdrift');
     if (typeof row.cover === 'string' && /^\/api\/covers\/(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(row.cover)) { const cover = element('img', undefined, 'torrent-cover'); cover.src = row.cover; cover.alt = ''; cover.width = 64; cover.height = 96; cover.loading = 'lazy'; cover.onerror = () => cover.remove(); item.append(cover); }
-    const status = element('p', `${Math.round(Number(row.progress || 0) * 100)} % · ${row.state || ''} · ${bytes(row.size)} · Ratio ${Number(row.ratio || 0).toFixed(2)}`);
+    const status = element('p', `${Math.round(Number(row.progress || 0) * 100)} % · ${row.state || ''} · ${bytes(row.size)} · ${typeof row.credited_ratio === 'number' ? `Krediteret ratio ${trackerNumber(row.credited_ratio)} · Rå ratio ${trackerNumber(row.ratio)}` : `Ratio ${Number(row.ratio || 0).toFixed(2)}`}`);
     const speeds = element('p', `Download ${bytes(row.dlspeed)}/s · Upload ${bytes(row.upspeed)}/s · Seeding ${(Number(row.seeding_time || 0) / 3600).toFixed(1)} timer`);
     const actions = element('div', undefined, 'actions'); actions.append(command('Detaljer', () => showDetails(row))); if (appRole !== 'viewer') { const start = command('Start', () => torrentAction(row, 'start')); start.disabled = !downloadsEnabled; actions.append(start, command('Stop', () => torrentAction(row, 'stop')), command('Fjern', () => chooseRemoval(row))); }
-    item.append(element('h2', row.name), progress, status, speeds, actions); target.append(item);
+    item.append(element('h2', row.name), progress, status, speeds);
+    if ('credited_ratio' in row) item.append(trackerCreditView(row));
+    item.append(actions); target.append(item);
   }
 }
 function torrentTraffic() {
@@ -339,6 +342,23 @@ document.querySelector('#vpn-disconnect').onclick = async () => {
   catch (error) { notify(error); button.disabled = false; }
 };
 document.querySelector('#vpn-refresh').onclick = () => refreshVpn().catch(error => { renderConnection({unavailable: true}); notify(error); });
+function trackerCreditView(row) {
+  const panel = element('section', undefined, 'tracker-credit');
+  const title = row.credit_observation_stale ? 'Trafikmåling afventer · ratiomål beskyttet' : row.green_pending ? 'Trackerregler afventer · foreløbig 0,5× kredit' : row.green_active ? 'Green-periode · 0,5× upload' : row.green_uploaded > 0 ? 'Green-periode afsluttet · ny upload tæller 1×' : 'Trackerregler · upload tæller 1×';
+  panel.append(element('strong', title));
+  panel.append(element('p', `Rå upload ${trackerBytes(row.uploaded)} · Beregnet krediteret upload ${trackerBytes(row.credited_uploaded)} · Krediteret ratio ${trackerNumber(row.credited_ratio)} / mål ${trackerNumber(row.ratio_limit)}`));
+  if (row.green_pending) panel.append(element('p', row.credit_observation_stale ? 'Afventer en stabil trafikmåling. En ældre måling eller en nulstillet tæller må ikke udløse et ratiomål.' : 'Afventer bekræftet oprettelsesdato fra trackeren. Ratio og automatisk oprydning bruger foreløbig halv uploadkredit.', 'muted'));
+  if (row.green_rule_until) panel.append(element('p', `De første 24 timer slutter ${new Date(row.green_rule_until * 1000).toLocaleString('da-DK')}. MediaSeed bruger 30 minutters sikkerhedsmargin til ${new Date(row.green_until * 1000).toLocaleTimeString('da-DK')}.`, 'muted'));
+  if (row.green_uploaded > 0) panel.append(element('p', `${trackerBytes(row.green_uploaded)} upload er registreret til 0,5×. Den del beholder halv kredit efter periodens udløb.`, 'muted'));
+  if (row.green_history_estimated) panel.append(element('p', 'Historisk upload kan ikke tidsopdeles præcist og er beregnet forsigtigt.', 'muted'));
+  const benefits = row.tracker_benefits;
+  if (benefits) {
+    const flags = [benefits.freeleech === null ? 'Freeleech ukendt' : `Freeleech ${benefits.freeleech} %`, benefits.doubleUpload ? 'Dobbelt upload' : null, benefits.featured ? 'Featured' : null, benefits.internal ? 'Internal' : null, benefits.refundable ? 'Refunderbar' : null, benefits.ownUpload ? 'Egen udgivelse · undtaget fra Green' : null].filter(Boolean);
+    panel.append(element('p', `${benefits.tracker} · Bekræftet info-hash · ${flags.join(' · ')}`, 'tracker-benefit-flags'));
+    if (benefits.doubleUpload) panel.append(element('p', 'Trackerbonus vises som information. Det lokale seedingmål bruger forsigtigt den målte upload med Green-fradrag; kontoens faktiske kredit fremgår af trackerkortet.', 'muted'));
+  } else panel.append(element('p', 'Aktuelle trackerfordele afventer et nyt API-opslag.', 'muted'));
+  return panel;
+}
 function detailTable(title, columns, rows) {
   const section = element('section'); section.append(element('h3', title)); if (!rows.length) { section.append(element('p', 'Ingen data', 'muted')); return section; }
   const table = element('table'); const heading = element('tr'); for (const [, label] of columns) heading.append(element('th', label)); const head = element('thead'); head.append(heading); table.append(head);
@@ -347,12 +367,12 @@ function detailTable(title, columns, rows) {
 async function showDetails(row) {
   selectedHash = row.hash; document.querySelector('#detail-name').textContent = row.name; document.querySelector('#detail-message').textContent = ''; const target = document.querySelector('#detail-data'); target.replaceChildren(element('p', 'Henter detaljer…'));
   document.querySelector('#policy-form input').value = Number(row.ratio_limit) >= 1 ? row.ratio_limit : 1; dialog.showModal();
-  try { const details = await api(`torrents/${row.hash}/details`); target.replaceChildren(element('p', `Downloadet ${bytes(details.properties.total_downloaded)} · Uploadet ${bytes(details.properties.total_uploaded)} · Seeding ${(Number(details.properties.seeding_time || 0) / 3600).toFixed(1)} timer`)); target.append(detailTable('Filer', [['name', 'Navn'], ['size', 'Bytes'], ['progress', 'Fremdrift']], details.files), detailTable('Trackere', [['host', 'Tracker'], ['status', 'Status'], ['num_peers', 'Peers']], details.trackers), detailTable('Peers', [['ip', 'IP'], ['client', 'Klient'], ['progress', 'Fremdrift']], details.peers)); renderCleanupDetails(details.cleanup, row, target); document.querySelector('#policy-form').hidden = appRole === 'viewer' || (details.cleanup?.mode && details.cleanup.mode !== 'never'); try { const benefits = await api(`torrents/${row.hash}/benefits`); if (benefits.status === 'matched') { const flags = [benefits.freeleech === null ? null : `Freeleech ${benefits.freeleech} %`, benefits.doubleUpload ? 'Dobbelt upload' : null, benefits.featured ? 'Featured' : null, benefits.internal ? 'Internal' : null, benefits.refundable ? 'Refunderbar' : null].filter(Boolean); target.append(element('h3', 'Trackerfordele'), element('p', `${benefits.tracker} · Præcist hash-match · ${flags.join(' · ') || 'Ingen bekræftede fordele'}`, 'muted')); } } catch {} } catch (error) { target.replaceChildren(element('p', error.message)); }
+  try { const details = await api(`torrents/${row.hash}/details`); target.replaceChildren(element('p', `Downloadet ${bytes(details.properties.total_downloaded)} · Uploadet ${bytes(details.properties.total_uploaded)} · Seeding ${(Number(details.properties.seeding_time || 0) / 3600).toFixed(1)} timer`)); target.append(detailTable('Filer', [['name', 'Navn'], ['size', 'Bytes'], ['progress', 'Fremdrift']], details.files), detailTable('Trackere', [['host', 'Tracker'], ['status', 'Status'], ['num_peers', 'Peers']], details.trackers), detailTable('Peers', [['ip', 'IP'], ['client', 'Klient'], ['progress', 'Fremdrift']], details.peers)); if (details.credit && 'credited_ratio' in details.credit) target.append(trackerCreditView({...row, ...details.credit, uploaded: details.properties.total_uploaded})); renderCleanupDetails(details.cleanup, row, target); document.querySelector('#policy-form').hidden = appRole === 'viewer' || (details.cleanup?.mode && details.cleanup.mode !== 'never'); try { const benefits = await api(`torrents/${row.hash}/benefits`); if (benefits.status === 'matched' && !details.credit?.tracker_benefits) { const flags = [benefits.freeleech === null ? null : `Freeleech ${benefits.freeleech} %`, benefits.doubleUpload ? 'Dobbelt upload' : null, benefits.featured ? 'Featured' : null, benefits.internal ? 'Internal' : null, benefits.refundable ? 'Refunderbar' : null].filter(Boolean); target.append(element('h3', 'Trackerfordele'), element('p', `${benefits.tracker} · Præcist hash-match · ${flags.join(' · ') || 'Ingen bekræftede fordele'}`, 'muted')); } } catch {} } catch (error) { target.replaceChildren(element('p', error.message)); }
 }
 function renderCleanupDetails(policy = {mode: 'never'}, row, target) {
   target.append(element('h3', 'Automatisk oprydning'));
   if (policy.mode === 'never') { target.append(element('p', 'Slået fra · torrent og filer bevares.', 'muted')); return; }
-  const goals = {time: `${policy.hours} timers aktiv seeding`, ratio: `uploadratio ${policy.ratio}`, both: `${policy.hours} timers aktiv seeding OG ratio ${policy.ratio}`, either: `${policy.hours} timers aktiv seeding ELLER ratio ${policy.ratio}`};
+  const goals = {time: `${policy.hours} timers aktiv seeding`, ratio: `krediteret uploadratio ${policy.ratio}`, both: `${policy.hours} timers aktiv seeding OG krediteret ratio ${policy.ratio}`, either: `${policy.hours} timers aktiv seeding ELLER krediteret ratio ${policy.ratio}`};
   const state = {waiting: 'Afventer klargøring; torrenten holdes på pause', preparing: 'Klargøring blev afbrudt; kontrollér torrenten eller slå reglen fra', active: 'Overvåges · venter på målet og på tilsluttede downloadere', identity_mismatch: 'Oprydning blokeret: torrentens identitet kunne ikke bekræftes'};
   target.append(element('p', `${policy.delete_files ? 'Fjern torrent og filer' : 'Fjern kun torrent · behold filer'} efter ${goals[policy.mode]}.`), element('p', policy.observationFailed ? 'Statuskontrol fejlede · oprydning afventer en ny, gyldig måling.' : state[policy.status] || 'Afventer kontrol', 'muted'));
   if (appRole !== 'viewer') {
@@ -483,7 +503,7 @@ function updateCleanupFields() {
   }
   document.querySelector('#add-cleanup-action').disabled = !active;
   document.querySelector('#add-cleanup-warning').hidden = !active || !files;
-  document.querySelector('#add-seeding-help').textContent = active ? 'Den valgte oprydningsregel styrer seedingmålet. Vælg start nu eller tilføj på pause. Start kræver verificeret VPN.' : 'Vælg start nu eller tilføj på pause. Start kræver verificeret VPN. Stopmål: valgt ratio eller 49 timers seeding; torrent og filer bevares.';
+  document.querySelector('#add-seeding-help').textContent = active ? 'Den valgte oprydningsregel styrer seedingmålet. Vælg start nu eller tilføj på pause. Start kræver verificeret VPN.' : 'Vælg start nu eller tilføj på pause. Start kræver verificeret VPN. Stopmål: valgt krediteret ratio eller 49 timers seeding; torrent og filer bevares.';
   const stop = addForm.elements.namedItem('ratio'); stop.disabled = active;
   const label = stop.closest?.('label'); if (label) label.hidden = active;
 }

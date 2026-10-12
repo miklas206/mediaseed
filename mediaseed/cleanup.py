@@ -86,6 +86,10 @@ def reached(policy, row):
         if any(type(row.get(key)) not in (int, float) for key in ("progress", "seeding_time", "ratio")):
             return False
         progress, seconds, ratio = (float(row[key]) for key in ("progress", "seeding_time", "ratio"))
+        if "credited_ratio" in row:
+            if type(row["credited_ratio"]) not in (int, float):
+                return False
+            ratio = float(row["credited_ratio"])
         if not all(math.isfinite(x) and x >= 0 for x in (progress, seconds, ratio)) or progress < 1:
             return False
         if row.get("state") not in {"uploading", "stalledUP", "pausedUP", "stoppedUP", "queuedUP", "forcedUP"}:
@@ -102,8 +106,9 @@ def reached(policy, row):
 
 
 class CleanupManager:
-    def __init__(self, database, qbit, vpn_status):
+    def __init__(self, database, qbit, vpn_status, credit=None):
         self.database, self.qbit, self.vpn_status = database, qbit, vpn_status
+        self.credit = credit
         self.lock = asyncio.Lock()
         self.observation_failed = False
         with database() as db:
@@ -201,7 +206,8 @@ class CleanupManager:
                         continue
                     await self.qbit("/api/v2/torrents/start", "POST", {"hashes": identifier})
                 rule["status"] = "active"; self.save(rule)
-            if reached(rule, row):
+            observed = {**row, **self.credit.observe(row)} if self.credit else row
+            if reached(rule, observed):
                 await self.qbit("/api/v2/torrents/delete", "POST", {"hashes": identifier, "deleteFiles": "true" if rule["delete_files"] else "false"})
                 # Deletion is accepted asynchronously by qBittorrent. Drop the
                 # policy now so a later re-import never inherits this action.

@@ -38,7 +38,7 @@ def matching_poster(data, identifier):
 
 
 class Covers:
-    def __init__(self, root, accounts, tracker_read, qbit):
+    def __init__(self, root, accounts, tracker_read, qbit, username=None):
         self.root = Path(root) / "cover-cache"
         self.root.mkdir(mode=0o700, exist_ok=True)
         self.accounts = accounts
@@ -46,6 +46,26 @@ class Covers:
         self.qbit = qbit
         self.checked = {}
         self.lock = asyncio.Lock()
+        self.username = username or (lambda identifier: None)
+
+    def remember(self, identifier, account, attributes):
+        if str(attributes.get("info_hash", "")).lower() != identifier.lower():
+            return
+        featured = attributes.get("featured") is True
+        try:
+            freeleech = float(str(attributes.get("freeleech")).rstrip("%"))
+        except (ValueError, TypeError):
+            freeleech = None
+        username = self.username(account["id"])
+        evidence = {"status": "matched", "infoHash": identifier.lower(), "tracker": account["name"][:80],
+                    "checkedAt": time.time(), "createdAt": attributes.get("created_at") if isinstance(attributes.get("created_at"), str) and len(attributes["created_at"]) <= 80 else None,
+                    "ownUpload": bool(username and attributes.get("uploader") == username),
+                    "freeleech": 100 if featured else freeleech if freeleech in {0, 25, 50, 75, 100} else None,
+                    "featured": featured, "doubleUpload": True if featured else attributes.get("double_upload") if type(attributes.get("double_upload")) is bool else None,
+                    "internal": attributes.get("internal") is True, "refundable": attributes.get("refundable") is True}
+        path = self.path(identifier).with_suffix(".json")
+        temporary = path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(evidence)); temporary.chmod(0o600); temporary.replace(path)
 
     def path(self, identifier):
         if not re.fullmatch(r"[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", identifier):
@@ -75,7 +95,8 @@ class Covers:
                 try:
                     for account in accounts:
                         name = str(torrent.get("name", ""))[:200]
-                        variants = list(dict.fromkeys([name, re.sub(r"[._]+", " ", name).strip()]))
+                        release = re.sub(r"\.(?:mkv|mp4|m4v|avi|mov|wmv|webm|m2ts|ts|iso|flac|mp3|m4a|ogg|wav)$", "", name, flags=re.I)
+                        variants = list(dict.fromkeys([release, name, re.sub(r"[._]+", " ", release).strip(), re.sub(r"[._]+", " ", name).strip()]))
                         matched = False
                         for variant in variants:
                             cursor = None
@@ -89,16 +110,7 @@ class Covers:
                                 data = await self.tracker_read(account, "/api/torrents/filter", params)
                                 attributes = matching_attributes(data, identifier)
                                 if attributes:
-                                    featured = attributes.get("featured") is True
-                                    freeleech = attributes.get("freeleech")
-                                    try:
-                                        freeleech = float(str(freeleech).rstrip("%"))
-                                    except (ValueError, TypeError):
-                                        freeleech = None
-                                    evidence = {"status": "matched", "infoHash": identifier.lower(), "tracker": account["name"][:80], "checkedAt": time.time(), "freeleech": 100 if featured else freeleech if freeleech in {0, 25, 50, 75, 100} else None, "featured": featured, "doubleUpload": True if featured else attributes.get("double_upload") if type(attributes.get("double_upload")) is bool else None, "internal": attributes.get("internal") is True, "refundable": attributes.get("refundable") is True}
-                                    evidence_path = path.with_suffix(".json")
-                                    evidence_path.write_text(json.dumps(evidence))
-                                    evidence_path.chmod(0o600)
+                                    self.remember(identifier, account, attributes)
                                     meta = attributes.get("meta")
                                     poster = poster_url(meta.get("poster")) if isinstance(meta, dict) else None
                                     if poster and (not path.exists() or time.time() - path.stat().st_mtime >= 86400):
@@ -107,6 +119,11 @@ class Covers:
                                     break
                                 links = data.get("links", {}) if isinstance(data, dict) else {}
                                 next_link = links.get("next") if isinstance(links, dict) else None
+                                meta = data.get("meta", {}) if isinstance(data, dict) else {}
+                                next_cursor = meta.get("next_cursor") if isinstance(meta, dict) else None
+                                if isinstance(next_cursor, str) and 0 < len(next_cursor) <= 2048:
+                                    cursor = next_cursor
+                                    continue
                                 if not isinstance(next_link, str) or len(next_link) > 4096:
                                     break
                                 next_address = urlsplit(next_link)

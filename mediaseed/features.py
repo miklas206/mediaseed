@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from mediaseed.covers import Covers
 from mediaseed.rss_worker import RssWorker
+from mediaseed.cleanup import source_hashes
 
 
 class SeedingPolicy(BaseModel):
@@ -106,7 +107,7 @@ async def add_stopped(qbit, ratio, content=None, magnet=None, start=False, vpn_s
 
 
 
-def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=None, cleanup=None):
+def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=None, cleanup=None, credit=None):
     tracker_cache = {}
     tracker_lock = asyncio.Lock()
     with database() as connection:
@@ -192,7 +193,11 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
             results.append(result)
         return {"results": results, "limit": 50, "downloadsEnabled": False}
 
-    covers = Covers(data_dir, rows, tracker_read, qbit) if data_dir else None
+    def tracker_username(identifier):
+        cached = tracker_cache.get(identifier)
+        account = next((a for a in rows("trackers") if a["id"] == identifier), None)
+        return cached["public"].get("username") if cached and account and cached["key"] == account["api_key"] and time.monotonic() - cached["checked"] < 360 and cached["public"].get("status") == "ok" else None
+    covers = Covers(data_dir, rows, tracker_read, qbit, username=tracker_username) if data_dir else None
     rss_worker = RssWorker(database, rows, qbit, vpn_status) if vpn_status else None
 
     @app.get("/api/covers/{identifier}")
@@ -237,6 +242,9 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         content = await tracker_read(account, address.path + ("?" + address.query if address.query else ""), binary=True)
         if not content.startswith(b"d") or not content.endswith(b"e"):
             raise HTTPException(502, "Tracker did not return a torrent file")
+        if covers:
+            for info_hash in source_hashes(content=content):
+                covers.remember(info_hash, account, attributes)
         await add_stopped(qbit, body.ratio, content=content)
         return {"added": True, "stopped": True, "downloadsEnabled": False}
 
@@ -277,6 +285,7 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
             "trackers": [{"host": urlsplit(row.get("url", "")).hostname or "DHT / PeX / LSD", "status": row.get("status"), "num_peers": row.get("num_peers")} for row in trackers[:100]],
             "peers": [{key: row.get(key) for key in ("ip", "port", "client", "progress", "dl_speed", "up_speed")} for row in list(peers.get("peers", {}).values())[:200]],
             "cleanup": cleanup.public(identifier) if cleanup else {"mode": "never"},
+            "credit": credit.observe({"hash": identifier, "uploaded": properties.get("total_uploaded"), "downloaded": properties.get("total_downloaded"), "ratio": properties.get("share_ratio"), "added_on": properties.get("addition_date")}) if credit else {},
         }
 
     @app.post("/api/torrents/{identifier}/policy")
