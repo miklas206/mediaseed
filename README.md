@@ -20,6 +20,11 @@ unavailable hub displays an error without a redirect loop. No first manual app
 login is required; standalone login remains available outside managed mode.
 Set `MEDIASEED_HUB_BROWSER_URL` to the public HTTPS hub origin when it differs
 from `MEDIASEED_HUB_URL`, which remains the verified server-side identity endpoint.
+An app domain saved in MediaHub settings becomes the registered opening and SSO
+callback origin together. MediaSeed reads it over verified TLS and accepts only
+its local host and that current domain. Set up domain DNS, HTTPS and proxy
+routing first, preserving the original Host header. Reset restores the local
+HTTPS origin.
 
 - Independent FastAPI runtime, SQLite account database and static application UI.
 - Administrator setup, Argon2 password storage, expiring HttpOnly sessions, CSRF protection, login throttling and strict host/origin checks.

@@ -112,6 +112,13 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
             raise HTTPException(503, "MediaHub authentication unavailable") from None
 
+    async def managed_origin():
+        value = (await hub_request("origin?packageId=org.mediahub.mediaseed")).get("origin", "")
+        candidate = urlsplit(value)
+        if candidate.scheme != "https" or not candidate.hostname or candidate.path or candidate.query or candidate.fragment or candidate.username or candidate.password:
+            raise HTTPException(503, "Invalid MediaHub app origin")
+        return value
+
     async def vpn_request(path, method="GET", payload=None, content=None):
         if not vpn_url or not vpn_token_file:
             raise HTTPException(409, "MediaVPN integration is not configured")
@@ -207,12 +214,21 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
                 await worker
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=[parsed.hostname])
+    if not hub_url:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=[parsed.hostname])
 
     @app.middleware("http")
     async def security(request, call_next):
         origin = request.headers.get("origin")
-        if request.method not in {"GET", "HEAD", "OPTIONS"} and origin and origin != base:
+        origins = {base}
+        if hub_url and (request.url.hostname != parsed.hostname or origin not in {None, base}):
+            try:
+                origins.add(await managed_origin())
+            except HTTPException as error:
+                return JSONResponse({"detail": error.detail}, status_code=error.status_code)
+        if hub_url and request.url.hostname not in {urlsplit(value).hostname for value in origins}:
+            return Response(status_code=400)
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and origin and origin not in origins:
             return Response(status_code=403)
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -249,9 +265,12 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         return {**dict(session), **public}
 
     @app.get("/auth/hub/start")
-    def hub_start():
+    async def hub_start(request: Request):
         if not hub_url:
             raise HTTPException(409, "MediaHub SSO is not configured")
+        origin = await managed_origin()
+        if request.headers.get("host", "").lower() != urlsplit(origin).netloc.lower():
+            return RedirectResponse(origin + "/auth/hub/start", status_code=303, headers={"Cache-Control": "no-store"})
         state, verifier = secrets.token_urlsafe(48), secrets.token_urlsafe(48)
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
         with database() as connection:
@@ -325,9 +344,9 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         return {"status": "healthy", "version": "0.1.0"}
 
     @app.get("/api/auth/status")
-    def status():
+    async def status():
         if hub_url:
-            return {"needsSetup": False, "managed": True, "loginUrl": "/auth/hub/start"}
+            return {"needsSetup": False, "managed": True, "loginUrl": await managed_origin() + "/auth/hub/start"}
         with database() as connection:
             return {"needsSetup": connection.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0}
 

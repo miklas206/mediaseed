@@ -14,6 +14,8 @@ def test_managed_login_and_live_permissions(tmp_path, monkeypatch):
 
     def handler(request):
         assert request.url.host == "hub.example"
+        if request.url.path.endswith("origin"):
+            return httpx.Response(200, json={"data": {"origin": "https://seed.example"}})
         if request.url.path.endswith("exchange"):
             return httpx.Response(200, json={"data": {"token": "t" * 64, "expires": int(time.time()) + 3600, "user": {"id": "member", "username": "member", "role": role[0]}}})
         assert request.headers["Authorization"] == "Bearer " + "t" * 64
