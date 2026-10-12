@@ -33,6 +33,9 @@ test('removal choice survives early-seeding confirmation and streams regenerate 
   vm.runInContext('torrents = [{hash: "a".repeat(40), name: "First"}, {hash: "b".repeat(40), name: "Next"}]', context);
   context.renderTorrents();
   assert.equal(context.countryLabel('Albania'), 'Albanien');
+  assert.equal(context.countryFlag('Albania').src, '/static/flags/al.svg');
+  assert.equal(context.countryFlag('DE').src, '/static/flags/de.svg');
+  assert.equal(context.countryFlag(null), null);
   for (const lane of lanes) {
     assert.equal(lane.children.length, 2);
     for (const packet of lane.children) {

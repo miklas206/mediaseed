@@ -118,6 +118,23 @@ async function refresh() {
   refreshing = false;
 }
 
+function countryFlag(country) {
+  if (!country) return null;
+  let code = /^[A-Z]{2}$/.test(country) ? country : null;
+  try {
+    const english = new Intl.DisplayNames(['en'], {type: 'region'});
+    for (let first = 65; !code && first <= 90; first++) for (let second = 65; second <= 90; second++) {
+      const candidate = String.fromCharCode(first, second);
+      if (english.of(candidate) === country) { code = candidate; break; }
+    }
+  } catch {}
+  if (!code) return null;
+  const flag = element('img', undefined, 'country-flag');
+  flag.src = `/static/flags/${code.toLowerCase()}.svg`;
+  flag.alt = ''; flag.width = 20; flag.height = 15;
+  flag.onerror = () => { flag.hidden = true; };
+  return flag;
+}
 function countryLabel(country) {
   if (!country) return 'Land ukendt';
   try {
@@ -140,6 +157,8 @@ function renderConnection(state) {
   document.querySelector('#connection-flow').dataset.state = status;
   document.querySelector('#connection-status').textContent = active ? 'Forbundet · VPN verificeret' : unavailable ? 'Status kan ikke verificeres' : state.disconnectPending ? 'Frakobling afventer' : state.provider ? 'Forbindelsen er blokeret' : 'Ingen VPN valgt';
   document.querySelector('#connection-country').textContent = active ? countryLabel(state.country) : 'Afventer forbindelse';
+  const flag = active ? countryFlag(state.country) : null;
+  if (flag) document.querySelector('#connection-country').append(flag);
   document.querySelector('#connection-ip').textContent = active ? state.publicIp || 'IP ukendt' : 'Downloads blokeret';
   document.querySelector('#connection-port').textContent = active ? `VPN-port ${state.forwardedPort || 'ukendt'}` : state.provider ? 'Kontrollér forbindelsen under VPN' : 'Vælg VPN under VPN-fanen';
   document.querySelector('#connection-checked').textContent = fresh ? `Kontrolleret ${new Date(checked * 1000).toLocaleTimeString('da-DK')}` : 'Afventer statuskontrol';
