@@ -1,6 +1,13 @@
 const api = globalThis.browser || chrome, MS = MediaSeedExtension;
 const $ = id => document.getElementById(id);
-let selected = null, pending = new URL(location.href).searchParams.get('pending'), currentTab = null, adding = false;
+let selected = null, pending = new URL(location.href).searchParams.get('pending'), currentTab = null, adding = false, savedDefaults = MS.defaults();
+function renderDefaults() {
+  const {start, ratio, cleanup: c} = savedDefaults;
+  const goals = {never: `Behold filer · stop ved ratio ${ratio} / 49 timer`, time: `${c.hours} timers seeding`, ratio: `ratio ${c.ratio}`, both: `${c.hours} timer OG ratio ${c.ratio}`, either: `${c.hours} timer ELLER ratio ${c.ratio}`};
+  $('settings-summary').textContent = `${start ? 'Start med det samme' : 'Tilføj på pause'} · ${goals[c.mode]}${c.mode === 'never' ? '' : c.delete_files ? ' · fjern torrent og filer' : ' · fjern kun torrent'}`;
+  $('add-default').textContent = start ? 'Tilføj og start' : 'Tilføj på pause';
+  $('add-other').textContent = start ? 'Tilføj på pause' : 'Tilføj og start'; $('add-other').value = start ? 'pause' : 'start';
+}
 function cleanupPolicy() {
   return {mode: $('cleanup-mode').value || 'never', hours: Number($('cleanup-hours').value || 49), ratio: Number($('cleanup-ratio').value || 1), delete_files: $('cleanup-action').value === 'files'};
 }
@@ -14,6 +21,18 @@ function updateCleanup() {
   $('ratio').disabled = active; const label = $('ratio').closest?.('label'); if (label) label.hidden = active;
 }
 $('cleanup-mode').onchange = updateCleanup; $('cleanup-action').onchange = updateCleanup; updateCleanup();
+function markDirty() { $('settings-state').textContent = 'Der er ændringer – gem for at bruge dem til nye tilføjelser.'; $('settings-state').dataset.dirty = 'true'; }
+$('settings').oninput = markDirty;
+$('settings').onchange = markDirty;
+$('settings').onsubmit = async e => {
+  e.preventDefault();
+  try {
+    const defaults = MS.defaults({start: $('default-start').value === 'start', ratio: $('ratio').value, cleanup: cleanupPolicy()});
+    await api.storage.local.set({defaults}); savedDefaults = defaults; renderDefaults();
+    $('settings-state').textContent = 'Gemt · bruges automatisk til nye tilføjelser.'; $('settings-state').dataset.dirty = 'false';
+    status('Standardindstillinger gemt. Højreklik sender nu direkte med disse valg.');
+  } catch (err) { status(err.message, true); }
+};
 function status(text, error = false) { $('status').textContent = text; $('status').dataset.error = String(error); }
 async function message(value) { const result = await api.runtime.sendMessage(value); if (result?.error) throw Error(result.error); return result; }
 async function permission(origin) { if (!await api.permissions.request({origins: [MS.pattern(origin)]})) throw Error('Browseradgang blev ikke givet.'); }
@@ -39,9 +58,11 @@ $('connect').onsubmit = async e => {
   try {
     const origin = MS.origin($('origin').value);
     await permission(origin); await api.storage.local.set({origin}); $('origin').value = origin;
+    $('connection-name').textContent = new URL(origin).host;
     status('Kontrollerer dit MediaSeed-login…');
     const result = await message({type: 'send', item: {kind: 'check'}});
     status(result.role === 'viewer' ? 'Forbundet · din bruger har kun læseadgang.' : 'Forbundet · klar til at tilføje torrents.');
+    $('connection').open = result.role === 'viewer';
   } catch (err) { status(err.message, true); }
 };
 $('open').onclick = async () => { try { await api.tabs.create({url: MS.origin($('origin').value) + '/'}); } catch (err) {status(err.message, true);} };
@@ -50,9 +71,7 @@ $('add').onsubmit = async e => {
   let controls;
   try {
     let item = selected?.kind === 'file' || selected?.kind === 'link' ? {...selected} : {kind: 'magnet', magnet: MS.magnet($('magnet').value)};
-    item.ratio = MS.ratio($('ratio').value); item.start = e.submitter?.value === 'start';
-    const cleanup = cleanupPolicy();
-    if (cleanup.mode !== 'never') item.cleanup = cleanup;
+    item = {...item, ...savedDefaults, start: ['start', 'pause'].includes(e.submitter?.value) ? e.submitter.value === 'start' : savedDefaults.start};
     adding = true; controls = [...document.querySelectorAll('button')]; controls.forEach(b => {b.disabled = true;});
     // Request only the specific source host, during this explicit user gesture.
     if (item.kind === 'link') await permission(MS.webURL(item.url).origin);
@@ -60,7 +79,6 @@ $('add').onsubmit = async e => {
     const result = await message({type: 'send', item, pending});
     status(result.cleanupPending ? 'Tilføjet på pause · oprydningsreglen afventer klargøring. Valgt start udføres derefter.' : result.pending ? 'Tilføjet · afventer torrentmetadata i MediaSeed.' : result.stopped ? 'Tilføjet på pause.' : 'Tilføjet · start anmodet. Følg fremdriften i MediaSeed.');
     showItem(null); $('file').value = ''; pending = null;
-    $('cleanup-mode').value = 'never'; updateCleanup();
   } catch (err) { status(err.message, true); }
   finally { adding = false; controls?.forEach(b => {b.disabled = false;}); $('enable').disabled = !currentTab; }
 };
@@ -84,10 +102,22 @@ $('enable').onclick = async () => {
   } catch (err) { status(err.message, true); }
 };
 async function initialize() {
-  const config = await api.storage.local.get('origin'); $('origin').value = config.origin || '';
-  if (config.origin) status('Klar · bruger din session i MediaSeed.');
+  const config = await api.storage.local.get(['origin', 'defaults', 'lastResult']); $('origin').value = config.origin || '';
+  savedDefaults = MS.defaults(config.defaults);
+  $('default-start').value = savedDefaults.start ? 'start' : 'pause'; $('ratio').value = String(savedDefaults.ratio);
+  $('cleanup-mode').value = savedDefaults.cleanup.mode; $('cleanup-hours').value = String(savedDefaults.cleanup.hours);
+  $('cleanup-ratio').value = String(savedDefaults.cleanup.ratio); $('cleanup-action').value = savedDefaults.cleanup.delete_files ? 'files' : 'torrent';
+  updateCleanup(); renderDefaults(); $('connection').open = !config.origin;
+  if (config.origin) { $('connection-name').textContent = new URL(config.origin).host; status('Klar · sender direkte med dine gemte valg.'); }
+  if (config.lastResult && Date.now() - config.lastResult.at < 10 * 60 * 1000) status(config.lastResult.text, config.lastResult.error);
   const [tab] = await api.tabs.query({active: true, currentWindow: true});
   try { if (tab?.url && MS.webURL(tab.url)) {currentTab = tab; $('site').textContent = new URL(tab.url).origin; $('enable').disabled = false;} } catch {}
+  if (!config.origin && currentTab && api.scripting) {
+    try {
+      const result = await api.scripting.executeScript({target: {tabId: currentTab.id}, func: mediaSeedDiscover});
+      if (result[0]?.result) { $('origin').value = MS.origin(result[0].result); status('MediaSeed fundet. Tryk Gem og forbind – adressen er udfyldt.'); }
+    } catch { /* An ordinary website need not permit discovery. */ }
+  }
   if (pending) { const result = await message({type: 'pending', id: pending}); if (result.item.kind === 'invalid') throw Error('Linket er ikke et gyldigt magnet- eller torrentlink.'); showItem(result.item); }
   await renderSites();
 }

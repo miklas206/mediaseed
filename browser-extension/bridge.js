@@ -46,3 +46,18 @@ async function mediaSeedReadFile(value, requireSameOrigin = true) {
   let text = ''; for (let i = 0; i < length; i += 8192) text += String.fromCharCode(...bytes.subarray(i, i + 8192));
   return {base64: btoa(text), name: 'download.torrent'};
 }
+
+/* No page data or credentials are read; feedback stays isolated in a shadow root. */
+function mediaSeedToast(text) {
+  document.getElementById('mediaseed-extension-toast')?.remove();
+  const host = document.createElement('div'); host.id = 'mediaseed-extension-toast';
+  host.style.cssText = 'position:fixed;top:18px;right:18px;z-index:2147483647;max-width:calc(100vw - 36px)';
+  const root = host.attachShadow({mode: 'closed'}), box = document.createElement('div');
+  box.setAttribute('role', 'status'); box.textContent = 'MediaSeed · ' + text;
+  box.style.cssText = 'font:14px/1.5 system-ui,sans-serif;color:#e4fff7;background:#102b28;border:1px solid #43d39b;border-radius:12px;padding:14px 18px;box-shadow:0 8px 28px #0005;overflow-wrap:anywhere';
+  root.append(box); document.documentElement.append(host); setTimeout(() => host.remove(), 6000);
+}
+
+function mediaSeedDiscover() {
+  return (document.title.startsWith('MediaSeed') || document.title.endsWith('MediaSeed')) && !!(document.getElementById('add-torrent') || document.getElementById('extension-download')) ? location.origin : null;
+}

@@ -32,6 +32,13 @@ def test_extension_packages_match_source_and_are_served(tmp_path):
                 assert "host_permissions" not in manifest
                 assert set(manifest["permissions"]) == {"storage", "contextMenus", "scripting", "activeTab"}
                 assert "externally_connectable" not in manifest
+                assert manifest["version"] == "1.2.0"
+                assert manifest["action"]["default_icon"] == manifest["icons"]
+                for size in (16, 32, 48, 128):
+                    import struct
+                    png = archive.read(manifest["icons"][str(size)])
+                    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+                    assert struct.unpack(">II", png[16:24]) == (size, size)
                 if browser == "chromium":
                     assert manifest["background"]["service_worker"] == "worker.js"
                 else:

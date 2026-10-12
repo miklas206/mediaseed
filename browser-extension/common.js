@@ -19,8 +19,14 @@ globalThis.MediaSeedExtension = (() => {
     if (!bytes.length || bytes.length > MAX_FILE || bytes[0] !== 100 || bytes[bytes.length - 1] !== 101) throw Error('Torrentfilen er ugyldig eller større end 4 MiB.');
   }
   function ratio(value) { const n = Number(value); if (!Number.isFinite(n) || n < 1 || n > 1000) throw Error('Ratio skal være mellem 1 og 1000.'); return n; }
+  function defaults(value = {}) {
+    const c = value.cleanup || {}, mode = c.mode ?? 'never', hours = Number(c.hours ?? 49);
+    if (!['never', 'time', 'ratio', 'both', 'either'].includes(mode) || !Number.isFinite(hours) || hours < 1 / 60 || hours > 87600) throw Error('Vælg gyldig oprydning og seedtid mellem ét minut og 87600 timer.');
+    if (value.start !== undefined && typeof value.start !== 'boolean' || c.delete_files !== undefined && typeof c.delete_files !== 'boolean') throw Error('Vælg gyldige start- og sletteindstillinger.');
+    return {start: value.start ?? true, ratio: ratio(value.ratio ?? 1), cleanup: {mode, hours, ratio: ratio(c.ratio ?? 1), delete_files: c.delete_files ?? false}};
+  }
   function webURL(value) { const u = new URL(value); if (!['https:', 'http:'].includes(u.protocol) || u.username || u.password || value.length > 8192) throw Error('Ugyldig torrentadresse.'); return u; }
   function encode(bytes) { let text = ''; for (let i = 0; i < bytes.length; i += 8192) text += String.fromCharCode(...bytes.subarray(i, i + 8192)); return btoa(text); }
   function decode(text) { if (typeof text !== 'string' || text.length > Math.ceil(MAX_FILE / 3) * 4) throw Error('Torrentfilen er for stor.'); return Uint8Array.from(atob(text), x => x.charCodeAt(0)); }
-  return {MAX_FILE, origin, pattern, magnet, file, ratio, webURL, encode, decode};
+  return {MAX_FILE, origin, pattern, magnet, file, ratio, defaults, webURL, encode, decode};
 })();

@@ -75,20 +75,21 @@ test('torrent fetching is bounded, same-origin, rejects redirects and HTML', asy
   await assert.rejects(c.mediaSeedReadFile('https://tracker.example/file.torrent'), /ikke en torrentfil/);
 });
 function background() {
-  let listener; const local = {origin: 'https://seed.example', sites: ['https://tracker.example']}, session = {}, created = [], executions = [];
+  let listener, clicked; const local = {origin: 'https://seed.example', sites: ['https://tracker.example']}, session = {}, created = [], executions = [], badges = [];
   const api = {
-    storage: {local: {get: async () => local}, session: {get: async id => id === null ? session : {[id]: session[id]}, set: async obj => Object.assign(session, obj), remove: async keys => (Array.isArray(keys) ? keys : [keys]).forEach(k => delete session[k])}},
+    storage: {local: {get: async () => local, set: async obj => Object.assign(local, obj)}, session: {get: async id => id === null ? session : {[id]: session[id]}, set: async obj => Object.assign(session, obj), remove: async keys => (Array.isArray(keys) ? keys : [keys]).forEach(k => delete session[k])}},
     permissions: {contains: async () => true},
     tabs: {query: async () => [{id: 1, url: 'https://seed.example/', status: 'complete'}], get: async () => ({id: 1, url: 'https://seed.example/', status: 'complete'}), create: async opts => {created.push(opts); return {id: 2};}, update: async () => {} , onUpdated: {addListener() {}}},
     scripting: {executeScript: async options => {executions.push(options); return [{result: {ok: true, stopped: true}}];}},
-    contextMenus: {onClicked: {addListener() {}}},
+    contextMenus: {onClicked: {addListener(fn) {clicked = fn;}}},
+    action: {setBadgeText: async item => badges.push(item.text), setBadgeBackgroundColor: async () => {}, setTitle: async () => {}},
     runtime: {getURL: path => 'chrome-extension://synthetic/' + path, onInstalled: {addListener() {}}, onMessage: {addListener(fn) {listener = fn;}}},
   };
   const c = context({chrome: api}); vm.runInContext(file('background.js'), c);
   const dispatch = (message, sender = {url: 'chrome-extension://synthetic/popup.html'}) => new Promise(resolve => listener(message, sender, resolve));
-  return {dispatch, api, created, executions, local, session};
+  return {dispatch, api, created, executions, local, session, badges, click: (...args) => clicked(...args)};
 }
-test('background restricts web messages to enabled sites and review only', async () => {
+test('background restricts web messages to enabled sites and sends with saved defaults', async () => {
   const b = background();
   let result = await b.dispatch({type: 'send', item: {kind: 'magnet', magnet: sample}}, {url: 'https://tracker.example', tab: {id: 9}, frameId: 0});
   assert.ok(result.error); assert.equal(b.executions.length, 0);
@@ -97,8 +98,9 @@ test('background restricts web messages to enabled sites and review only', async
   result = await b.dispatch({type: 'capture', url: sample}, {url: 'https://tracker.example', tab: {id: 9}, frameId: 1});
   assert.ok(result.error);
   result = await b.dispatch({type: 'capture', url: sample}, {url: 'https://tracker.example', tab: {id: 9}, frameId: 0});
-  assert.equal(result.ok, true); assert.equal(b.created.length, 1); assert.equal(b.executions.length, 0);
-  assert.equal(Object.keys(b.session).length, 1);
+  assert.equal(result.ok, true); assert.equal(b.created.length, 0);
+  assert.equal(b.executions[0].args[1].start, true); assert.equal(b.executions[0].args[1].cleanup.mode, 'never');
+  assert.equal(Object.keys(b.session).length, 0); assert.equal(b.badges.at(-1), 'OK');
 });
 test('background enforces exact MediaSeed origin and single-flight sends', async () => {
   const b = background(); let release;
@@ -109,6 +111,62 @@ test('background enforces exact MediaSeed origin and single-flight sends', async
   release([{result: {ok: true}}]); assert.equal((await first).ok, true);
   b.api.permissions.contains = async () => false;
   assert.match((await b.dispatch({type: 'send', item: {kind: 'check'}})).error, /adgang/);
+});
+
+test('direct context-menu magnets use persistent settings without opening a form', async () => {
+  const b = background();
+  b.local.defaults = {start: false, ratio: 3, cleanup: {mode: 'both', hours: 72, ratio: 4, delete_files: true}};
+  b.click({menuItemId: 'mediaseed-add', linkUrl: sample}, {id: 9});
+  await new Promise(r => setTimeout(r, 0));
+  assert.equal(b.created.length, 0);
+  const item = b.executions.find(x => x.func.name === 'mediaSeedBridge').args[1];
+  assert.equal(item.magnet, sample); assert.equal(item.start, false); assert.equal(item.ratio, 3);
+  assert.deepEqual(JSON.parse(JSON.stringify(item.cleanup)), b.local.defaults.cleanup);
+  assert.equal(b.local.lastResult.error, false);
+  assert.equal(b.executions.filter(x => x.func.name === 'mediaSeedBridge').length, 1);
+});
+
+test('direct torrent download retains source login and the same saved cleanup policy', async () => {
+  const b = background();
+  b.local.defaults = {start: true, cleanup: {mode: 'time', hours: 24, ratio: 2, delete_files: false}};
+  b.api.tabs.get = async id => id === 9 ? {id, url: 'https://tracker.example/list'} : {id, status: 'complete', url: 'https://seed.example/'};
+  b.api.scripting.executeScript = async options => { b.executions.push(options); return [{result: options.func.name === 'mediaSeedReadFile' ? {name: 'test.torrent', base64: btoa('de')} : {ok: true}}]; };
+  const result = await b.dispatch({type: 'capture', url: 'https://tracker.example/test.torrent'}, {url: 'https://tracker.example/list', tab: {id: 9}, frameId: 0});
+  assert.equal(result.ok, true); assert.equal(b.created.length, 0);
+  assert.equal(b.executions[0].target.tabId, 9);
+  const item = b.executions.find(x => x.func.name === 'mediaSeedBridge').args[1];
+  assert.equal(item.kind, 'file'); assert.equal(item.cleanup.hours, 24); assert.equal(item.start, true);
+});
+
+test('setup and failed sends preserve a draft; successful POST is never retried for feedback errors', async () => {
+  const b = background();
+  b.local.origin = '';
+  const sender = {url: 'https://tracker.example/list', tab: {id: 9}, frameId: 0};
+  assert.equal((await b.dispatch({type: 'capture', url: sample}, sender)).setup, true);
+  assert.equal(b.executions.length, 0); assert.equal(b.created.length, 1);
+  b.local.origin = 'https://seed.example';
+  b.api.scripting.executeScript = async options => {b.executions.push(options); return [{result: {error: 'Session expired', login: true}}];};
+  const failure = await b.dispatch({type: 'capture', url: sample}, sender);
+  assert.equal(failure.reviewed, true); assert.equal(b.created.length, 2); assert.equal(b.local.lastResult.error, true);
+  b.api.scripting.executeScript = async options => {b.executions.push(options); return [{result: {ok: true}}];};
+  b.api.storage.local.set = async () => {throw Error('synthetic storage failure');};
+  b.api.action.setTitle = async () => {throw Error('synthetic badge failure');};
+  assert.equal((await b.dispatch({type: 'capture', url: sample}, sender)).ok, true);
+  assert.equal(b.created.length, 2);
+  assert.equal(b.executions.filter(x => x.func.name === 'mediaSeedBridge').length, 2);
+});
+
+test('persistent error status redacts private source URLs', async () => {
+  const b = background();
+  b.api.scripting.executeScript = async () => {throw Error('Cannot access https://tracker.example/download?passkey=synthetic-private');};
+  await b.dispatch({type: 'capture', url: sample}, {url: 'https://tracker.example/list', tab: {id: 9}, frameId: 0});
+  assert.equal(b.local.lastResult.error, true); assert.doesNotMatch(b.local.lastResult.text, /passkey|synthetic-private|https:/);
+});
+
+test('saved defaults validate destructive intent and finite seed goals', () => {
+  const m = context().MediaSeedExtension;
+  assert.equal(m.defaults().cleanup.delete_files, false); assert.equal(m.defaults().start, true);
+  for (const value of [{cleanup: {hours: Infinity}}, {cleanup: {mode: 'bad'}}, {cleanup: {ratio: 0}}, {cleanup: {delete_files: 'true'}}, {start: 'true'}]) assert.throws(() => m.defaults(value));
 });
 test('capture intercepts trusted unmodified torrent clicks only and honors disabled sites', async () => {
   let listener, changed; const messages = [], storage = {sites: ['https://tracker.example']};
@@ -146,4 +204,33 @@ test('popup sends explicit start/pause, accepts a drop without sending, and pres
   fail = false;
   await node('add').onsubmit({preventDefault() {}, submitter: {value: 'pause'}});
   assert.match(node('status').textContent, /på pause/);
+});
+
+test('popup saves seed defaults, restores them after reopening and keeps them after adding', async () => {
+  const local = {origin: 'https://seed.example', sites: []}, sent = [];
+  async function open() {
+    const nodes = new Map();
+    const node = id => {if (!nodes.has(id)) nodes.set(id, {value: '', dataset: {}, files: [], classList: {add() {}, remove() {}}, replaceChildren() {}, append() {}}); return nodes.get(id);};
+    const c = context({location: {href: 'chrome-extension://synthetic/popup.html'}, document: {getElementById: node, addEventListener() {}, querySelectorAll: () => [], createElement: () => ({append() {}})}, chrome: {
+      storage: {local: {get: async () => local, set: async data => Object.assign(local, JSON.parse(JSON.stringify(data)))}}, tabs: {query: async () => []},
+      runtime: {sendMessage: async msg => {sent.push(msg); return {ok: true, stopped: !msg.item.start};}},
+    }});
+    vm.runInContext(file('popup.js'), c); await new Promise(r => setTimeout(r, 0)); return node;
+  }
+  let node = await open();
+  node('default-start').value = 'pause'; node('ratio').value = '2';
+  node('cleanup-mode').value = 'either'; node('cleanup-hours').value = '36'; node('cleanup-ratio').value = '3'; node('cleanup-action').value = 'files';
+  await node('settings').onsubmit({preventDefault() {}});
+  assert.deepEqual(local.defaults, {start: false, ratio: 2, cleanup: {mode: 'either', hours: 36, ratio: 3, delete_files: true}});
+  node = await open();
+  assert.equal(node('default-start').value, 'pause'); assert.equal(node('cleanup-hours').value, '36');
+  assert.equal(node('cleanup-action').value, 'files'); assert.match(node('settings-summary').textContent, /36 timer ELLER ratio 3/);
+  node('magnet').value = sample;
+  await node('add').onsubmit({preventDefault() {}, submitter: {value: 'defaults'}});
+  assert.equal(sent[0].item.start, false); assert.equal(sent[0].item.cleanup.hours, 36); assert.equal(sent[0].item.cleanup.delete_files, true);
+  assert.equal(node('cleanup-mode').value, 'either');
+  await node('add').onsubmit({preventDefault() {}, submitter: {value: 'start'}});
+  // Empty link fails validation instead of re-sending the previous torrent.
+  assert.equal(sent.length, 1);
+  node = await open(); assert.equal(node('cleanup-mode').value, 'either');
 });

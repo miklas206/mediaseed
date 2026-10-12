@@ -22,6 +22,7 @@ def package(browser):
     # Git's Windows checkout may use CRLF; packages must match on Linux too.
     contents = {name: (ROOT / name).read_text(encoding="utf-8").encode() for name in FILES}
     contents["mediaseed.svg"] = (STATIC / "mediaseed.svg").read_text(encoding="utf-8").encode()
+    contents.update({f"icons/{size}.png": (ROOT / "icons" / f"{size}.png").read_bytes() for size in (16, 32, 48, 128)})
     contents["manifest.json"] = (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode()
     stream = io.BytesIO()
     with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
