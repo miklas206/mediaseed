@@ -53,8 +53,6 @@ class Magnet(BaseModel):
         topics = params.get("xt", [])
         if not topics or not all(re.fullmatch(r"urn:btih:(?:[a-fA-F0-9]{40}|[a-zA-Z2-7]{32})|urn:btmh:1220[a-fA-F0-9]{64}", topic) for topic in topics):
             raise ValueError("Invalid magnet info hash")
-        if any(key in params for key in ("xs", "as", "ws")):
-            raise ValueError("External file sources are not supported")
         return value
 
 
@@ -460,7 +458,14 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.post("/api/torrents")
     async def add(body: Magnet, session=Depends(authorized)):
-        return await add_stopped(qbit, body.ratio, magnet=body.url)
+        params = parse_qs(urlsplit(body.url).query, keep_blank_values=True, max_num_fields=100)
+        ignored = any(key in params for key in ("xs", "as", "ws"))
+        # Keep the info hash and trackers without allowing arbitrary HTTP file fetches.
+        magnet = "magnet:?" + urlencode({key: value for key, value in params.items() if key not in {"xs", "as", "ws"}}, doseq=True) if ignored else body.url
+        result = await add_stopped(qbit, body.ratio, magnet=magnet)
+        if ignored:
+            result["webSourcesIgnored"] = True
+        return result
 
     @app.post("/api/torrents/upload")
     async def upload(request: Request, filename: str = Query(min_length=1, max_length=255), ratio: float = Query(default=1, ge=1, le=1000, allow_inf_nan=False), session=Depends(authorized)):
@@ -496,7 +501,20 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
                 raise HTTPException(503, "Cannot verify seeding progress") from None
         path = "delete" if action == "remove" else "stop"
         await qbit("/api/v2/torrents/" + path, "POST", {"hashes": body.torrent_hash, "deleteFiles": "true" if action == "remove" and body.delete_files else "false"})
-        return {"completed": True}
+        return {"accepted": True} if action == "remove" else {"completed": True}
+
+    @app.get("/api/torrents/{torrent_hash}/presence")
+    async def presence(torrent_hash: str, session=Depends(authorized)):
+        if not re.fullmatch(r"(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})", torrent_hash):
+            raise HTTPException(422, "Invalid torrent hash")
+        response = await qbit("/api/v2/torrents/info", payload={"hashes": torrent_hash})
+        try:
+            rows = response.json()
+            if not isinstance(rows, list) or any(not isinstance(row, dict) or not isinstance(row.get("hash"), str) for row in rows):
+                raise ValueError()
+            return {"present": any(row["hash"].lower() == torrent_hash.lower() for row in rows)}
+        except (ValueError, TypeError):
+            raise HTTPException(503, "Cannot verify torrent removal") from None
 
     background = install_features(app, authorized, database, qbit, vpn_status=vpn_status, data_dir=data)
 

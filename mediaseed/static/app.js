@@ -4,6 +4,7 @@ let torrents = [];
 let selectedHash = '';
 let downloadsEnabled = false;
 let refreshing = false;
+const pendingRemovals = new Map();
 let appRole = 'administrator';
 let vpnDraft = false;
 let vpnFreshUntil = 0;
@@ -39,8 +40,30 @@ function command(label, handler) { const button = element('button', label); butt
 async function torrentAction(row, action, deleteFiles = false) {
   try { await api('torrents/' + action, {torrent_hash: row.hash, delete_files: deleteFiles}); }
   catch (error) { if (error.status !== 409 || action === 'start') throw error; if (!confirm('Seedingmålet er ikke nået: ratio under 1 og mindre end 49 timer. Vil du alligevel fortsætte?')) return; await api('torrents/' + action, {torrent_hash: row.hash, delete_files: deleteFiles, confirm_early: true}); }
-  await refresh();
+  if (action === 'remove') {
+    pendingRemovals.set(row.hash, {confirmed: false});
+    renderTorrents();
+  } else await refresh();
   return true;
+}
+async function confirmRemoval(row) {
+  const deadline = Date.now() + 30000;
+  try {
+    while (true) {
+      const result = await api(`torrents/${row.hash}/presence`);
+      if (result.present === false) {
+        pendingRemovals.set(row.hash, {confirmed: true});
+        renderTorrents();
+        showNotification('Torrenten er fjernet.', 'success');
+        return;
+      }
+      if (Date.now() >= deadline) throw new Error('Fjernelsen er endnu ikke bekræftet. Opdater listen for at kontrollere status.');
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  } catch (error) {
+    pendingRemovals.delete(row.hash);
+    renderTorrents(); notify(error);
+  }
 }
 let removalRow;
 const removalDialog = document.querySelector('#remove-torrent');
@@ -57,19 +80,23 @@ document.querySelector('#remove-form').onsubmit = async event => {
   if (button.disabled || !removalRow) return;
   button.disabled = true;
   try {
-    if (await torrentAction(removalRow, 'remove', document.querySelector('#remove-files').checked)) {
+    const row = removalRow;
+    if (await torrentAction(row, 'remove', document.querySelector('#remove-files').checked)) {
       removalDialog.close(); removalRow = null;
-      showNotification('Torrenten er fjernet.', 'success');
+      showNotification('Fjernelse anmodet. Afventer bekræftelse fra torrentklienten.', 'info');
+      void confirmRemoval(row);
     }
   } catch (error) { notify(error); }
   finally { button.disabled = false; }
 };
 function renderTorrents() {
   const search = document.querySelector('#search').value.toLocaleLowerCase(); const filter = document.querySelector('#filter').value; const sort = document.querySelector('#sort').value;
-  const rows = torrents.filter(row => String(row.name).toLocaleLowerCase().includes(search) && (filter === 'all' || state(row) === filter));
+  const visible = torrents.filter(row => !pendingRemovals.has(row.hash));
+  const rows = visible.filter(row => String(row.name).toLocaleLowerCase().includes(search) && (filter === 'all' || state(row) === filter));
   const source = document.querySelector('#source-filter').value; const filtered = rows.filter(row => source === 'all' || String(row.category || '').startsWith('MediaSeed-RSS-') === (source === 'rss')); rows.splice(0, rows.length, ...filtered);
   rows.sort((first, second) => sort === 'name' ? String(first.name).localeCompare(String(second.name)) : Number(second[sort]) - Number(first[sort]));
-  document.querySelector('#count').textContent = `${rows.length} af ${torrents.length} torrents`;
+  const pending = [...pendingRemovals.values()].filter(row => !row.confirmed).length;
+  document.querySelector('#count').textContent = `${rows.length} af ${visible.length} torrents${pending ? ' · ' + pending + ' fjernes' : ''}`;
   const target = document.querySelector('#torrents'); target.replaceChildren(); if (!rows.length) target.append(element('p', torrents.length ? 'Ingen matchende torrents' : 'Ingen torrents', 'muted'));
   for (const row of rows) {
     const item = element('article', undefined, 'torrent'); const progress = element('progress'); progress.max = 1; progress.value = Math.max(0, Math.min(1, Number(row.progress || 0))); progress.setAttribute('aria-label', 'Fremdrift');
@@ -83,7 +110,7 @@ function renderTorrents() {
 async function refresh() {
   if (refreshing) return; refreshing = true;
   try { const runtime = await api('runtime'); downloadsEnabled = runtime.downloadsEnabled === true; renderConnection(runtime); } catch { downloadsEnabled = false; renderConnection({unavailable: true}); }
-  try { torrents = await api('torrents'); renderTorrents(); } catch (error) { torrents = []; renderTorrents(); document.querySelector('#count').textContent = 'Torrentklient utilgængelig'; }
+  try { torrents = await api('torrents'); for (const [hash, removal] of pendingRemovals) if (removal.confirmed && !torrents.some(row => row.hash === hash)) pendingRemovals.delete(hash); renderTorrents(); } catch (error) { torrents = []; renderTorrents(); document.querySelector('#count').textContent = 'Torrentklient utilgængelig'; }
   try { const client = await api('client'); const transfer = await api('transfer'); renderTraffic(transfer); document.querySelector('#transfer').textContent = `${client.name} ${client.version} · Download ${bytes(transfer.dl_info_speed)}/s · Upload ${bytes(transfer.up_info_speed)}/s · ${downloadsEnabled ? 'VPN verificeret' : 'Downloads blokeret indtil VPN er verificeret'}`; } catch { renderTraffic(); document.querySelector('#transfer').textContent = 'qBittorrent ikke tilsluttet · downloads blokeret'; }
   try { const queue = await api('queue'); document.querySelector('#queue-status').textContent = `Kø: ${queue.active}/${queue.limit} aktive · ${queue.waiting} ventende · RSS ${queue.rssActive} · Manuelle ${queue.manualActive}${queue.boundedView ? ' · Begrænset til 500 torrents' : ''}`; } catch { document.querySelector('#queue-status').textContent = 'Køstatus utilgængelig'; }
   const storage = document.querySelector('#storage'); storage.hidden = false;
@@ -93,9 +120,16 @@ async function refresh() {
 
 function countryLabel(country) {
   if (!country) return 'Land ukendt';
-  const codes = {'United States': 'US', 'United Kingdom': 'GB', 'Netherlands': 'NL', 'Sweden': 'SE', 'Denmark': 'DK', 'Norway': 'NO', 'Finland': 'FI', 'Germany': 'DE', 'Switzerland': 'CH', 'France': 'FR', 'Canada': 'CA', 'Romania': 'RO', 'Poland': 'PL', 'Spain': 'ES', 'Japan': 'JP', 'Singapore': 'SG', 'Australia': 'AU'};
-  const code = codes[country] || (/^[A-Z]{2}$/.test(country) ? country : null);
-  try { return code ? new Intl.DisplayNames(['da'], {type: 'region'}).of(code) : country; } catch { return country; }
+  try {
+    const english = new Intl.DisplayNames(['en'], {type: 'region'});
+    const danish = new Intl.DisplayNames(['da'], {type: 'region'});
+    if (/^[A-Z]{2}$/.test(country)) return danish.of(country);
+    for (let first = 65; first <= 90; first++) for (let second = 65; second <= 90; second++) {
+      const code = String.fromCharCode(first, second);
+      if (english.of(code) === country) return danish.of(code);
+    }
+  } catch {}
+  return country;
 }
 function renderConnection(state) {
   const checked = Number(state.checkedAt);
@@ -289,7 +323,7 @@ addForm.onsubmit = async event => {
       const response = await fetch(`/api/torrents/upload?filename=${encodeURIComponent(file.name)}&ratio=${ratio}`, {method: 'POST', headers: {'Content-Type': 'application/x-bittorrent', 'X-MediaSeed-CSRF': csrf}, body: file});
       result = await response.json(); if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : 'Torrentfilen kunne ikke tilføjes.');
     } else { result = await api('torrents', {url: addForm.elements.namedItem('url').value.trim(), ratio}); }
-    addDialog.close(); await refresh(); showNotification(result.pending ? 'Magnetlink modtaget stoppet. Metadata afventer VPN.' : 'Torrent tilføjet stoppet. Start kræver verificeret VPN.', 'success');
+    addDialog.close(); await refresh(); showNotification((result.pending ? 'Magnetlink modtaget. Metadata afventer VPN.' : 'Torrent tilføjet på pause. Tryk Start, når du vil hente.') + (result.webSourcesIgnored ? ' Ekstra webkilder i linket er udeladt; hash og trackere bruges.' : ''), 'success');
   } catch (error) { notify(error); }
   finally { addingTorrent = false; controls.forEach((control, index) => { control.disabled = disabledStates[index]; }); }
 };

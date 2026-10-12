@@ -1,4 +1,4 @@
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
@@ -176,8 +176,14 @@ def test_manual_magnet_and_file_additions_are_stopped(tmp_path):
         assert b'name="torrents"; filename="upload.torrent"' in calls[-1].content
         assert b'name="stopped"\r\n\r\ntrue' in calls[-1].content
         count = len(calls)
-        for url in ("https://example.test/file.torrent", "magnet:?xt=urn:btih:bad", magnet + "\n", magnet + "&xs=http://localhost/secret"):
+        for url in ("https://example.test/file.torrent", "magnet:?xt=urn:btih:bad", magnet + "\n"):
             assert client.post("/api/torrents", json={"url": url}).status_code == 422
+        response = client.post("/api/torrents", json={"url": magnet + "&tr=udp%3A%2F%2Ftracker.example%3A1337&ws=https%3A%2F%2Fwebtorrent.io%2Ftorrents%2F&xs=http%3A%2F%2Flocalhost%2Fsecret"})
+        assert response.status_code == 200 and response.json()["webSourcesIgnored"] is True
+        submitted = parse_qs(calls[-1].content.decode())["urls"][0]
+        assert "localhost" not in submitted and "webtorrent.io" not in submitted
+        assert parse_qs(urlsplit(submitted).query)["tr"] == ["udp://tracker.example:1337"]
+        count = len(calls)
         assert client.post("/api/torrents", json={"url": magnet, "ratio": 0.5}).status_code == 422
         assert client.post(path, content=b"not a torrent", headers=headers).status_code == 422
         assert client.post(path, content=b"d" + b"x" * (4 * 1024 * 1024) + b"e", headers=headers).status_code == 413

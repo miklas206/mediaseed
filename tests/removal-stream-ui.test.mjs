@@ -14,10 +14,12 @@ test('removal choice survives early-seeding confirmation and streams regenerate 
   const find = selector => {if (!nodes.has(selector)) nodes.set(selector, create()); return nodes.get(selector);};
   const lanes = Array.from({length: 4}, create);
   const requests = [];
+  const confirmations = [];
   let refuseOnce = true;
   const context = vm.createContext({document: {querySelector: find, querySelectorAll: s => s === '.binary-lane' ? lanes : [], createElement: create, body: create(), addEventListener() {}},
     setInterval() {}, setTimeout() {}, clearTimeout() {}, confirm: () => true,
     fetch: async (url, options) => {
+      if (url.endsWith('/presence')) return new Promise(resolve => confirmations.push(() => resolve({ok: true, json: async () => ({present: false})})));
       if (url === '/api/torrents/remove') {
         requests.push(JSON.parse(options.body));
         if (refuseOnce) {refuseOnce = false; return {ok: false, status: 409, json: async () => ({detail: 'Seeding goal'})};}
@@ -27,6 +29,10 @@ test('removal choice survives early-seeding confirmation and streams regenerate 
   });
   vm.runInContext(readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
   context.refresh = async () => {};
+  find('#filter').value = 'all'; find('#source-filter').value = 'all'; find('#sort').value = 'name';
+  vm.runInContext('torrents = [{hash: "a".repeat(40), name: "First"}, {hash: "b".repeat(40), name: "Next"}]', context);
+  context.renderTorrents();
+  assert.equal(context.countryLabel('Albania'), 'Albanien');
   for (const lane of lanes) {
     assert.equal(lane.children.length, 3);
     for (const packet of lane.children) {
@@ -45,8 +51,20 @@ test('removal choice survives early-seeding confirmation and streams regenerate 
   assert.ok(requests.every(body => body.delete_files === true));
   assert.equal(requests[1].confirm_early, true);
   assert.equal(find('#remove-torrent').open, false);
+  assert.equal(find('#message').dataset.tone, 'info');
+  assert.equal(find('#count').textContent, '1 af 1 torrents · 1 fjernes');
+  // A stale poll still containing the deleted hash must not resurrect its card.
+  context.renderTorrents();
+  assert.equal(find('#count').textContent, '1 af 1 torrents · 1 fjernes');
+  assert.equal(vm.runInContext('pendingRemovals.get("a".repeat(40)).confirmed', context), false);
+  confirmations.shift()();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(find('#message').dataset.tone, 'success');
+  assert.equal(vm.runInContext('pendingRemovals.get("a".repeat(40)).confirmed', context), true);
   context.chooseRemoval({hash: 'b'.repeat(40), name: 'Next'});
   assert.equal(find('#remove-files').checked, false);
   await find('#remove-form').onsubmit({preventDefault() {}});
   assert.equal(requests[2].delete_files, false);
+  confirmations.shift()();
+  await new Promise(resolve => setImmediate(resolve));
 });
