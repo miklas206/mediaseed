@@ -5,6 +5,7 @@ let selectedHash = '';
 let downloadsEnabled = false;
 let refreshing = false;
 let torrentListRequest = 0;
+let clientLabel = 'qBittorrent';
 const pendingRemovals = new Map();
 let appRole = 'administrator';
 let vpnDraft = false;
@@ -34,7 +35,7 @@ async function api(path, body, method) {
 }
 function notify(error) { showNotification(errorLabels[error.message] || error.message); }
 Object.assign(errorLabels, {'Invalid torrent file': 'Filen er ikke en gyldig torrentfil.', 'Choose a .torrent file': 'Vælg en .torrent-fil.', 'Torrent file exceeds 4 MiB': 'Torrentfilen må højst være 4 MiB.'});
-errorLabels['Starting requires a verified VPN. Choose add on pause instead.'] = 'Start kræver en verificeret VPN. Du kan vælge Tilføj på pause.';
+errorLabels['Starting requires a verified VPN. Choose add on pause instead.'] = 'Start kræver en verificeret VPN. Kontrollér forbindelsen under VPN.';
 function element(tag, text, className) { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; }
 function bytes(value) { const number = Number(value || 0); for (const [divisor, unit] of [[1073741824, 'GiB'], [1048576, 'MiB'], [1024, 'KiB']]) if (number >= divisor) return `${(number / divisor).toFixed(1)} ${unit}`; return `${number} B`; }
 function state(row) { if (/error|missing/i.test(row.state)) return 'error'; if (/stopped|paused/i.test(row.state)) return 'stopped'; if (Number(row.progress) >= 1) return 'seeding'; return 'downloading'; }
@@ -109,6 +110,14 @@ function renderTorrents() {
     item.append(element('h2', row.name), progress, status, speeds, actions); target.append(item);
   }
 }
+function torrentTraffic() {
+  if (!torrents.every(row => ['dlspeed', 'upspeed'].every(key => typeof row[key] === 'number' && Number.isFinite(row[key]) && row[key] >= 0))) return;
+  return torrents.reduce((total, row) => ({dl_info_speed: total.dl_info_speed + row.dlspeed, up_info_speed: total.up_info_speed + row.upspeed}), {dl_info_speed: 0, up_info_speed: 0});
+}
+function renderTransferSummary() {
+  const traffic = torrentTraffic();
+  document.querySelector('#transfer').textContent = traffic ? `${clientLabel} · Download ${bytes(traffic.dl_info_speed)}/s · Upload ${bytes(traffic.up_info_speed)}/s · ${downloadsEnabled ? 'VPN verificeret' : 'Downloads blokeret indtil VPN er verificeret'}${torrents.length === 500 ? ' · Trafik for de 500 viste torrents' : ''}` : `${clientLabel} · afventer trafikmåling`;
+}
 async function refreshTorrents() {
   const request = ++torrentListRequest;
   try {
@@ -117,9 +126,11 @@ async function refreshTorrents() {
     torrents = rows;
     for (const [hash, removal] of pendingRemovals) if (removal.confirmed && !torrents.some(row => row.hash === hash)) pendingRemovals.delete(hash);
     renderTorrents();
+    renderTraffic(torrentTraffic()); renderTransferSummary();
   } catch (error) {
     if (request !== torrentListRequest) return;
     torrents = []; renderTorrents(); document.querySelector('#count').textContent = 'Torrentklient utilgængelig';
+    renderTraffic(); document.querySelector('#transfer').textContent = 'Torrentklient utilgængelig · afventer trafikmåling';
   }
 }
 async function refresh() {
@@ -127,7 +138,7 @@ async function refresh() {
   try { const runtime = await api('runtime'); downloadsEnabled = runtime.downloadsEnabled === true; renderConnection(runtime); } catch { downloadsEnabled = false; renderConnection({unavailable: true}); }
   updateAddStart();
   await refreshTorrents();
-  try { const client = await api('client'); const transfer = await api('transfer'); renderTraffic(transfer); document.querySelector('#transfer').textContent = `${client.name} ${client.version} · Download ${bytes(transfer.dl_info_speed)}/s · Upload ${bytes(transfer.up_info_speed)}/s · ${downloadsEnabled ? 'VPN verificeret' : 'Downloads blokeret indtil VPN er verificeret'}`; } catch { renderTraffic(); document.querySelector('#transfer').textContent = 'qBittorrent ikke tilsluttet · downloads blokeret'; }
+  try { const client = await api('client'); clientLabel = `${client.name} ${client.version}`; } catch { clientLabel = 'qBittorrent'; }
   try { const queue = await api('queue'); document.querySelector('#queue-status').textContent = `Kø: ${queue.active}/${queue.limit} aktive · ${queue.waiting} ventende · RSS ${queue.rssActive} · Manuelle ${queue.manualActive}${queue.boundedView ? ' · Begrænset til 500 torrents' : ''}`; } catch { document.querySelector('#queue-status').textContent = 'Køstatus utilgængelig'; }
   const storage = document.querySelector('#storage'); storage.hidden = false;
   try { const capacity = await api('storage'); storage.textContent = `Lokal storage: ${bytes(capacity.freeBytes)} ledig af ${bytes(capacity.totalBytes)}${capacity.lowSpace ? ' · Lav diskplads' : ''}${capacity.writable ? '' : ' · Ikke skrivbar'}`; } catch { storage.textContent = 'Lokal storage utilgængelig'; }

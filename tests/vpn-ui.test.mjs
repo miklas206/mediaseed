@@ -90,6 +90,18 @@ test('shipped provider markup supports profile choice, polling, explicit connect
   assert.equal(find('#connection-ip').textContent, '203.0.113.7');
   assert.equal(find('#connection-port').textContent, 'VPN-port 43210');
   const flow = find('#connection-flow');
+  vm.runInContext('torrents = [{dlspeed: 23428, upspeed: 0}, {dlspeed: 100, upspeed: 0}]', context);
+  context.renderTraffic(context.torrentTraffic()); context.renderTransferSummary();
+  assert.equal(flow.dataset.download, 'true');
+  assert.equal(flow.dataset.upload, 'false');
+  assert.match(find('#connection-download').textContent, /23.0 KiB\/s/);
+  assert.match(find('#transfer').textContent, /23.0 KiB\/s/);
+  vm.runInContext('torrents = [{dlspeed: 0, upspeed: 2048}]', context);
+  context.renderTraffic(context.torrentTraffic());
+  assert.equal(flow.dataset.download, 'false'); assert.equal(flow.dataset.upload, 'true');
+  vm.runInContext('torrents = [{dlspeed: null, upspeed: 2048}]', context);
+  context.renderTraffic(context.torrentTraffic());
+  assert.equal(flow.dataset.download, 'false'); assert.equal(flow.dataset.upload, 'false');
   context.renderTraffic({dl_info_speed: 0, up_info_speed: 2048});
   assert.equal(flow.dataset.upload, 'true');
   assert.equal(flow.dataset.download, 'false');
