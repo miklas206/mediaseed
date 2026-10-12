@@ -138,6 +138,35 @@ test('direct torrent download retains source login and the same saved cleanup po
   assert.equal(item.kind, 'file'); assert.equal(item.cleanup.hours, 24); assert.equal(item.start, true);
 });
 
+test('NordicBytes suffixless download route sends once with defaults and a success toast', async () => {
+  const b = background();
+  b.local.sites = ['https://nordicbytes.org'];
+  b.local.defaults = {start: true, ratio: 3, cleanup: {mode: 'both', hours: 72, ratio: 3, delete_files: false}};
+  b.api.tabs.get = async id => id === 9 ? {id, url: 'https://nordicbytes.org/torrents/123'} : {id, status: 'complete', url: 'https://seed.example/'};
+  b.api.scripting.executeScript = async options => {b.executions.push(options); return [{result: options.func.name === 'mediaSeedReadFile' ? {name: 'test.torrent', base64: btoa('de')} : {ok: true}}];};
+  const result = await b.dispatch({type: 'capture', url: 'https://nordicbytes.org/torrents/download/123.synthetic?test=1'}, {url: 'https://nordicbytes.org/torrents/123', tab: {id: 9}, frameId: 0});
+  assert.equal(result.ok, true); assert.equal(b.created.length, 0);
+  const imports = b.executions.filter(x => x.func.name === 'mediaSeedBridge');
+  assert.equal(imports.length, 1);
+  assert.equal(imports[0].args[1].cleanup.hours, 72);
+  assert.equal(imports[0].args[1].ratio, 3);
+  assert.equal(imports[0].args[1].start, true);
+  const toast = b.executions.find(x => x.func.name === 'mediaSeedToast');
+  assert.equal(toast.target.tabId, 9); assert.match(toast.args[0], /Tilføjet/);
+  assert.equal((await b.dispatch({type: 'capture', url: 'https://nordicbytes.org/torrents/123'}, {url: 'https://nordicbytes.org/torrents/123', tab: {id: 9}, frameId: 0})).error, 'Kun torrentlinks kan fanges automatisk.');
+});
+
+test('automatic NordicBytes matching excludes other routes, origins and non-torrent pages', () => {
+  const m = context().MediaSeedExtension;
+  for (const origin of ['https://nordicbytes.org', 'https://www.nordicbytes.org']) {
+    assert.equal(m.capturable(origin + '/torrents/download/123', origin), true);
+    assert.equal(m.capturable(origin + '/torrents/download/123.synthetic?test=1', origin), true);
+    for (const path of ['/torrents/123', '/download/123', '/torrents/download/', '/torrents/download/123/other']) assert.equal(m.capturable(origin + path, origin), false);
+  }
+  assert.equal(m.capturable('https://nordicbytes.org/torrents/download/123', 'https://tracker.example'), false);
+  assert.equal(m.capturable('https://nordicbytes.org.evil.example/torrents/download/123', 'https://nordicbytes.org.evil.example'), false);
+});
+
 test('setup and failed sends preserve a draft; successful POST is never retried for feedback errors', async () => {
   const b = background();
   b.local.origin = '';
@@ -169,7 +198,7 @@ test('saved defaults validate destructive intent and finite seed goals', () => {
   for (const value of [{cleanup: {hours: Infinity}}, {cleanup: {mode: 'bad'}}, {cleanup: {ratio: 0}}, {cleanup: {delete_files: 'true'}}, {start: 'true'}]) assert.throws(() => m.defaults(value));
 });
 test('capture intercepts trusted unmodified torrent clicks only and honors disabled sites', async () => {
-  let listener, changed; const messages = [], storage = {sites: ['https://tracker.example']};
+  let listener, changed; const messages = [], storage = {sites: ['https://tracker.example', 'https://nordicbytes.org']};
   const c = context({location: {origin: 'https://tracker.example'}, document: {addEventListener(_, fn) {listener = fn;}}, chrome: {
     storage: {local: {get: async () => storage}, onChanged: {addListener(fn) {changed = fn;}}}, runtime: {sendMessage: async msg => {messages.push(msg); return {ok: true};}},
   }});
@@ -178,6 +207,10 @@ test('capture intercepts trusted unmodified torrent clicks only and honors disab
   assert.equal(click(sample, {isTrusted: false}), false); assert.equal(click(sample, {ctrlKey: true}), false);
   assert.equal(click('https://tracker.example/article'), false);
   assert.equal(click(sample), true); assert.equal(messages.length, 1);
+  c.location.origin = 'https://nordicbytes.org'; await changed();
+  assert.equal(click('https://nordicbytes.org/torrents/download/123.synthetic'), true);
+  assert.equal(messages.length, 2);
+  assert.equal(click('https://nordicbytes.org/torrents/123'), false);
   storage.sites = []; await changed(); await new Promise(r => setTimeout(r, 0));
   assert.equal(click(sample), false);
 });

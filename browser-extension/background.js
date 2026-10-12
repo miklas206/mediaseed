@@ -98,7 +98,7 @@ async function inject(tab) {
   const config = await settings();
   let origin; try { origin = new URL(tab.url).origin; } catch { return; }
   if (origin === config.origin || !config.sites.includes(origin)) return;
-  if (await api.permissions.contains({origins: [MS.pattern(origin)]})) await api.scripting.executeScript({target: {tabId: tab.id}, files: ['capture.js']});
+  if (await api.permissions.contains({origins: [MS.pattern(origin)]})) await api.scripting.executeScript({target: {tabId: tab.id}, files: ['common.js', 'capture.js']});
 }
 api.tabs.onUpdated.addListener((id, info, tab) => { if (info.status === 'complete') inject(tab).catch(() => {}); });
 api.runtime.onInstalled.addListener(() => {
@@ -118,7 +118,7 @@ async function handle(message, sender) {
     if (!sender.tab || sender.frameId !== 0 || source === config.origin || !config.sites.includes(source)) throw Error('Hjemmesiden er ikke aktiveret.');
     if (!await api.permissions.contains({origins: [MS.pattern(source)]})) throw Error('Adgangen til hjemmesiden er fjernet.');
     const item = message.url.startsWith('magnet:') ? {kind: 'magnet', magnet: MS.magnet(message.url)} : {kind: 'link', url: MS.webURL(message.url).href, sourceTab: sender.tab.id};
-    if (item.kind === 'link' && !new URL(item.url).pathname.toLowerCase().endsWith('.torrent')) throw Error('Kun torrentlinks kan fanges automatisk.');
+    if (!MS.capturable(message.url, source)) throw Error('Kun torrentlinks kan fanges automatisk.');
     return await direct(item, sender.tab);
   }
   // Only our own extension pages may configure, read imports or send API requests.

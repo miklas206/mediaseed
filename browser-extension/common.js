@@ -26,7 +26,17 @@ globalThis.MediaSeedExtension = (() => {
     return {start: value.start ?? true, ratio: ratio(value.ratio ?? 1), cleanup: {mode, hours, ratio: ratio(c.ratio ?? 1), delete_files: c.delete_files ?? false}};
   }
   function webURL(value) { const u = new URL(value); if (!['https:', 'http:'].includes(u.protocol) || u.username || u.password || value.length > 8192) throw Error('Ugyldig torrentadresse.'); return u; }
+  function capturable(value, sourceOrigin) {
+    try {
+      if (value.startsWith('magnet:')) { magnet(value); return true; }
+      const u = webURL(value);
+      if (u.pathname.toLowerCase().endsWith('.torrent')) return true;
+      // UNIT3D download links have no .torrent suffix. Restrict this adapter to
+      // a user-enabled NordicBytes origin and its actual torrent download route.
+      return u.origin === sourceOrigin && ['nordicbytes.org', 'www.nordicbytes.org'].includes(u.hostname) && /^\/torrents\/download\/[^/]+\/?$/.test(u.pathname);
+    } catch { return false; }
+  }
   function encode(bytes) { let text = ''; for (let i = 0; i < bytes.length; i += 8192) text += String.fromCharCode(...bytes.subarray(i, i + 8192)); return btoa(text); }
   function decode(text) { if (typeof text !== 'string' || text.length > Math.ceil(MAX_FILE / 3) * 4) throw Error('Torrentfilen er for stor.'); return Uint8Array.from(atob(text), x => x.charCodeAt(0)); }
-  return {MAX_FILE, origin, pattern, magnet, file, ratio, defaults, webURL, encode, decode};
+  return {MAX_FILE, origin, pattern, magnet, file, ratio, defaults, webURL, capturable, encode, decode};
 })();

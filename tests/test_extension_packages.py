@@ -32,7 +32,7 @@ def test_extension_packages_match_source_and_are_served(tmp_path):
                 assert "host_permissions" not in manifest
                 assert set(manifest["permissions"]) == {"storage", "contextMenus", "scripting", "activeTab"}
                 assert "externally_connectable" not in manifest
-                assert manifest["version"] == "1.2.0"
+                assert manifest["version"] == "1.2.1"
                 assert manifest["action"]["default_icon"] == manifest["icons"]
                 for size in (16, 32, 48, 128):
                     import struct
