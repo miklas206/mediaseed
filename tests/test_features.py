@@ -262,14 +262,17 @@ def test_mediavpn_proxy_requires_fresh_readiness_for_start(tmp_path, monkeypatch
     def handler(request):
         assert request.headers["X-MediaSeed-Key"] == "synthetic-machine-token"
         if request.url.path.endswith("/status"):
-            return httpx.Response(200, json={"ready": ready, "downloadsEnabled": ready})
+            return httpx.Response(200, json={"enabled": True, "profileId": "a" * 24, "ready": ready, "downloadsEnabled": ready})
         body = json.loads(request.content)
+        if request.url.path.endswith("/settings"):
+            return httpx.Response(200, json={})
         mutations.append(body)
         return httpx.Response(200, json={"status": 204, "body": base64.b64encode(b"").decode()})
 
     monkeypatch.setattr(module.httpx, "AsyncClient", lambda **kwargs: original_client(**kwargs, transport=httpx.MockTransport(handler)))
     with TestClient(create_app(tmp_path / "state", "http://testserver")) as client:
         sign_in(client)
+        assert client.put("/api/vpn", json={"provider": "mediavpn", "enabled": True, "profileId": "a" * 24}).status_code == 200
         assert client.post("/api/torrents/start", json={"torrent_hash": "a" * 40}).status_code == 200
         assert mutations[-1]["path"] == "torrents/start"
         ready = False

@@ -66,17 +66,45 @@ async function refresh() {
   refreshing = false;
 }
 
+function updateVpnChoice() {
+  const selected = document.querySelector('#vpn-provider').value === 'mediavpn';
+  const profile = document.querySelector('#vpn-profile');
+  document.querySelector('#vpn-profile-field').hidden = !selected;
+  profile.disabled = !selected;
+  profile.required = selected;
+  document.querySelector('#vpn-connect').disabled = selected && !profile.value;
+}
 async function refreshVpn() {
-  const state = await api('vpn'); const select = document.querySelector('#vpn-profile'); const previous = select.value; select.replaceChildren(element('option', 'Vælg profil')); select.firstChild.value = '';
-  for (const profile of state.profiles || []) { const option = element('option', `${profile.name} · ${profile.forwardedPort ? 'port ' + profile.forwardedPort : 'port ikke verificeret'}`); option.value = profile.id; select.append(option); }
-  select.value = state.profileId || previous; if (!select.value && select.options.length === 2) select.selectedIndex = 1;
-  document.querySelector('#vpn-status').textContent = state.ready ? 'Verificeret' : 'Ikke verificeret';
+  const state = await api('vpn');
+  const provider = document.querySelector('#vpn-provider');
+  provider.value = state.provider || '';
+  provider.querySelector('option[value="mediavpn"]').disabled = !state.integrationAvailable;
+  const select = document.querySelector('#vpn-profile');
+  select.replaceChildren(element('option', 'V\u00e6lg profil')); select.firstChild.value = '';
+  for (const profile of state.profiles || []) { const option = element('option', `${profile.name} \u00b7 ${profile.forwardedPort ? 'port ' + profile.forwardedPort : 'port ikke verificeret'}`); option.value = profile.id; select.append(option); }
+  select.value = state.profileId || '';
+  document.querySelector('#vpn-status').textContent = state.ready ? 'Verificeret' : state.provider ? 'Ikke verificeret' : 'Ikke tilkoblet';
   document.querySelector('#vpn-downloads').textContent = state.downloadsEnabled ? 'Tilladt gennem VPN' : 'Blokeret';
   document.querySelector('#vpn-ip').textContent = state.publicIp || 'Ikke verificeret'; document.querySelector('#vpn-port').textContent = state.forwardedPort || 'Ikke verificeret'; document.querySelector('#vpn-reason').textContent = state.reason || '';
-  document.querySelector('#vpn-connect').disabled = select.options.length < 2;
+  document.querySelector('#vpn-disconnect').disabled = !state.provider && !state.disconnectPending;
+  updateVpnChoice();
 }
-document.querySelector('#vpn-form').onsubmit = async event => { event.preventDefault(); const button = document.querySelector('#vpn-connect'); button.disabled = true; try { await api('vpn', {enabled: true, profileId: document.querySelector('#vpn-profile').value}, 'PUT'); await refreshVpn(); await refresh(); showNotification('Seedbox-tilkobling gemt. Status verificeres.', 'success'); } catch (error) { notify(error); } finally { button.disabled = false; } };
-document.querySelector('#vpn-disconnect').onclick = async () => { try { await api('vpn', {enabled: false, profileId: document.querySelector('#vpn-profile').value || null}, 'PUT'); await refreshVpn(); await refresh(); showNotification('Seedbox stoppet.', 'success'); } catch (error) { notify(error); } };
+document.querySelector('#vpn-provider').onchange = updateVpnChoice;
+document.querySelector('#vpn-profile').onchange = updateVpnChoice;
+document.querySelector('#vpn-form').onsubmit = async event => {
+  event.preventDefault(); const button = document.querySelector('#vpn-connect'); button.disabled = true;
+  const provider = document.querySelector('#vpn-provider').value || null;
+  try {
+    await api('vpn', {enabled: provider === 'mediavpn', provider, profileId: document.querySelector('#vpn-profile').value || null}, 'PUT');
+    await refreshVpn(); await refresh();
+    showNotification(provider ? 'MediaVPN valgt. Torrentklienten starter, n\u00e5r profilen er verificeret.' : 'MediaVPN frakoblet. Downloads er blokeret. Data bevares.', 'success');
+  } catch (error) { notify(error); } finally { updateVpnChoice(); }
+};
+document.querySelector('#vpn-disconnect').onclick = async () => {
+  const button = document.querySelector('#vpn-disconnect'); button.disabled = true;
+  try { await api('vpn', {enabled: false, provider: null}, 'PUT'); await refreshVpn(); await refresh(); showNotification('MediaVPN frakoblet. Downloads er blokeret. Data bevares.', 'success'); }
+  catch (error) { notify(error); button.disabled = false; }
+};
 document.querySelector('#vpn-refresh').onclick = () => refreshVpn().catch(notify);
 function detailTable(title, columns, rows) {
   const section = element('section'); section.append(element('h3', title)); if (!rows.length) { section.append(element('p', 'Ingen data', 'muted')); return section; }

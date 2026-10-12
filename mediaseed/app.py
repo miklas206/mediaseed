@@ -10,6 +10,7 @@ import ssl
 import time
 from contextlib import asynccontextmanager, contextmanager, suppress
 from pathlib import Path
+from typing import Literal
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
@@ -66,6 +67,7 @@ class TorrentAction(BaseModel):
 class VpnSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool
+    provider: Literal["mediavpn"] | None = None
     profileId: str | None = Field(default=None, pattern=r"^[a-f0-9]{24}$")
 
 
@@ -119,11 +121,6 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         except (httpx.HTTPError, OSError, ValueError):
             raise HTTPException(503, "MediaVPN is unavailable; downloads are blocked") from None
 
-    async def vpn_status():
-        if not vpn_url:
-            return {"ready": False, "downloadsEnabled": False, "vpn": "unverified", "profiles": [], "reason": "MediaVPN integration is not configured"}
-        return await vpn_request("status")
-
     @contextmanager
     def database():
         with sqlite3.connect(data / "mediaseed.sqlite", timeout=10) as connection:
@@ -132,6 +129,11 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     with database() as connection:
         connection.executescript("""
+            CREATE TABLE IF NOT EXISTS vpn_selection (
+                id INTEGER PRIMARY KEY CHECK(id=1), provider TEXT, profile_id TEXT,
+                disconnect_pending INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT OR IGNORE INTO vpn_selection(id) VALUES(1);
             CREATE TABLE IF NOT EXISTS accounts (username TEXT PRIMARY KEY, password TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS sessions (digest TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS attempts (address TEXT PRIMARY KEY, count INTEGER NOT NULL, started REAL NOT NULL);
@@ -139,12 +141,64 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             CREATE TABLE IF NOT EXISTS hub_sessions (digest TEXT PRIMARY KEY, token TEXT NOT NULL, user_id TEXT NOT NULL);
         """)
     (data / "mediaseed.sqlite").chmod(0o600)
+    vpn_lock = asyncio.Lock()
+
+    def vpn_selection():
+        with database() as connection:
+            return dict(connection.execute("SELECT * FROM vpn_selection WHERE id=1").fetchone())
+
+    def save_vpn(provider, profile_id, pending=False):
+        with database() as connection:
+            connection.execute("UPDATE vpn_selection SET provider=?,profile_id=?,disconnect_pending=? WHERE id=1", (provider, profile_id, int(pending)))
+
+    async def disconnect_vpn():
+        selection = vpn_selection()
+        if selection["disconnect_pending"]:
+            await vpn_request("settings", "PUT", {"enabled": False, "profileId": selection["profile_id"]})
+            save_vpn(None, selection["profile_id"])
+
+    async def vpn_status(discover=False):
+        selection = vpn_selection()
+        configured = bool(vpn_url and vpn_token_file)
+        disconnected = {
+            "provider": None, "enabled": False, "profileId": None,
+            "ready": False, "downloadsEnabled": False, "vpn": "unverified",
+            "profiles": [], "integrationAvailable": configured,
+            "disconnectPending": bool(selection["disconnect_pending"]),
+            "publicIp": None, "forwardedPort": None,
+            "reason": "MediaVPN er ikke valgt. Downloads er blokeret."
+        }
+        if not selection["provider"] and not discover:
+            return disconnected
+        if not configured:
+            return {**disconnected, "reason": "MediaVPN er ikke tilgÃ¦ngelig i denne installation."}
+        try:
+            remote = await vpn_request("status")
+        except HTTPException:
+            return {**disconnected, "provider": selection["provider"], "profileId": selection["profile_id"] if selection["provider"] else None, "integrationAvailable": False, "reason": "MediaVPN er utilgÃ¦ngelig; downloads er blokeret."}
+        if not selection["provider"]:
+            return {**disconnected, "profiles": remote.get("profiles", []), "reason": "Frakobling afventer MediaVPN. Downloads er blokeret." if selection["disconnect_pending"] else disconnected["reason"]}
+        matches = remote.get("enabled") is True and remote.get("profileId") == selection["profile_id"]
+        ready = matches and remote.get("ready") is True and remote.get("downloadsEnabled") is True
+        return {**remote, "provider": "mediavpn", "profileId": selection["profile_id"], "enabled": True, "integrationAvailable": True, "disconnectPending": False, "ready": ready, "downloadsEnabled": ready, "vpn": "verified" if ready else "unverified", "reason": remote.get("reason") if matches else "Den valgte MediaVPN-profil er ikke tilkoblet; downloads er blokeret."}
+
+    async def reconcile_disconnect():
+        while True:
+            try:
+                async with vpn_lock:
+                    await disconnect_vpn()
+            except HTTPException:
+                await asyncio.sleep(5)
+                continue
+            await asyncio.sleep(5)
+
     @asynccontextmanager
     async def lifespan(app):
-        worker = asyncio.create_task(background()) if vpn_url else None
+        workers = [asyncio.create_task(background()), asyncio.create_task(reconcile_disconnect())] if vpn_url else []
         yield
-        if worker:
+        for worker in workers:
             worker.cancel()
+        for worker in workers:
             with suppress(asyncio.CancelledError):
                 await worker
 
@@ -232,6 +286,9 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     async def qbit(path, method="GET", payload=None, files=None):
         if vpn_url:
+            selection = vpn_selection()
+            if selection["provider"] != "mediavpn" or selection["disconnect_pending"]:
+                raise HTTPException(409, "VÃ¦lg MediaVPN under VPN i MediaSeed fÃ¸rst. Downloads er blokeret.")
             if files:
                 query = urlencode({"ratio": float(payload.get("ratioLimit", 1)), "savepath": payload.get("savepath", "/downloads"), "category": payload.get("category", "")})
                 result = await vpn_request("upload?" + query, "POST", content=files["torrents"][1])
@@ -337,11 +394,23 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/api/vpn")
     async def vpn_overview(session=Depends(authorized)):
-        return await vpn_status()
+        return await vpn_status(discover=True)
 
     @app.put("/api/vpn")
     async def configure_vpn(body: VpnSettings, session=Depends(authorized)):
-        return await vpn_request("settings", "PUT", body.model_dump())
+        if body.enabled and (body.provider != "mediavpn" or not body.profileId):
+            raise HTTPException(422, "VÃ¦lg MediaVPN og en profil fÃ¸rst.")
+        if body.enabled and (not vpn_url or not vpn_token_file):
+            raise HTTPException(409, "MediaVPN er ikke tilgÃ¦ngelig i denne installation.")
+        async with vpn_lock:
+            if body.enabled:
+                save_vpn("mediavpn", body.profileId)
+                await vpn_request("settings", "PUT", {"enabled": True, "profileId": body.profileId})
+            else:
+                previous = vpn_selection()
+                save_vpn(None, previous["profile_id"], pending=bool(vpn_url and vpn_token_file))
+                await disconnect_vpn()
+        return await vpn_status(discover=True)
 
     @app.get("/api/torrents")
     async def torrents(session=Depends(authorized)):
