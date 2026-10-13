@@ -38,6 +38,8 @@ async function api(path, body, method) {
   if (!response.ok) throw Object.assign(new Error(typeof result.detail === 'string' ? result.detail : t("Check the fields and try again.")), {status: response.status});
   return result;
 }
+globalThis.MediaAppTheme.setOverrideHandler(themeOverride => api('auth/preferences', {themeOverride}, 'PUT'));
+window.addEventListener('mediahub-theme-error', event => notify(new Error(event.detail)));
 function notify(error) { showNotification(errorLabels[error.message] || error.message); }
 Object.assign(errorLabels, {'Invalid torrent file': t("The file is not a valid torrent file."), 'Choose a .torrent file': t("Choose a .torrent file."), 'Torrent file exceeds 4 MiB': t("Torrent files must not exceed 4 MiB.")});
 errorLabels['Starting requires a verified VPN. Choose add on pause instead.'] = t("Starting requires a verified VPN. Check the connection under VPN.");
@@ -527,7 +529,7 @@ for (const selector of ['#search', '#filter', '#sort', '#source-filter']) docume
 document.querySelector('#open-rss')?.addEventListener('click', () => document.querySelector('[data-view="feeds"]').click());
 document.querySelector('#manage-trackers').onclick = () => document.querySelector('[data-view="trackers"]').click();
 function showWorkspace() { if (appRole !== 'viewer') void loadSources('feeds').catch(() => { const preview = document.querySelector('#feed-preview'); if (preview) preview.textContent = t('Feed list unavailable'); }); const rssPanel = document.querySelector('.seed-rss'); if (rssPanel) rssPanel.hidden = appRole === 'viewer'; void refreshTrackerOverview(); document.body.classList.add('signed-in'); document.querySelector('#identity').hidden = true; document.querySelector('#workspace').hidden = false; document.querySelector('#logout').hidden = false; document.querySelector('#new-torrent').hidden = appRole === 'viewer'; document.querySelector('#policy-form').hidden = appRole === 'viewer'; for (const selector of ['#feed-form', '#tracker-form', '#vpn-form']) document.querySelector(selector).hidden = appRole !== 'administrator'; for (const selector of ['[data-view="feeds"]', '[data-view="trackers"]']) document.querySelector(selector).hidden = appRole === 'viewer'; refresh(); }
-document.querySelector('#login').onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(event.target)); try { if (needsSetup) { await api('auth/setup', body); needsSetup = false; } csrf = (await api('auth/login', body)).csrf; const identity = await api('auth/me'); setLanguage(identity.language || 'en'); event.target.reset(); showWorkspace(); } catch (error) { notify(error); } };
+document.querySelector('#login').onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(event.target)); try { if (needsSetup) { await api('auth/setup', body); needsSetup = false; } csrf = (await api('auth/login', body)).csrf; const identity = await api('auth/me'); setLanguage(identity.language || 'en'); globalThis.MediaAppTheme.applyIdentity(identity); event.target.reset(); showWorkspace(); } catch (error) { notify(error); } };
 document.querySelector('#refresh').onclick = refresh;
 const addDialog = document.querySelector('#add-torrent');
 const addForm = document.querySelector('#add-torrent-form');
@@ -644,14 +646,14 @@ async function initializeLogin() {
     const status = await api('auth/status'); needsSetup = status.needsSetup;
     if (status.managed) {
       document.querySelector('#login').hidden = true;
-      try { const identity = await api('auth/me'); setLanguage(identity.language || 'en'); csrf = identity.csrf; appRole = identity.role || 'administrator'; showWorkspace(); }
+      try { const identity = await api('auth/me'); setLanguage(identity.language || 'en'); globalThis.MediaAppTheme.applyIdentity(identity); csrf = identity.csrf; appRole = identity.role || 'administrator'; showWorkspace(); }
       catch (error) { if (error.status === 401) location.replace(status.loginUrl); else notify(error); }
       return;
     }
     document.querySelector('#identity-title').textContent = needsSetup ? t("A fresh start.") : t("Welcome back.");
     document.querySelector('#identity-subtitle').textContent = needsSetup ? t("Create your local MediaSeed administrator.") : t("Sign in to MediaSeed.");
     document.querySelector('#login-submit').textContent = needsSetup ? t("Create administrator") : t("Sign in");
-    if (!needsSetup) { try { const identity = await api('auth/me'); setLanguage(identity.language || 'en'); csrf = identity.csrf; appRole = identity.role || 'administrator'; showWorkspace(); } catch {} }
+    if (!needsSetup) { try { const identity = await api('auth/me'); setLanguage(identity.language || 'en'); globalThis.MediaAppTheme.applyIdentity(identity); csrf = identity.csrf; appRole = identity.role || 'administrator'; showWorkspace(); } catch {} }
   } catch (error) { notify(error); }
 }
 void initializeLogin();
@@ -659,6 +661,12 @@ void initializeLogin();
 const accountLanguage = document.querySelector('#account-language');
 if (accountLanguage) { accountLanguage.onchange = () => setLanguage(accountLanguage.value); setLanguage(accountLanguage.value || 'en'); }
 
-async function refreshAccountLanguage() { try { const identity = await api('auth/me'); setLanguage(identity.language || 'en'); } catch {} }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshAccountLanguage(); });
-setInterval(() => { if (!document.hidden) void refreshAccountLanguage(); }, 60000);
+let refreshingPreferences = false;
+async function refreshAccountPreferences() {
+  if (refreshingPreferences || document.hidden || document.querySelector('#workspace').hidden) return;
+  refreshingPreferences = true;
+  try { const identity = await api('auth/me'); setLanguage(identity.language || 'en'); globalThis.MediaAppTheme.applyIdentity(identity); } catch {} finally { refreshingPreferences = false; }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshAccountPreferences(); });
+window.addEventListener('focus', () => { void refreshAccountPreferences(); });
+setInterval(() => { void refreshAccountPreferences(); }, 60000);

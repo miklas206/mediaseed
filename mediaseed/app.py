@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from mediaseed.appearance import install_theme_preferences, theme_override
 from mediaseed.cleanup import CleanupManager, CleanupPolicy
 from mediaseed.features import add_stopped, install_features, queue_summary
 from mediaseed.tracker_credit import TrackerCredit
@@ -265,7 +266,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             public = await hub_request("session?packageId=org.mediahub.mediaseed", token=managed["token"])
             if public.get("id") != managed["user_id"] or public.get("role") not in {"administrator", "user", "viewer"}:
                 raise HTTPException(403, "MediaHub access denied")
-            if request.method not in {"GET", "HEAD", "OPTIONS"} and request.url.path != "/api/auth/logout":
+            if request.method not in {"GET", "HEAD", "OPTIONS"} and request.url.path not in {"/api/auth/logout", "/api/auth/preferences"}:
                 if public["role"] == "viewer":
                     raise HTTPException(403, "Read-only app access")
                 tracker_admin = request.url.path == "/api/trackers" or (request.url.path.startswith("/api/trackers/") and request.method == "PUT")
@@ -274,6 +275,8 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         if request.method not in {"GET", "HEAD", "OPTIONS"} and not secrets.compare_digest(request.headers.get("X-MediaSeed-CSRF", ""), session["csrf"]):
             raise HTTPException(403, "Session verification failed")
         return {**dict(session), **public}
+
+    install_theme_preferences(app, database, authorized, bool(hub_url))
 
     @app.get("/auth/hub/start")
     async def hub_start(request: Request):
@@ -403,7 +406,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/api/auth/me")
     def me(session=Depends(authorized)):
-        return {key: session[key] for key in ("csrf", "id", "username", "role", "language") if key in session}
+        return {"managed": bool(hub_url), "themeOverride": theme_override(database, session.get("id")), **{key: session[key] for key in ("csrf", "id", "username", "role", "language", "appearance", "theme") if key in session}}
 
     @app.get("/api/storage")
     def storage(session=Depends(authorized)):
