@@ -123,6 +123,10 @@ document.querySelector('#remove-form').onsubmit = async event => {
   finally { button.disabled = false; }
 };
 function renderTorrents() {
+  const measured = torrentSnapshotValid ? torrentTraffic() : null;
+  for (const [id, value] of [['seed-download-speed', measured ? `${bytes(measured.dl_info_speed)}/s` : '\u2014'], ['seed-upload-speed', measured ? `${bytes(measured.up_info_speed)}/s` : '\u2014'], ['seed-torrent-count', torrentSnapshotValid ? String(torrents.length) : '\u2014']]) {
+    const node = document.querySelector('#' + id); if (node) node.textContent = value;
+  }
   const search = document.querySelector('#search').value.toLocaleLowerCase(); const filter = document.querySelector('#filter').value; const sort = document.querySelector('#sort').value;
   const visible = torrents.filter(row => !pendingRemovals.has(row.hash));
   const rows = visible.filter(row => String(row.name).toLocaleLowerCase().includes(search) && (filter === 'all' || state(row) === filter));
@@ -439,6 +443,18 @@ async function refreshTrackerOverview() {
 }
 async function loadSources(kind) {
   const rows = await api(kind); const target = document.querySelector(kind === 'feeds' ? '#feed-list' : '#tracker-list'); target.replaceChildren(); if (!rows.length) target.append(element('p', kind === 'feeds' ? t("No feeds") : t("No accounts"), 'muted'));
+  if (kind === 'feeds') {
+    const preview = document.querySelector('#feed-preview');
+    if (preview) {
+      preview.replaceChildren();
+      if (!rows.length) preview.append(element('p', t("No feeds"), 'muted'));
+      for (const row of rows.slice(0, 6)) {
+        const item = element('div', undefined, 'seed-feed-row');
+        item.append(element('strong', row.name), element('small', row.paused ? t("Paused") : t("Active")));
+        preview.append(item);
+      }
+    }
+  }
   if (kind === 'trackers') {
     renderTrackerOverview(rows);
     const select = document.querySelector('#tracker-account'); const previous = select.value; select.replaceChildren(element('option', t("Choose account"))); select.firstChild.value = '';
@@ -486,8 +502,9 @@ for (const button of document.querySelectorAll('[data-view]')) button.onclick = 
 document.querySelector('#close-details').onclick = () => dialog.close();
 document.querySelector('#policy-form').onsubmit = async event => { event.preventDefault(); try { await api(`torrents/${selectedHash}/policy`, {ratio: Number(event.target.elements.namedItem('ratio').value)}); document.querySelector('#detail-message').textContent = t("Seeding goal saved"); } catch (error) { document.querySelector('#detail-message').textContent = t(error.message); } };
 for (const selector of ['#search', '#filter', '#sort', '#source-filter']) document.querySelector(selector).addEventListener('input', renderTorrents);
+document.querySelector('#open-rss')?.addEventListener('click', () => document.querySelector('[data-view="feeds"]').click());
 document.querySelector('#manage-trackers').onclick = () => document.querySelector('[data-view="trackers"]').click();
-function showWorkspace() { void refreshTrackerOverview(); document.body.classList.add('signed-in'); document.querySelector('#identity').hidden = true; document.querySelector('#workspace').hidden = false; document.querySelector('#logout').hidden = false; document.querySelector('#new-torrent').hidden = appRole === 'viewer'; document.querySelector('#policy-form').hidden = appRole === 'viewer'; for (const selector of ['#feed-form', '#tracker-form', '#vpn-form']) document.querySelector(selector).hidden = appRole !== 'administrator'; for (const selector of ['[data-view="feeds"]', '[data-view="trackers"]']) document.querySelector(selector).hidden = appRole === 'viewer'; refresh(); }
+function showWorkspace() { if (appRole !== 'viewer') void loadSources('feeds').catch(() => { const preview = document.querySelector('#feed-preview'); if (preview) preview.textContent = t('Feed list unavailable'); }); const rssPanel = document.querySelector('.seed-rss'); if (rssPanel) rssPanel.hidden = appRole === 'viewer'; void refreshTrackerOverview(); document.body.classList.add('signed-in'); document.querySelector('#identity').hidden = true; document.querySelector('#workspace').hidden = false; document.querySelector('#logout').hidden = false; document.querySelector('#new-torrent').hidden = appRole === 'viewer'; document.querySelector('#policy-form').hidden = appRole === 'viewer'; for (const selector of ['#feed-form', '#tracker-form', '#vpn-form']) document.querySelector(selector).hidden = appRole !== 'administrator'; for (const selector of ['[data-view="feeds"]', '[data-view="trackers"]']) document.querySelector(selector).hidden = appRole === 'viewer'; refresh(); }
 document.querySelector('#login').onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(event.target)); try { if (needsSetup) { await api('auth/setup', body); needsSetup = false; } csrf = (await api('auth/login', body)).csrf; const identity = await api('auth/me'); setLanguage(identity.language || 'en'); event.target.reset(); showWorkspace(); } catch (error) { notify(error); } };
 document.querySelector('#refresh').onclick = refresh;
 const addDialog = document.querySelector('#add-torrent');

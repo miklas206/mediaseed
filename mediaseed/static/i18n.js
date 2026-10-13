@@ -1,6 +1,9 @@
 // Account language; English source keys and Danish translations.
 (() => {
 const messages = {
+  "Open RSS to manage feeds": "\u00c5bn RSS for at administrere feeds",
+  "Feed list unavailable": "Feedlisten er ikke tilg\u00e6ngelig",
+  "Torrents": "Torrents",
   "Unknown country": "Ukendt land",
   "Updated": "Opdateret",
   "Fetching metadata": "Henter metadata",

@@ -94,3 +94,28 @@ button.primary { color: var(--accent-contrast); }
   .torrent { grid-template-columns: minmax(0,1fr); }
   .torrent > :is(h2,p,progress,.actions) { grid-column: 1 !important; grid-row: auto !important; }
 }
+
+/* Measured stats, compact torrent table and RSS rail. */
+.seed-stats { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; margin: 18px 0 12px; }
+.seed-stats article { display: flex; gap: 14px; align-items: center; padding: 18px; border: 1px solid var(--line); border-radius: var(--skin-radius); background: var(--glass); }
+.seed-stats article > span { font-size: 28px; color: var(--accent); }
+.seed-stats small { display: block; color: var(--muted); font-size: 11px; margin-bottom: 7px; }
+.seed-stats strong { font-size: 22px; letter-spacing: -.025em; font-variant-numeric: tabular-nums; }
+.seed-download-grid { display: grid; grid-template-columns: minmax(0,1fr) 240px; gap: 18px; align-items: start; }
+.seed-torrent-panel { min-width: 0; }
+.seed-rss { padding: 18px; margin-top: 18px; }
+.seed-rss .heading h2 { font-size: 15px; margin: 0; }
+.seed-rss .heading button { padding: 4px 8px; min-height: 30px; }
+.seed-feed-row { padding: 15px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.seed-feed-row strong { display: block; font-size: 12px; }
+.seed-feed-row small { display: block; color: var(--muted); margin-top: 5px; }
+.seed-rss p { font-size: 12px; line-height: 1.6; }
+#transfer { font-size: 11px; }
+#connection-flow { padding-block: 16px; margin-bottom: 16px; }
+.torrent { padding-block: 12px; }
+#downloads > .downloads-heading h1 { font-size: 27px; }
+@media (max-width: 1150px) { .seed-download-grid { grid-template-columns: minmax(0,1fr); } .seed-rss { margin-top: 0; } #feed-preview { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; } }
+@media (max-width: 760px) { .seed-stats { gap: 8px; } .seed-stats article { padding: 12px 8px; gap: 6px; } .seed-stats article > span { font-size: 20px; } .seed-stats strong { font-size: 14px; } .seed-stats small { font-size: 10px; } #feed-preview { grid-template-columns: 1fr; } }
+
+.connection-route { margin: 4px 0; }
+#downloads { gap: 0; }
