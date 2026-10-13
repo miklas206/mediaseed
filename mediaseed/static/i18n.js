@@ -1,6 +1,10 @@
 // Account language; English source keys and Danish translations.
 (() => {
 const messages = {
+  "Seedbox": "Seedbox",
+  "Search and filters": "Søgning og filtre",
+  "Fast, private and always on.": "Hurtig, privat og altid klar.",
+  "Speed": "Hastighed",
   "Open RSS to manage feeds": "\u00c5bn RSS for at administrere feeds",
   "Feed list unavailable": "Feedlisten er ikke tilg\u00e6ngelig",
   "Torrents": "Torrents",

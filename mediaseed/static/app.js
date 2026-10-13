@@ -8,6 +8,7 @@ let refreshing = false;
 let torrentListRequest = 0;
 let clientLabel = 'qBittorrent';
 let torrentSnapshotValid = false;
+let transferHistory = [];
 let clientRefreshAt = 0;
 let storageRefreshAt = 0;
 const pendingRemovals = new Map();
@@ -135,16 +136,28 @@ function renderTorrents() {
   const pending = [...pendingRemovals.values()].filter(row => !row.confirmed).length;
   document.querySelector('#count').textContent = t("{0} of {1} torrents{2}", {0: rows.length, 1: visible.length, 2: pending ? ' · ' + pending + ' fjernes' : ''});
   const target = document.querySelector('#torrents'); target.replaceChildren(); if (!rows.length) target.append(element('p', torrents.length ? t("No matching torrents") : torrentSnapshotValid ? t("No torrents") : t("Torrent client unavailable"), 'muted'));
-  for (const row of rows) {
-    const item = element('article', undefined, 'torrent'); const progress = element('progress'); progress.max = 1; progress.value = Math.max(0, Math.min(1, Number(row.progress || 0))); progress.setAttribute('aria-label', t("Progress"));
-    if (typeof row.cover === 'string' && /^\/api\/covers\/(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(row.cover)) { const cover = element('img', undefined, 'torrent-cover'); cover.src = row.cover; cover.alt = ''; cover.width = 64; cover.height = 96; cover.loading = 'lazy'; cover.onerror = () => cover.remove(); item.append(cover); }
-    const status = element('p', `${Math.round(Number(row.progress || 0) * 100)} % · ${torrentStatus(row.state)} · ${bytes(row.size)} · ${typeof row.credited_ratio === 'number' ? t("Credited ratio {0} · Raw ratio {1}", {0: trackerNumber(row.credited_ratio), 1: trackerNumber(row.ratio)}) : `Ratio ${Number(row.ratio || 0).toFixed(2)}`}`);
-    const speeds = element('p', t("Download {0}/s · Upload {1}/s · Seeding {2} hours", {0: bytes(row.dlspeed), 1: bytes(row.upspeed), 2: (Number(row.seeding_time || 0) / 3600).toFixed(1)}));
-    const actions = element('div', undefined, 'actions'); actions.append(command(t("Details"), () => showDetails(row))); if (appRole !== 'viewer') { const start = command('Start', () => torrentAction(row, 'start')); start.disabled = !downloadsEnabled; actions.append(start, command('Stop', () => torrentAction(row, 'stop')), command(t("Remove"), () => chooseRemoval(row))); }
-    item.append(element('h2', row.name), progress, status, speeds);
-    if ('credited_ratio' in row) item.append(trackerCreditView(row));
-    item.append(actions); target.append(item);
+  for (const [index, row] of rows.entries()) {
+    const item = element('article', undefined, 'torrent'); item.dataset.state = state(row);
+    const name = command(row.name, () => showDetails(row)); name.className = 'torrent-name'; name.title = row.name;
+    const progressCell = element('div', undefined, 'torrent-progress');
+    const progress = element('progress'); progress.max = 1; progress.value = Math.max(0, Math.min(1, Number(row.progress || 0))); progress.setAttribute('aria-label', t("Progress"));
+    progressCell.append(progress, element('small', `${Math.round(progress.value * 100)}%`));
+    const speed = element('span', `${bytes(state(row) === 'seeding' ? row.upspeed : row.dlspeed)}/s`, 'torrent-speed');
+    const status = element('span', torrentStatus(row.state), 'torrent-state');
+    const actions = element('div', undefined, 'actions');
+    if (appRole !== 'viewer') {
+      const stopped = state(row) === 'stopped';
+      const toggle = command(stopped ? '\u25b6' : '\u23f8', () => torrentAction(row, stopped ? 'start' : 'stop'));
+      toggle.setAttribute('aria-label', `${stopped ? t("Start") : t("Stop")}: ${row.name}`); toggle.title = stopped ? t("Start") : t("Stop"); toggle.disabled = stopped && !downloadsEnabled; actions.append(toggle);
+    }
+    const menu = element('details', undefined, 'torrent-menu'); const trigger = element('summary', '\u22ef'); trigger.setAttribute('aria-label', t("Details"));
+    const commands = element('div', undefined, 'torrent-menu-content'); commands.append(command(t("Details"), () => showDetails(row)));
+    if (appRole !== 'viewer') commands.append(command(t("Remove"), () => chooseRemoval(row)));
+    if ('credited_ratio' in row) commands.append(trackerCreditView(row));
+    menu.append(trigger, commands); actions.append(menu);
+    item.append(element('small', String(index+1), 'torrent-index'), name, progressCell, speed, status, actions); target.append(item);
   }
+
 }
 function torrentTraffic() {
   if (!torrents.every(row => ['dlspeed', 'upspeed'].every(key => typeof row[key] === 'number' && Number.isFinite(row[key]) && row[key] >= 0))) return;
@@ -159,10 +172,19 @@ function applyTorrentSnapshot(rows, request) {
   torrentSnapshotValid = Array.isArray(rows);
   if (torrentSnapshotValid) {
     torrents = rows;
+    const sample = torrentTraffic();
+    if (sample) transferHistory.push(sample);
+    transferHistory = transferHistory.slice(-24);
+    for (const [id, key] of [['seed-download-chart', 'dl_info_speed'], ['seed-upload-chart', 'up_info_speed']]) {
+      const path = document.querySelector('#' + id);
+      if (path) { const maximum = Math.max(1, ...transferHistory.map(point => point[key])); path.setAttribute('d', transferHistory.length < 2 ? '' : transferHistory.map((point,index) => `${index ? 'L' : 'M'}${(index/(transferHistory.length-1)*90).toFixed(1)},${(28-point[key]/maximum*24).toFixed(1)}`).join(' ')); }
+    }
     for (const [hash, removal] of pendingRemovals) if (removal.confirmed && !torrents.some(row => row.hash === hash)) pendingRemovals.delete(hash);
     renderTorrents();
     renderTraffic(torrentTraffic()); renderTransferSummary();
   } else {
+    transferHistory = [];
+    for (const id of ["seed-download-chart", "seed-upload-chart"]) document.querySelector("#"+id)?.setAttribute("d", "");
     torrents = []; renderTorrents(); document.querySelector('#count').textContent = t("Torrent client unavailable");
     renderTraffic(); document.querySelector('#transfer').textContent = t("Torrent client unavailable · waiting for traffic measurement");
   }
@@ -498,7 +520,7 @@ for (const [selector, kind] of [['#feed-form', 'feeds'], ['#tracker-form', 'trac
   const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { body.ratio = Number(body.ratio); body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); form.reset(); form.elements.namedItem('id').value = ''; await loadSources(kind); showNotification(t("Saved palette"), 'success'); } catch (error) { notify(error); } };
   form.addEventListener('reset', () => { form.elements.namedItem('id').setAttribute('value', ''); });
 }
-for (const button of document.querySelectorAll('[data-view]')) button.onclick = async () => { message.textContent = ''; for (const other of document.querySelectorAll('[data-view]')) other.setAttribute('aria-pressed', String(other === button)); for (const section of document.querySelectorAll('.view')) section.hidden = section.id !== button.dataset.view; try { if (button.dataset.view === 'feeds' || button.dataset.view === 'trackers') await loadSources(button.dataset.view); else if (button.dataset.view === 'vpn') await refreshVpn(); } catch (error) { notify(error); } };
+for (const button of document.querySelectorAll('[data-view]')) button.onclick = async () => { message.textContent = ''; for (const other of document.querySelectorAll('[data-view]')) other.setAttribute('aria-pressed', String(other === button)); for (const section of document.querySelectorAll('.view')) section.hidden = section.id !== button.dataset.view; document.querySelector('#connection-flow').hidden = button.dataset.view !== 'vpn'; try { if (button.dataset.view === 'feeds' || button.dataset.view === 'trackers') await loadSources(button.dataset.view); else if (button.dataset.view === 'vpn') await refreshVpn(); } catch (error) { notify(error); } };
 document.querySelector('#close-details').onclick = () => dialog.close();
 document.querySelector('#policy-form').onsubmit = async event => { event.preventDefault(); try { await api(`torrents/${selectedHash}/policy`, {ratio: Number(event.target.elements.namedItem('ratio').value)}); document.querySelector('#detail-message').textContent = t("Seeding goal saved"); } catch (error) { document.querySelector('#detail-message').textContent = t(error.message); } };
 for (const selector of ['#search', '#filter', '#sort', '#source-filter']) document.querySelector(selector).addEventListener('input', renderTorrents);
