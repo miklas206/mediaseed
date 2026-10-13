@@ -791,7 +791,17 @@ const messages = {
   "Error": "Fejl",
   "Unknown": "Ukendt",
   "Country": "Land",
-  "Save": "Gem"
+  "Save": "Gem",
+  "Add feed": "Tilf?j feed",
+  "Your feeds": "Dine feeds",
+  "Search releases": "S?g efter udgivelser",
+  "Tracker accounts": "Trackerkonti",
+  "Verification": "Verifikation",
+  "Traffic": "Trafik",
+  "Actions": "Handlinger",
+  "Manage your VPN connections and app access.": "Administrer dine VPN-forbindelser og adgang for apps.",
+  "Create your first VPN connection.": "Opret din f?rste VPN-forbindelse.",
+  "Dismiss notification": "Luk besked"
 };
 
 globalThis.MediaAppI18n = (() => {
