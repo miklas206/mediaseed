@@ -18,3 +18,7 @@ The first-party hub link can pass an explicit validated Light mode.
 Downloads use compact progress/speed/status rows with quick pause/start and a
 Details/Remove menu. Existing authorization, seeding goals and removal dialogs remain.
 Transfer sparklines show only actual observed samples. VPN details are under VPN.
+
+The ambient revision adds visible abstract light fields and curved ribbons.
+The shared environment stylesheet has a new cache version; no background images
+are used and reduced-motion preferences disable movement.
