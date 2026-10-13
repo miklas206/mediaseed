@@ -75,11 +75,11 @@ def queue_summary(torrents):
     return {"limit": 8, "active": len(active), "waiting": waiting, "rssActive": rss, "manualActive": len(active) - rss, "boundedView": len(torrents) >= 500}
 
 
-async def add_stopped(qbit, ratio, content=None, magnet=None, start=False, vpn_status=None, tag=None):
+async def add_stopped(qbit, ratio, content=None, magnet=None, start=False, vpn_status=None, tag=None, savepath="/downloads"):
     if start and (vpn_status is None or not (await vpn_status()).get("downloadsEnabled")):
         raise HTTPException(409, "Starting requires a verified VPN. Choose add on pause instead.")
     paused = "false" if start else "true"
-    payload = {"stopped": paused, "paused": paused, "savepath": "/downloads", "ratioLimit": str(ratio), "seedingTimeLimit": "2940", "shareLimitAction": "Stop"}
+    payload = {"stopped": paused, "paused": paused, "savepath": savepath, "ratioLimit": str(ratio), "seedingTimeLimit": "2940", "shareLimitAction": "Stop"}
     if tag:
         payload["tags"] = tag
     files = None

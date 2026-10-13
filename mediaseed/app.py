@@ -4,7 +4,6 @@ import hashlib
 import os
 import re
 import secrets
-import shutil
 import sqlite3
 import ssl
 import time
@@ -26,6 +25,7 @@ from mediaseed.appearance import install_theme_preferences, theme_override
 from mediaseed.cleanup import CleanupManager, CleanupPolicy
 from mediaseed.features import add_stopped, install_features, queue_summary
 from mediaseed.tracker_credit import TrackerCredit
+from mediaseed.storage import Storage
 
 COOKIE = "mediaseed_session"
 HASHER = PasswordHasher()
@@ -45,6 +45,8 @@ class Magnet(BaseModel):
     ratio: float = Field(default=1, ge=1, le=1000, allow_inf_nan=False)
     start: bool = False
     cleanup: CleanupPolicy = Field(default_factory=CleanupPolicy)
+    location: str = Field(default="local", max_length=64)
+    folder: str = Field(default="", max_length=1000)
 
     @field_validator("url")
     @classmethod
@@ -85,6 +87,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
     downloads.mkdir(parents=True, exist_ok=True, mode=0o700)
     if downloads.resolve() != downloads:
         raise ValueError("Downloads directory must not contain symlink components")
+    storage_catalog = Storage(downloads)
     base = (base_url or os.environ.get("MEDIASEED_BASE_URL", "http://127.0.0.1:18800")).rstrip("/")
     parsed = urlsplit(base)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.path or parsed.username:
@@ -358,7 +361,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/healthz")
     def health():
-        return {"status": "healthy", "version": "0.1.0"}
+        return {"status": "healthy", "version": "0.1.1"}
 
     @app.get("/api/auth/status")
     async def status():
@@ -410,11 +413,11 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/api/storage")
     def storage(session=Depends(authorized)):
-        try:
-            capacity = shutil.disk_usage(downloads)
-        except OSError:
-            raise HTTPException(503, "Local downloads storage unavailable") from None
-        return {"label": "Local downloads", "type": "local", "totalBytes": capacity.total, "freeBytes": capacity.free, "usedBytes": capacity.used, "writable": os.access(downloads, os.W_OK), "lowSpace": capacity.free < 2 * 1024**3, "externalMountRequired": False}
+        return storage_catalog.snapshot()
+
+    @app.get("/api/storage/folders")
+    def storage_folders(location: str = Query(default="local", max_length=64), folder: str = Query(default="", max_length=1000), session=Depends(authorized)):
+        return storage_catalog.folders(location, folder)
 
     @app.post("/api/auth/logout")
     def logout(response: Response, session=Depends(authorized)):
@@ -509,13 +512,14 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         ignored = any(key in params for key in ("xs", "as", "ws"))
         # Keep the info hash and trackers without allowing arbitrary HTTP file fetches.
         magnet = "magnet:?" + urlencode({key: value for key, value in params.items() if key not in {"xs", "as", "ws"}}, doseq=True) if ignored else body.url
-        result = await cleanup.add(add_stopped, body.cleanup, body.ratio, magnet=magnet, start=body.start, vpn_status=vpn_status)
+        result = await cleanup.add(add_stopped, body.cleanup, body.ratio, magnet=magnet, start=body.start, vpn_status=vpn_status, savepath=storage_catalog.destination(body.location, body.folder))
         if ignored:
             result["webSourcesIgnored"] = True
         return result
 
     @app.post("/api/torrents/upload")
-    async def upload(request: Request, filename: str = Query(min_length=1, max_length=255), ratio: float = Query(default=1, ge=1, le=1000, allow_inf_nan=False), start: bool = Query(default=False), cleanup_mode: Literal["never", "time", "ratio", "both", "either"] = "never", cleanup_hours: float = Query(default=49, ge=1/60, le=87600, allow_inf_nan=False), cleanup_ratio: float = Query(default=1, ge=1, le=1000, allow_inf_nan=False), cleanup_delete_files: bool = False, session=Depends(authorized)):
+    async def upload(request: Request, filename: str = Query(min_length=1, max_length=255), ratio: float = Query(default=1, ge=1, le=1000, allow_inf_nan=False), start: bool = Query(default=False), cleanup_mode: Literal["never", "time", "ratio", "both", "either"] = "never", cleanup_hours: float = Query(default=49, ge=1/60, le=87600, allow_inf_nan=False), cleanup_ratio: float = Query(default=1, ge=1, le=1000, allow_inf_nan=False), cleanup_delete_files: bool = False, location: str = Query(default="local", max_length=64), folder: str = Query(default="", max_length=1000), session=Depends(authorized)):
+        savepath = storage_catalog.destination(location, folder)
         if not filename.lower().endswith(".torrent"):
             raise HTTPException(422, "Choose a .torrent file")
         if request.headers.get("content-type", "").split(";")[0] not in {"application/x-bittorrent", "application/octet-stream"}:
@@ -528,7 +532,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         if not content.startswith(b"d") or not content.endswith(b"e"):
             raise HTTPException(422, "Invalid torrent file")
         policy = CleanupPolicy(mode=cleanup_mode, hours=cleanup_hours, ratio=cleanup_ratio, delete_files=cleanup_delete_files)
-        return await cleanup.add(add_stopped, policy, ratio, content=bytes(content), start=start, vpn_status=vpn_status)
+        return await cleanup.add(add_stopped, policy, ratio, content=bytes(content), start=start, vpn_status=vpn_status, savepath=savepath)
 
     @app.post("/api/torrents/{action}")
     async def action(action: str, body: TorrentAction, session=Depends(authorized)):

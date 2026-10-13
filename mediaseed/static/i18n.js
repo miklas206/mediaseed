@@ -1,6 +1,22 @@
 // Account language; English source keys and Danish translations.
 (() => {
 const messages = {
+  "Download folder": "Downloadmappe",
+  "Storage location": "Lagerplacering",
+  "Parent folder": "Overordnet mappe",
+  "Open a subfolder": "Vælg en undermappe",
+  "Files will be saved in the selected folder.": "Filer gemmes i den valgte mappe.",
+  "Local downloads": "Lokale downloads",
+  "Storage unavailable": "Lager ikke tilgængeligt",
+  "{0} free of {1}": "{0} ledig af {1}",
+  "Read-only": "Skrivebeskyttet",
+  "Low disk space": "Lav diskplads",
+  "Choose an available writable folder": "Vælg en tilgængelig mappe med skriveadgang",
+  "Loading storage": "Henter lager",
+  "Use this folder": "Brug denne mappe",
+  "Only the first 200 folders are shown": "Kun de første 200 mapper vises",
+  "Choose an approved download folder": "Vælg en godkendt downloadmappe",
+  "Download folder is unavailable or read-only": "Downloadmappen er utilgængelig eller skrivebeskyttet",
   "Seedbox": "Seedbox",
   "Search and filters": "Søgning og filtre",
   "Fast, private and always on.": "Hurtig, privat og altid klar.",

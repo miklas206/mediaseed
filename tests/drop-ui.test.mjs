@@ -40,13 +40,19 @@ function setup() {
   const body = create(); body.classList.add('signed-in');
   const context = vm.createContext({document: {querySelector: find, querySelectorAll: () => [], createElement: create, body,
     addEventListener(type, fn) {if (!listeners.has(type)) listeners.set(type, []); listeners.get(type).push(fn);}},
+    Option: function(text, value) {this.textContent = text; this.value = value;},
+    MediaAppTheme: {setOverrideHandler() {}, applyIdentity() {}}, window: {addEventListener() {}},
     setInterval() {}, setTimeout() {}, clearTimeout() {},
     fetch: async (url, options) => {
+      if (url === '/api/storage') return {ok: true, json: async () => ({locations: [{id: 'local', label: 'Local downloads', available: true, writable: true, freeBytes: 2000, totalBytes: 3000}], defaultLocation: 'local'})};
+      if (url.startsWith('/api/storage/folders')) return {ok: true, json: async () => ({folders: [], writable: true})};
       if (url.startsWith('/api/torrents/upload')) uploads.push({url, ...options});
       return {ok: true, json: async () => ({needsSetup: true})};
     },
   });
   vm.runInContext(readFileSync(new URL('../mediaseed/static/i18n.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
+  const submit = form.onsubmit;
+  form.onsubmit = async event => {if (!vm.runInContext("addStorageReady", context)) await context.loadAddStorage(); return submit(event);};
   const refresh = context.refresh;
   context.refresh = async () => {};
   const refreshTorrents = context.refreshTorrents;
@@ -73,7 +79,7 @@ test('page drop opens a populated dialog, preserves its draft, and uploads only 
   assert.equal(ratio.value, '3'); assert.equal(find('#add-torrent').openCount, 1);
   await form.onsubmit({preventDefault() {}});
   assert.equal(uploads.length, 1); assert.equal(uploads[0].body, replacement);
-  assert.match(uploads[0].url, /filename=Other.TORRENT&ratio=3&start=false$/);
+  assert.match(uploads[0].url, /filename=Other.TORRENT&ratio=3&start=false&location=local&folder=$/);
   assert.equal(find('#add-torrent').open, false);
 });
 
@@ -87,7 +93,7 @@ test('start button submits the explicit start choice; pause remains available wi
   drag('drop', [torrent()]);
   assert.equal(find('#add-start').disabled, false);
   await form.onsubmit({preventDefault() {}, submitter: {value: 'start'}});
-  assert.match(uploads[0].url, /&start=true$/);
+  assert.match(uploads[0].url, /&start=true&location=local&folder=$/);
 });
 
 test('invalid drops never open the dialog or upload; leaving clears the cue', () => {
@@ -122,7 +128,9 @@ test('addition refreshes the list during a busy status poll and ignores an older
   // Exercise the actual list loader, keeping the other status endpoints pending.
   context.refreshTorrents = refreshTorrents;
   const pending = [];
+  const originalApi = context.api;
   context.api = async path => {
+    if (path.startsWith('storage')) return originalApi(path);
     assert.equal(path, 'torrents');
     return new Promise(resolve => pending.push(resolve));
   };
@@ -163,4 +171,28 @@ test('dashboard renders in one request without waiting for slow auxiliary data o
   assert.equal(find('#connection-flow').dataset.state, 'unknown');
   assert.equal(find('#connection-flow').dataset.download, 'false');
   assert.equal(vm.runInContext('refreshing', context), false);
+});
+
+
+test('folder selection survives upload', async () => {
+  const {context, drag, form, uploads, find} = setup();
+  drag('drop', [torrent()]);
+  await context.loadAddStorage();
+  const originalApi = context.api;
+  context.api = async path => path === 'storage' ? {locations: [{id: 'movies', label: 'Movies', writable: true, available: true, freeBytes: 12345, totalBytes: 54321}], defaultLocation: 'movies'} : path.startsWith('storage/folders') ? {folders: [{name: 'Danske film', writable: true}], writable: !path.includes('readonly')} : originalApi(path);
+  await context.loadAddStorage();
+  await context.loadAddFolders('Danske film');
+  await form.onsubmit({preventDefault() {}, submitter: {value: 'pause'}});
+  const params = new URL(uploads[0].url, 'https://synthetic.example').searchParams;
+  assert.equal(params.get('location'), 'movies');
+  assert.equal(params.get('folder'), 'Danske film');
+  assert.equal(find('#add-folder-path').textContent, '/Danske film');
+});
+
+
+test('download destination controls belong to the add dialog, not a hidden feed form', () => {
+  const html = readFileSync(new URL('../mediaseed/static/index.html', import.meta.url), 'utf8');
+  const start = html.indexOf('<form id="add-torrent-form">');
+  const addForm = html.slice(start, html.indexOf('</form>', start));
+  for (const id of ['add-location', 'add-folder', 'add-folder-path']) assert.ok(addForm.includes(`id="${id}"`));
 });

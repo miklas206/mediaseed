@@ -210,7 +210,7 @@ async function refreshAuxiliary() {
     storageRefreshAt = Date.now() + 60000;
     tasks.push((async () => {
       const storage = document.querySelector('#storage'); storage.hidden = false;
-      try { const capacity = await api('storage'); storage.textContent = t("Local storage: {0} free of {1}{2}{3}", {0: bytes(capacity.freeBytes), 1: bytes(capacity.totalBytes), 2: capacity.lowSpace ? t(" · Low disk space") : '', 3: capacity.writable ? '' : t(" · Not writable")}); }
+      try { const capacity = await api('storage'); storage.replaceChildren(...(capacity.locations || [capacity]).map(row => element('span', `${t(row.label)}: ${row.available === false ? t('Storage unavailable') : t('{0} free of {1}', {0: bytes(row.freeBytes), 1: bytes(row.totalBytes)})}${row.writable ? '' : ' \u00b7 ' + t('Read-only')}${row.lowSpace ? ' \u00b7 ' + t('Low disk space') : ''}`, 'storage-location'))); }
       catch { storage.textContent = t("Local storage unavailable"); storageRefreshAt = Date.now() + 30000; }
     })());
   }
@@ -573,7 +573,36 @@ function openAdd() {
   updateAddStart();
   updateCleanupFields();
   addDialog.append(document.querySelector('.notifications')); addDialog.showModal();
+  void loadAddStorage().catch(notify);
 }
+const addLocation = document.querySelector('#add-location');
+const addFolder = document.querySelector('#add-folder');
+let addFolderPath = '', addStorageReady = false, storageRequest = 0, addLocations = [];
+async function loadAddStorage() {
+  addStorageReady = false; const request = ++storageRequest;
+  addLocation.replaceChildren(new Option(t('Loading storage'), '')); addLocation.disabled = true;
+  const catalog = await api('storage'); if (request !== storageRequest || !addDialog.open) return;
+  addLocations = catalog.locations;
+  addLocation.replaceChildren(...addLocations.map(row => { const option = new Option(t(row.label) + (row.writable ? '' : ' - ' + t('Read-only')), row.id); option.disabled = !row.available; return option; }));
+  addLocation.value = catalog.defaultLocation; addLocation.disabled = false;
+  await loadAddFolders('');
+}
+async function loadAddFolders(path) {
+  addStorageReady = false; const request = ++storageRequest, location = addLocation.value;
+  addFolder.disabled = true;
+  const rows = await api(`storage/folders?location=${encodeURIComponent(location)}&folder=${encodeURIComponent(path)}`);
+  if (request !== storageRequest || !addDialog.open) return;
+  addFolderPath = path; addStorageReady = rows.writable;
+  document.querySelector('#add-folder-path').textContent = '/' + path;
+  document.querySelector('#add-folder-up').disabled = !path;
+  addFolder.replaceChildren(new Option(t('Use this folder'), ''), ...rows.folders.map(row => new Option(row.name + (row.writable ? '' : ' - ' + t('Read-only')), row.name)));
+  addFolder.disabled = false;
+  const capacity = addLocations.find(row => row.id === location);
+  document.querySelector('#add-storage-capacity').textContent = t('{0} free of {1}', {0: bytes(capacity.freeBytes), 1: bytes(capacity.totalBytes)}) + (rows.writable ? '' : ' - ' + t('Read-only')) + (rows.truncated ? ' - ' + t('Only the first 200 folders are shown') : '');
+}
+addLocation.onchange = () => { void loadAddFolders('').catch(notify); };
+addFolder.onchange = () => { if (addFolder.value) void loadAddFolders([addFolderPath, addFolder.value].filter(Boolean).join('/')).catch(notify); };
+document.querySelector('#add-folder-up').onclick = () => { void loadAddFolders(addFolderPath.split('/').slice(0, -1).join('/')).catch(notify); };
 document.querySelector('#new-torrent').onclick = openAdd;
 addDialog.addEventListener('close', () => { document.body.append(document.querySelector('.notifications')); });
 function closeAdd() { if (!addingTorrent) addDialog.close(); }
@@ -621,6 +650,8 @@ addForm.onsubmit = async event => {
   event.preventDefault(); if (addingTorrent) return;
   const fileMode = addForm.elements.namedItem('mode').value === 'file'; const ratio = Number(addForm.elements.namedItem('ratio').value);
   const start = event.submitter?.value === 'start';
+  if (!addStorageReady) { showNotification(t('Choose an available writable folder')); return; }
+  const location = addLocation.value, folder = addFolderPath;
   const cleanup = addCleanupPolicy();
   const cleanupQuery = cleanup.mode === 'never' ? '' : `&cleanup_mode=${cleanup.mode}&cleanup_hours=${cleanup.hours}&cleanup_ratio=${cleanup.ratio}&cleanup_delete_files=${cleanup.delete_files}`;
   const file = droppedTorrent || fileInput.files[0];
@@ -630,9 +661,9 @@ addForm.onsubmit = async event => {
   try {
     let result;
     if (fileMode) {
-      const response = await fetch(`/api/torrents/upload?filename=${encodeURIComponent(file.name)}&ratio=${ratio}${cleanupQuery}&start=${start}`, {method: 'POST', headers: {'Content-Type': 'application/x-bittorrent', 'X-MediaSeed-CSRF': csrf}, body: file});
+      const response = await fetch(`/api/torrents/upload?filename=${encodeURIComponent(file.name)}&ratio=${ratio}${cleanupQuery}&start=${start}&location=${encodeURIComponent(location)}&folder=${encodeURIComponent(folder)}`, {method: 'POST', headers: {'Content-Type': 'application/x-bittorrent', 'X-MediaSeed-CSRF': csrf}, body: file});
       result = await response.json(); if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : t("The torrent file could not be added."));
-    } else { result = await api('torrents', {url: addForm.elements.namedItem('url').value.trim(), ratio, start, ...(cleanup.mode === 'never' ? {} : {cleanup})}); }
+    } else { result = await api('torrents', {url: addForm.elements.namedItem('url').value.trim(), ratio, start, location, folder, ...(cleanup.mode === 'never' ? {} : {cleanup})}); }
     addDialog.close(); showNotification((result.cleanupPending ? t("Torrent added paused. The cleanup rule is awaiting preparation; your selected start will follow.") : result.startRequested ? (result.pending ? t("Magnet link received. Start selected; waiting for metadata from the torrent network.") : t("Torrent added. Start requested through VPN.")) : (result.pending ? t("Magnet link received paused. Metadata is waiting for VPN.") : t("Torrent added paused. Press Start when you want to download."))) + (result.webSourcesIgnored ? t(" Extra web sources in the link were omitted; the hash and trackers are used.") : ''), 'success');
     await refreshTorrents();
   } catch (error) { notify(error); }
