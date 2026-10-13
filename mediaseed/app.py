@@ -361,7 +361,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/healthz")
     def health():
-        return {"status": "healthy", "version": "0.1.1"}
+        return {"status": "healthy", "version": "0.1.2"}
 
     @app.get("/api/auth/status")
     async def status():
@@ -582,7 +582,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             raise HTTPException(422, "Invalid torrent hash")
         return await cleanup.cancel(identifier.lower())
 
-    background = install_features(app, authorized, database, qbit, vpn_status=vpn_status, data_dir=data, cleanup=cleanup, credit=credit)
+    background = install_features(app, authorized, database, qbit, vpn_status=vpn_status, data_dir=data, cleanup=cleanup, credit=credit, storage=storage_catalog)
 
     @app.get("/")
     def home():

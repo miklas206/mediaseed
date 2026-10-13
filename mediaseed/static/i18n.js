@@ -1,6 +1,7 @@
 // Account language; English source keys and Danish translations.
 (() => {
 const messages = {
+  "Feed changed; waiting for the next refresh": "Feedet blev ændret; afventer næste opdatering",
   "Download folder": "Downloadmappe",
   "Storage location": "Lagerplacering",
   "Parent folder": "Overordnet mappe",

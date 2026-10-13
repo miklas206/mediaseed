@@ -193,3 +193,5 @@ footer { position: fixed; bottom: 0; width: 100%; min-height: 42px; display: fle
 .cleanup-settings{border:1px solid #284253;border-radius:12px;padding:18px;min-width:0}.cleanup-settings legend{padding:0 8px;font-weight:650}.cleanup-settings label{margin:12px 0}.cleanup-goals{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:14px}.cleanup-warning{color:#ff8793;background:#321e28;border:1px solid #8c4658;border-radius:8px;padding:12px}
 
 .storage-location{display:block;padding:.25rem 0;overflow-wrap:anywhere}.download-location{display:grid;gap:12px;min-width:0;margin:0;padding:16px;border:1px solid var(--line);border-radius:var(--select-radius,6px)}.download-location legend{padding:0 6px;font-weight:600}.download-location p{margin:0;font-size:13px}.download-location .actions{align-items:center;flex-wrap:wrap}#add-folder-path{overflow-wrap:anywhere;min-width:0}
+
+.rss-download-location{grid-column:1/-1}#feed-folder-path{overflow-wrap:anywhere;min-width:0}

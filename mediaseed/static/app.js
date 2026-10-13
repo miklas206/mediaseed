@@ -465,6 +465,55 @@ async function refreshTrackerOverview() {
   catch { document.querySelector('#tracker-account-list').replaceChildren(element('p', t("Tracker statistics could not be retrieved. Retrying automatically."), 'muted')); }
   finally { trackerOverviewLoading = false; }
 }
+const feedForm = document.querySelector('#feed-form');
+const feedLocation = document.querySelector('#feed-location');
+const feedFolder = document.querySelector('#feed-folder');
+let feedLocations = [], feedFolderPath = '', feedStorageReady = false, feedStorageRequest = 0, feedEditing = false;
+function feedStoragePending() {
+  feedStorageReady = false;
+  document.querySelector('#feed-save').disabled = true;
+  feedFolder.disabled = true;
+  document.querySelector('#feed-folder-up').disabled = true;
+}
+async function loadFeedLocations(location, folder = '') {
+  feedStoragePending(); const request = ++feedStorageRequest;
+  feedLocation.disabled = true;
+  const catalog = await api('storage');
+  if (request !== feedStorageRequest) return;
+  feedLocations = catalog.locations || [{...catalog, id: 'local', label: 'Local downloads'}];
+  feedLocation.replaceChildren(...feedLocations.map(row => {
+    const option = new Option(t(row.label) + (!row.available ? ' - ' + t('Storage unavailable') : !row.writable ? ' - ' + t('Read-only') : ''), row.id);
+    option.disabled = !row.available; return option;
+  }));
+  const choice = location ?? catalog.defaultLocation ?? 'local';
+  if (!feedLocations.some(row => row.id === choice)) {
+    const missing = new Option(choice + ' - ' + t('Storage unavailable'), choice); missing.disabled = true; feedLocation.append(missing);
+  }
+  feedLocation.value = choice; feedLocation.disabled = false;
+  await loadFeedFolders(folder);
+}
+async function loadFeedFolders(path) {
+  feedStoragePending(); const request = ++feedStorageRequest, location = feedLocation.value;
+  feedFolderPath = path;
+  document.querySelector('#feed-folder-path').textContent = '/' + path;
+  document.querySelector('#feed-folder-up').disabled = !path;
+  const rows = await api(`storage/folders?location=${encodeURIComponent(location)}&folder=${encodeURIComponent(path)}`);
+  if (request !== feedStorageRequest) return;
+  feedFolderPath = path; feedStorageReady = rows.writable;
+  feedForm.elements.namedItem('folder').value = path;
+  document.querySelector('#feed-folder-path').textContent = '/' + path;
+  document.querySelector('#feed-folder-up').disabled = !path;
+  feedFolder.replaceChildren(new Option(t('Use this folder'), ''), ...rows.folders.map(row => new Option(row.name + (row.writable ? '' : ' - ' + t('Read-only')), row.name)));
+  feedFolder.disabled = false;
+  const capacity = feedLocations.find(row => row.id === location);
+  document.querySelector('#feed-storage-capacity').textContent = (capacity ? t('{0} free of {1}', {0: bytes(capacity.freeBytes), 1: bytes(capacity.totalBytes)}) : '') + (rows.writable ? '' : ' - ' + t('Read-only')) + (rows.truncated ? ' - ' + t('Only the first 200 folders are shown') : '');
+  document.querySelector('#feed-save').disabled = !feedStorageReady;
+}
+feedLocation.onchange = () => { void loadFeedFolders('').catch(notify); };
+feedFolder.onchange = () => { if (feedFolder.value) void loadFeedFolders([feedFolderPath, feedFolder.value].filter(Boolean).join('/')).catch(notify); };
+document.querySelector('#feed-folder-up').onclick = () => { void loadFeedFolders(feedFolderPath.split('/').slice(0, -1).join('/')).catch(notify); };
+feedForm.addEventListener('reset', () => { if (!feedEditing) queueMicrotask(() => { void loadFeedLocations().catch(notify); }); });
+
 async function loadSources(kind) {
   const rows = await api(kind); const target = document.querySelector(kind === 'feeds' ? '#feed-list' : '#tracker-list'); target.replaceChildren(); if (!rows.length) target.append(element('p', kind === 'feeds' ? t("No feeds") : t("No accounts"), 'muted'));
   if (kind === 'feeds') {
@@ -488,11 +537,11 @@ async function loadSources(kind) {
   }
   for (const row of rows) {
     const item = kind === 'trackers' ? trackerCard(row) : element('article', undefined, 'source-row');
-    if (kind === 'feeds') item.append(element('h2', row.name), element('p', `${row.folder || '/downloads'} · Ratio ${row.ratio} · ${row.paused ? t("Paused") : t("Active")} · ${row.status || ''}`, 'muted'));
+    if (kind === 'feeds') item.append(element('h2', row.name), element('p', `${row.location ? t(feedLocations.find(place => place.id === row.location)?.label || (row.location === 'local' ? 'Local downloads' : row.location)) + ' /' + (row.folder || '') : row.folder || '/downloads'} · Ratio ${row.ratio} · ${row.paused ? t("Paused") : t("Active")} · ${t(row.status || '')}`, 'muted'));
     const actions = element('div', undefined, 'actions');
     if (appRole === 'administrator') {
       if (kind === 'feeds') actions.append(command(row.paused ? 'Aktivér' : 'Pause', async () => { await api(`feeds/${row.id}/state`, {enabled: row.paused}, 'PUT'); await loadSources('feeds'); showNotification(row.paused ? t("Feed enabled through VPN.") : t("Feed paused. Existing torrents are preserved."), 'success'); }));
-      actions.append(command(t("Edit"), () => { const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); form.reset(); for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } form.querySelector('input[name="name"]').focus(); }), command(t("Remove"), async () => { if (!confirm(t("Remove {0}? Files and torrents are preserved.", {0: row.name}))) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); }));
+      actions.append(command(t("Edit"), () => { const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); feedEditing = kind === 'feeds'; form.reset(); feedEditing = false; for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } if (kind === 'feeds') void loadFeedLocations(row.location || 'local', row.folder || '').catch(notify); form.querySelector('input[name="name"]').focus(); }), command(t("Remove"), async () => { if (!confirm(t("Remove {0}? Files and torrents are preserved.", {0: row.name}))) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); }));
     }
     item.append(actions); target.append(item);
   }
@@ -519,10 +568,10 @@ document.querySelector('#tracker-search').onsubmit = async event => {
   finally { button.disabled = document.querySelector('#tracker-account').options.length === 1; }
 };
 for (const [selector, kind] of [['#feed-form', 'feeds'], ['#tracker-form', 'trackers']]) {
-  const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { body.ratio = Number(body.ratio); body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); form.reset(); form.elements.namedItem('id').value = ''; await loadSources(kind); showNotification(t("Saved palette"), 'success'); } catch (error) { notify(error); } };
+  const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { if (!feedStorageReady) { showNotification(t('Choose an available writable folder')); return; } body.location = feedLocation.value; body.folder = feedFolderPath; body.ratio = Number(body.ratio); body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); form.reset(); form.elements.namedItem('id').value = ''; await loadSources(kind); showNotification(t("Saved palette"), 'success'); } catch (error) { notify(error); } };
   form.addEventListener('reset', () => { form.elements.namedItem('id').setAttribute('value', ''); });
 }
-for (const button of document.querySelectorAll('[data-view]')) button.onclick = async () => { message.textContent = ''; for (const other of document.querySelectorAll('[data-view]')) other.setAttribute('aria-pressed', String(other === button)); for (const section of document.querySelectorAll('.view')) section.hidden = section.id !== button.dataset.view; document.querySelector('#connection-flow').hidden = button.dataset.view !== 'vpn'; try { if (button.dataset.view === 'feeds' || button.dataset.view === 'trackers') await loadSources(button.dataset.view); else if (button.dataset.view === 'vpn') await refreshVpn(); } catch (error) { notify(error); } };
+for (const button of document.querySelectorAll('[data-view]')) button.onclick = async () => { message.textContent = ''; for (const other of document.querySelectorAll('[data-view]')) other.setAttribute('aria-pressed', String(other === button)); for (const section of document.querySelectorAll('.view')) section.hidden = section.id !== button.dataset.view; document.querySelector('#connection-flow').hidden = button.dataset.view !== 'vpn'; try { if (button.dataset.view === 'feeds' || button.dataset.view === 'trackers') { await loadSources(button.dataset.view); if (button.dataset.view === 'feeds' && appRole === 'administrator') await loadFeedLocations(feedLocations.length ? feedLocation.value : undefined, feedLocations.length ? feedFolderPath : ''); } else if (button.dataset.view === 'vpn') await refreshVpn(); } catch (error) { notify(error); } };
 document.querySelector('#close-details').onclick = () => dialog.close();
 document.querySelector('#policy-form').onsubmit = async event => { event.preventDefault(); try { await api(`torrents/${selectedHash}/policy`, {ratio: Number(event.target.elements.namedItem('ratio').value)}); document.querySelector('#detail-message').textContent = t("Seeding goal saved"); } catch (error) { document.querySelector('#detail-message').textContent = t(error.message); } };
 for (const selector of ['#search', '#filter', '#sort', '#source-filter']) document.querySelector(selector).addEventListener('input', renderTorrents);

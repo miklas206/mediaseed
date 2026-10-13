@@ -29,7 +29,8 @@ class FeedSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     name: str = Field(min_length=1, max_length=80)
     url: str = Field(default="", max_length=4096)
-    folder: str = Field(default="", max_length=120)
+    location: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9-]{1,80}$")
+    folder: str = Field(default="", max_length=1000)
     ratio: float = Field(default=1, ge=1, le=1000, allow_inf_nan=False)
     start_at: str | None = Field(default=None, max_length=40)
 
@@ -107,7 +108,7 @@ async def add_stopped(qbit, ratio, content=None, magnet=None, start=False, vpn_s
 
 
 
-def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=None, cleanup=None, credit=None):
+def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=None, cleanup=None, credit=None, storage=None):
     tracker_cache = {}
     tracker_lock = asyncio.Lock()
     with database() as connection:
@@ -140,6 +141,10 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
                 raise HTTPException(422, "A source credential is required")
             payload[secret] = existing[secret]
         if kind == "feeds":
+            if payload.get("location") is not None:
+                if storage is None:
+                    raise HTTPException(409, "Download folder is unavailable or read-only")
+                storage.destination(payload["location"], payload["folder"])
             payload["enabled"] = existing.get("enabled", False) if existing else False
         identifier = identifier or secrets.token_hex(12)
         with database() as connection:
@@ -198,7 +203,7 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         account = next((a for a in rows("trackers") if a["id"] == identifier), None)
         return cached["public"].get("username") if cached and account and cached["key"] == account["api_key"] and time.monotonic() - cached["checked"] < 360 and cached["public"].get("status") == "ok" else None
     covers = Covers(data_dir, rows, tracker_read, qbit, username=tracker_username) if data_dir else None
-    rss_worker = RssWorker(database, rows, qbit, vpn_status) if vpn_status else None
+    rss_worker = RssWorker(database, rows, qbit, vpn_status, storage=storage) if vpn_status else None
 
     @app.get("/api/covers/{identifier}")
     def cover(identifier: str, session=Depends(authorized)):
@@ -305,6 +310,9 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         if feed is None:
             raise HTTPException(404, "Feed not found")
         if body.enabled:
+            if rss_worker is None:
+                raise HTTPException(409, "VPN is not verified; feed activation blocked")
+            rss_worker.destination(feed)
             if urlsplit(feed["url"]).netloc != "nordicbytes.org":
                 raise HTTPException(422, "Only NordicBytes HTTPS RSS sources are enabled")
             if not (await vpn_status()).get("downloadsEnabled"):
