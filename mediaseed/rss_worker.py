@@ -93,7 +93,7 @@ class RssWorker:
             if not isinstance(link, str) or len(link) > 4096:
                 continue
             address = urlsplit(link)
-            if address.scheme != "https" or address.netloc != "nordicbytes.org" or not address.path.startswith("/torrents/download/") or address.fragment:
+            if address.scheme != "https" or address.netloc != "nordicbytes.org" or not re.match(r"^/torrents?/download/[^/]+", address.path) or address.fragment:
                 continue
             token = hashlib.sha256((feed["id"] + "\n" + str(article.get("id", "")) + "\n" + link).encode()).hexdigest()
             with self.database() as connection:

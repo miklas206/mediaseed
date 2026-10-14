@@ -4,6 +4,7 @@ import asyncio
 import sqlite3
 from contextlib import contextmanager
 import httpx
+import pytest
 
 
 def test_feed_date_gate_rejects_missing_old_and_future_dates():
@@ -16,7 +17,8 @@ def test_feed_date_gate_rejects_missing_old_and_future_dates():
     assert not date_matches({"date": "invalid"}, threshold)
 
 
-def test_rss_history_prevents_duplicate_import_and_vpn_loss_blocks_start(tmp_path):
+@pytest.mark.parametrize("prefix", ["torrent", "torrents"])
+def test_rss_history_prevents_duplicate_import_and_vpn_loss_blocks_start(tmp_path, prefix):
     @contextmanager
     def database():
         with sqlite3.connect(tmp_path / "history.sqlite") as connection:
@@ -24,7 +26,7 @@ def test_rss_history_prevents_duplicate_import_and_vpn_loss_blocks_start(tmp_pat
             yield connection
     feed = {"id": "a" * 24, "enabled": True, "url": "https://nordicbytes.org/rss/private", "folder": "releases", "ratio": 2, "start_at": "2026-01-01T00:00:00Z"}
     item_path = "MediaSeed-RSS-" + feed["id"]
-    items = {item_path: {"url": feed["url"], "articles": [{"id": "first", "date": "2026-01-02T00:00:00Z", "torrentURL": "https://nordicbytes.org/torrents/download/12/private"}]}}
+    items = {item_path: {"url": feed["url"], "articles": [{"id": "first", "date": "2026-01-02T00:00:00Z", "torrentURL": f"https://nordicbytes.org/{prefix}/download/12/private"}]}}
     calls = []
     ready = True
     async def vpn_status():
