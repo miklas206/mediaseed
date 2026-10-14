@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import hashlib
+import ipaddress
 import os
 import re
 import secrets
@@ -120,7 +121,9 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
             raise HTTPException(503, "MediaHub authentication unavailable") from None
 
-    async def managed_origin():
+    async def managed_origin(request=None):
+        if request is not None and request.headers.get("host", "").lower() == urlsplit(base).netloc.lower():
+            return base
         value = (await hub_request("origin?packageId=org.mediahub.mediaseed")).get("origin", "")
         candidate = urlsplit(value)
         if candidate.scheme != "https" or not candidate.hostname or candidate.path or candidate.query or candidate.fragment or candidate.username or candidate.password:
@@ -285,7 +288,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
     async def hub_start(request: Request):
         if not hub_url:
             raise HTTPException(409, "MediaHub SSO is not configured")
-        origin = await managed_origin()
+        origin = await managed_origin(request)
         if request.headers.get("host", "").lower() != urlsplit(origin).netloc.lower():
             return RedirectResponse(origin + "/auth/hub/start", status_code=303, headers={"Cache-Control": "no-store"})
         state, verifier = secrets.token_urlsafe(48), secrets.token_urlsafe(48)
@@ -295,7 +298,12 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             if connection.execute("SELECT COUNT(*) FROM hub_attempts").fetchone()[0] >= 1000:
                 raise HTTPException(429, "Try again later")
             connection.execute("INSERT INTO hub_attempts VALUES (?,?,?)", (hashlib.sha256(state.encode()).hexdigest(), verifier, time.time() + 300))
-        response = RedirectResponse(hub_browser_url + "/api/v1/sso/authorize?" + urlencode({"packageId": "org.mediahub.mediaseed", "state": state, "challenge": challenge}), status_code=303)
+        try:
+            local = origin == base and ipaddress.ip_address(urlsplit(origin).hostname).is_private
+        except ValueError:
+            local = False
+        browser_origin = hub_url if local else hub_browser_url
+        response = RedirectResponse(browser_origin + "/api/v1/sso/authorize?" + urlencode({"packageId": "org.mediahub.mediaseed", "state": state, "challenge": challenge, "appOrigin": origin}), status_code=303)
         response.set_cookie("mediaseed_sso_state", state, httponly=True, secure=True, samesite="lax", max_age=300, path="/auth/hub")
         response.headers["Cache-Control"] = "no-store"
         return response
@@ -361,12 +369,12 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/healthz")
     def health():
-        return {"status": "healthy", "version": "0.1.3"}
+        return {"status": "healthy", "version": "0.1.4"}
 
     @app.get("/api/auth/status")
-    async def status():
+    async def status(request: Request):
         if hub_url:
-            return {"needsSetup": False, "managed": True, "loginUrl": await managed_origin() + "/auth/hub/start"}
+            return {"needsSetup": False, "managed": True, "loginUrl": await managed_origin(request) + "/auth/hub/start"}
         with database() as connection:
             return {"needsSetup": connection.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0}
 
