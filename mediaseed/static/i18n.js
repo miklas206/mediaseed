@@ -1,6 +1,7 @@
 // Account language; English source keys and Danish translations.
 (() => {
 const messages = {
+  "MediaSeed 0.1.3": "MediaSeed 0.1.3",
   "Feed changed; waiting for the next refresh": "Feedet blev ændret; afventer næste opdatering",
   "Download folder": "Downloadmappe",
   "Storage location": "Lagerplacering",
@@ -816,15 +817,15 @@ const messages = {
   "Unknown": "Ukendt",
   "Country": "Land",
   "Save": "Gem",
-  "Add feed": "Tilf?j feed",
+  "Add feed": "Tilføj feed",
   "Your feeds": "Dine feeds",
-  "Search releases": "S?g efter udgivelser",
+  "Search releases": "Søg efter udgivelser",
   "Tracker accounts": "Trackerkonti",
   "Verification": "Verifikation",
   "Traffic": "Trafik",
   "Actions": "Handlinger",
   "Manage your VPN connections and app access.": "Administrer dine VPN-forbindelser og adgang for apps.",
-  "Create your first VPN connection.": "Opret din f?rste VPN-forbindelse.",
+  "Create your first VPN connection.": "Opret din første VPN-forbindelse.",
   "Dismiss notification": "Luk besked"
 };
 
