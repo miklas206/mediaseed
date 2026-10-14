@@ -149,7 +149,7 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         identifier = identifier or secrets.token_hex(12)
         with database() as connection:
             connection.execute("INSERT INTO settings VALUES (?,?,?) ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload", (kind, identifier, json.dumps(payload)))
-        return {"saved": True, "id": identifier}
+        return {"saved": True, "id": identifier, **({"start_at": payload.get("start_at")} if kind == "feeds" else {})}
 
     def tracker_account(identifier):
         account = next((row for row in rows("trackers") if row["id"] == identifier), None)

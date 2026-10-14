@@ -121,7 +121,9 @@ def test_saved_sources_mask_secrets_and_preserve_credentials(tmp_path):
         assert "private-secret" not in client.get("/api/feeds").text
         assert client.get("/api/feeds").json()[0]["paused"] is True
         source["url"] = ""
+        source["start_at"] = "2026-10-15T10:15:00+02:00"
         assert client.put(f"/api/feeds/{identifier}", json=source).status_code == 200
+        assert client.get("/api/feeds").json()[0]["start_at"] == source["start_at"]
         source["folder"] = "../outside"
         assert client.put(f"/api/feeds/{identifier}", json=source).status_code == 422
         account = client.post("/api/trackers", json={"name": "My account", "api_key": "synthetic-key"})

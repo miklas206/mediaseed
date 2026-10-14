@@ -1,6 +1,10 @@
 // Account language; English source keys and Danish translations.
 (() => {
 const messages = {
+  "Only fetch RSS entries from: {0}": "Hent kun RSS-poster fra: {0}",
+  "No start date selected": "Ingen startdato valgt",
+  "Saved feed address is kept. Fill in only to change it.": "Gemt feedadresse bevares. Udfyld kun for at skifte link.",
+  "The saved start date could not be verified. Your form is preserved.": "Den gemte startdato kunne ikke bekr\u00e6ftes. Formularen er bevaret.",
   "MediaSeed 0.1.3": "MediaSeed 0.1.3",
   "Feed changed; waiting for the next refresh": "Feedet blev ændret; afventer næste opdatering",
   "Download folder": "Downloadmappe",
