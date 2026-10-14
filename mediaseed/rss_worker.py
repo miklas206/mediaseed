@@ -70,6 +70,16 @@ class RssWorker:
         item_path = "MediaSeed-RSS-" + feed["id"]
         item = items.get(item_path)
         if not isinstance(item, dict):
+            configured = {"MediaSeed-RSS-" + row["id"] for row in self.rows("feeds")}
+            stale = [path for path, row in items.items()
+                     if isinstance(row, dict) and row.get("url") == feed["url"]
+                     and re.fullmatch(r"MediaSeed-RSS-[a-f0-9]{24}", path)
+                     and path not in configured]
+            if stale:
+                for path in stale:
+                    await self.qbit("/api/v2/rss/removeItem", "POST", {"path": path})
+                self.reports[feed["id"]] = "Gammel feedregistrering ryddet; synkroniserer"
+                return
             categories = (await self.qbit("/api/v2/torrents/categories")).json()
             if not isinstance(categories, dict):
                 raise ValueError("Invalid client categories")

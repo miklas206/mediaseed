@@ -53,3 +53,25 @@ def test_rss_history_prevents_duplicate_import_and_vpn_loss_blocks_start(tmp_pat
         await restarted.tick()
         assert sum(path.endswith("/add") for path, payload in calls) == 1
     asyncio.run(check())
+
+
+@pytest.mark.parametrize("old_kind", ["stale", "configured", "external"])
+def test_recreated_feed_cleans_only_owned_unconfigured_duplicate(tmp_path, old_kind):
+    @contextmanager
+    def database():
+        with sqlite3.connect(tmp_path / "rss.sqlite") as c:
+            yield c
+    feed = {"id": "a" * 24, "url": "https://nordicbytes.org/rss/synthetic", "folder": "", "enabled": True}
+    old = "MediaSeed-RSS-" + "b" * 24 if old_kind != "external" else "My manual feed"
+    current = [feed] + ([{"id": "b" * 24}] if old_kind == "configured" else [])
+    calls = []
+    async def qbit(path, method="GET", payload=None, files=None):
+        calls.append((path, payload))
+        return httpx.Response(200, json={})
+    async def status():
+        return {"downloadsEnabled": True}
+    worker = RssWorker(database, lambda kind: current, qbit, status)
+    asyncio.run(worker.process(feed, {old: {"url": feed["url"]}}))
+    removed = [payload for path, payload in calls if path.endswith("removeItem")]
+    assert removed == ([{"path": old}] if old_kind == "stale" else [])
+    assert not any(path.endswith("torrents/add") for path, _ in calls)
