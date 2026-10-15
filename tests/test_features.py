@@ -256,7 +256,7 @@ def test_tracker_statistics_are_bounded_private_and_cached(tmp_path, monkeypatch
     requests = []
     def handler(request):
         requests.append(request)
-        return httpx.Response(200, json={"username": "tester", "passkey": "private", "stats": {"uploaded": 123, "ratio": 2, "api_key": "private", "warnings": {"hnr": 2, "manual": 1, "unknown": 100}}})
+        return httpx.Response(200, json={"username": "tester", "passkey": "private", "autogroup": {"title": "Explorer", "icon": "private-icon"}, "uploadgroup": {"title": "Uploader", "secret": "private"}, "stats": {"uploaded": 123, "ratio": 2, "api_key": "private", "warnings": {"hnr": 2, "manual": 1, "unknown": 100}}})
     monkeypatch.setattr(features.httpx, "AsyncClient", lambda **kwargs: original(**kwargs, transport=httpx.MockTransport(handler)))
     with TestClient(create_app(tmp_path, "http://testserver")) as client:
         sign_in(client)
@@ -265,6 +265,11 @@ def test_tracker_statistics_are_bounded_private_and_cached(tmp_path, monkeypatch
         assert result.status_code == 200
         assert result.json()[0]["stats"]["uploaded"] == 123
         assert result.json()[0]["stats"]["warnings"] == 3
+        assert result.json()[0]["ranks"] == {"automatic": "Explorer", "upload": "Uploader"}
+        assert result.json()[0]["rankProgress"]["target"]["title"] == "Contributor"
+        overview = client.app.state.tracker_overview()[0]
+        assert overview["ranks"] == result.json()[0]["ranks"]
+        assert overview["rankProgress"] == result.json()[0]["rankProgress"]
         assert "private" not in result.text
         assert client.get("/api/trackers").status_code == 200 and len(requests) == 1
         client.put(f"/api/trackers/{identifier}", json={"name": "Test", "api_key": "new-key"})
@@ -275,12 +280,15 @@ def test_tracker_statistics_are_bounded_private_and_cached(tmp_path, monkeypatch
 def test_missing_tracker_warnings_are_unknown_not_zero(tmp_path, monkeypatch):
     from mediaseed import features
     original = httpx.AsyncClient
-    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"stats": {"ratio": 0, "downloaded": 0}}))
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"autogroup": {"title": 45}, "stats": {"ratio": 0, "downloaded": 0}}))
     monkeypatch.setattr(features.httpx, "AsyncClient", lambda **kwargs: original(**kwargs, transport=transport))
     with TestClient(create_app(tmp_path, "http://testserver")) as client:
         sign_in(client)
         client.post("/api/trackers", json={"name": "Test", "api_key": "synthetic-key"})
-        stats = client.get("/api/trackers").json()[0]["stats"]
+        account = client.get("/api/trackers").json()[0]
+        assert account["ranks"] == {}
+        assert account["rankProgress"]["target"] is None
+        stats = account["stats"]
         assert stats["warnings"] is None
         assert stats["uploaded"] is None
         assert stats["ratio"] == 0

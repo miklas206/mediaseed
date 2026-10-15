@@ -1,6 +1,33 @@
 // Account language; English source keys and Danish translations.
 (() => {
 const messages = {
+  "Next rank": "Næste rang",
+  "First rank in this table": "Første rang i denne tabel",
+  "All rank requirements": "Alle rangkrav",
+  "True upload": "True upload",
+  "Membership": "Medlemskab",
+  "Comments": "Kommentarer",
+  "Posts": "Indlæg",
+  "Average seeding time": "Gennemsnitlig seedingtid",
+  "{0} days": "{0} dage",
+  "Current value unavailable from tracker": "Nuværende værdi ikke oplyst af trackeren",
+  "Requirement met": "Krav opfyldt",
+  "Missing: {0}": "Mangler: {0}",
+  "True upload is not the same as credited upload. Missing tracker counters are shown as unknown.": "True upload er ikke det samme som krediteret upload. Manglende trackermålinger vises som ukendte.",
+  "Requirements from the rank table dated {0}": "Krav fra rangtabellen dateret {0}",
+  "Next rank: {0} · View requirements": "Næste rang: {0} · Se krav",
+  "View rank requirements": "Se rangkrav",
+
+  "Tracker upload": "Tracker-upload",
+  "Tracker download": "Tracker-download",
+  "Rank": "Rang",
+  "Uploader rank": "Uploader-rang",
+  "Staff rank": "Staff-rang",
+  "Rank: {0}": "Rang: {0}",
+  "Rank unavailable from tracker": "Rang ikke oplyst af trackeren",
+  "View next-rank requirements on NordicBytes": "Se krav til næste rang på NordicBytes",
+  "Next-rank requirements are not included in the tracker API. Open the rank table to see the requirements.": "Trackerens API oplyser ikke kravene til næste rang. Åbn rangtabellen for at se kravene.",
+
   "Torrent added": "Torrent tilføjet",
   "Raw upload {0} · Conservative seeding credit {1} · Goal ratio {2} / {3}": "Faktisk upload {0} · Konservativ seedingkredit {1} · Målratio {2} / {3}",
   "Estimated credited upload": "Krediteret upload (estimat)",
@@ -204,7 +231,7 @@ const messages = {
   "Selected torrent files": "Valgte torrentfiler",
   "For individual ratio previews, select one file at a time.": "V\u00e6lg \u00e9n fil ad gangen for at forh\u00e5ndsvise individuelle ratioer.",
 
-  "MediaSeed 0.1.19": "MediaSeed 0.1.19",
+  "MediaSeed 0.1.20": "MediaSeed 0.1.20",
   "Waiting for the next bounded metadata check": "Afventer næste kontrol af torrentoplysninger",
   "Seeding progress": "Seedingfremdrift",
   "Downloaded": "Downloadet",

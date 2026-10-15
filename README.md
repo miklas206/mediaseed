@@ -178,3 +178,5 @@ Choose 10, 25, 50 or 100 torrents per page. Search and source/state filters appl
 Download queue settings read the client's actual configuration rather than a hardcoded display value. The dashboard reuses the queue observation for up to 60 seconds; saving settings verifies and refreshes it immediately. MediaVPN 0.2.18+ provides an authenticated dedicated queue endpoint instead of exposing arbitrary qBittorrent preference writes. Viewer accounts cannot change settings.
 
 Storage is in normal document flow above the footer. Capacity shows used/free/total for the filesystem, and locations sharing the same device are grouped. Local downloads commonly share the LXC system disk with the OS, image layers and app data: that filesystem's used space is not the download directory's size. Files are not moved or deleted by this display change.
+
+MediaSeed 0.1.20 adds tracker-wide upload/download totals and cached account ranks to the Downloads summary. The tracker view links to the official rank table; promotion thresholds are not guessed.

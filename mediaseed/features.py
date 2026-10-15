@@ -18,6 +18,7 @@ from mediaseed.rss_worker import RssWorker
 from mediaseed.ratio_scout import RatioScout, RatioSettings
 from mediaseed.activity import Activity
 from mediaseed import feed_uploads
+from mediaseed.nordic_ranks import rank_progress
 
 
 class SeedingPolicy(BaseModel):
@@ -474,7 +475,16 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
                             stats[field] = value if type(value) in (int, float) and math.isfinite(value) else None
                         warnings = data["stats"].get("warnings")
                         stats["warnings"] = sum(value for key, value in warnings.items() if key in {"hnr", "manual"} and type(value) is int and value >= 0) if isinstance(warnings, dict) else None
-                        public = {"status": "ok", "stats": stats, "username": str(data.get("username", ""))[:80], "checkedAt": time.time()}
+                        # Rank identity uses the same cached account response, never another request.
+                        ranks = {}
+                        for source, target in (("autogroup", "automatic"), ("uploadgroup", "upload"), ("internalgroup", "internal")):
+                            group = data.get(source)
+                            title = group.get("title") if isinstance(group, dict) else None
+                            if isinstance(title, str) and title.strip():
+                                ranks[target] = title.strip()[:80]
+                        if not ranks.get("automatic") and isinstance(data.get("group"), str) and data["group"].strip():
+                            ranks["automatic"] = data["group"].strip()[:80]
+                        public = {"status": "ok", "stats": stats, "ranks": ranks, "rankProgress": rank_progress(ranks, stats), "username": str(data.get("username", ""))[:80], "checkedAt": time.time()}
                     except (HTTPException, ValueError, TypeError):
                         public = {"status": "error", "stats": None, "error": "Tracker account statistics are unavailable"}
                     cached = {"key": account["api_key"], "checked": time.monotonic(), "public": public}
@@ -522,7 +532,7 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
             cached = tracker_cache.get(account["id"])
             fresh = cached and cached["key"] == account["api_key"] and time.monotonic() - cached["checked"] < 360
             public = cached["public"] if fresh else {}
-            result.append({"id": account["id"], "name": account["name"], "status": public.get("status", "pending"), "stats": public.get("stats"), "checkedAt": public.get("checkedAt")})
+            result.append({"id": account["id"], "name": account["name"], "status": public.get("status", "pending"), "stats": public.get("stats"), "ranks": public.get("ranks", {}), "rankProgress": public.get("rankProgress"), "checkedAt": public.get("checkedAt")})
         return result
 
     app.state.tracker_overview = tracker_overview

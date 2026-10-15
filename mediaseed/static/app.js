@@ -474,6 +474,15 @@ function trackerBytes(value) {
   while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index++; }
   return `${value < 0 ? '−' : ''}${amount.toLocaleString(locale(), {maximumFractionDigits: index ? 2 : 0})} ${units[index]}`;
 }
+function rankRequirements(entry) {
+  const section=element('section',undefined,'rank-requirements');section.append(element('strong',entry.title));
+  const labels={trueUpload:'True upload',membership:'Membership',comments:'Comments',posts:'Posts',averageSeeding:'Average seeding time',seedingSize:'Seeding size'};
+  for(const item of entry.requirements){
+    const format=value=>item.unit==='bytes'?trackerBytes(value):item.unit==='days'?t('{0} days',{0:trackerNumber(value)}):trackerNumber(value);
+    const line=element('p');line.append(element('span',t(labels[item.metric])+': '+format(item.goal)),element('small',item.missing===null?t('Current value unavailable from tracker'):item.missing===0?t('Requirement met'):t('Missing: {0}',{0:format(item.missing)}),'muted'));section.append(line);
+  }
+  return section;
+}
 function trackerCard(row) {
   const card = element('article', undefined, 'source-row tracker-card');
   const head = element('div', undefined, 'tracker-card-heading');
@@ -496,6 +505,20 @@ function trackerCard(row) {
       stats.append(metric);
     }
     card.append(stats);
+    const ranks=element('div',undefined,'tracker-ranks');
+    for(const [key,label] of [['automatic','Rank'],['upload','Uploader rank'],['internal','Staff rank']]){
+      if(row.ranks?.[key])ranks.append(element('p',t(label)+': '+row.ranks[key]));
+    }
+    if(!row.ranks?.automatic)ranks.append(element('p',t('Rank unavailable from tracker'),'muted'));
+    const requirements=element('a',t('View next-rank requirements on NordicBytes'));requirements.href='https://nordicbytes.org/pages/groups';requirements.target='_blank';requirements.rel='noopener noreferrer';ranks.append(requirements);
+    const progress=row.rankProgress;
+    if(progress?.target)ranks.append(element('h4',t('Next rank')),rankRequirements(progress.target));
+    else if(progress?.firstListed)ranks.append(element('h4',t('First rank in this table')),rankRequirements(progress.firstListed));
+    const table=element('details');table.append(element('summary',t('All rank requirements')));
+    for(const entry of progress?.table||[])table.append(rankRequirements(entry));
+    ranks.append(table,element('p',t('True upload is not the same as credited upload. Missing tracker counters are shown as unknown.'),'muted'),element('small',t('Requirements from the rank table dated {0}',{0:progress?.sourceDate||'—'}),'muted'));
+    card.append(ranks);
+
     const checked = new Date(row.checkedAt * 1000);
     card.append(element('p', Number.isFinite(checked.getTime()) ? t("Retrieved {0} · Checked automatically every 5 minutes", {0: checked.toLocaleString(locale(), {dateStyle: 'short', timeStyle: 'short'})}) : t("Account statistics time is unknown"), 'tracker-updated muted'));
   } else {

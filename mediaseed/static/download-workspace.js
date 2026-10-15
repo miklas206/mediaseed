@@ -52,6 +52,13 @@
     vpn.replaceChildren(element('span',t('Connection')),element('strong',active?t('VPN verified'):t('Status cannot be verified')),element('small',active?runtime:t('Check the connection under VPN')));
     const accounts=globalThis.MediaSeedTrackerRows||[],row=accounts[0];
     account.replaceChildren(element('span',t('Tracker and ratio')),element('strong',row?.stats?t('Ratio {0} · Buffer {1}',{0:trackerNumber(row.stats.ratio),1:trackerBytes(row.stats.buffer)}):t('Account data unavailable')),element('small',row?.stats?t('{0} · Warnings {1}',{0:row.name,1:trackerNumber(row.stats.warnings)}):t('Manage trackers')));
+    if(row?.stats){
+      const totals=element('dl',undefined,'download-account-totals');
+      for(const [label,value] of [['Tracker upload',row.stats.uploaded],['Tracker download',row.stats.downloaded]]){const metric=element('div');metric.append(element('dt',t(label)),element('dd',trackerBytes(value)));totals.append(metric);}
+      account.append(totals,element('small',row.ranks?.automatic?t('Rank: {0}',{0:row.ranks.automatic}):t('Rank unavailable from tracker')));
+      if(row.rankProgress?.target)account.append(element('small',t('Next rank: {0} · View requirements',{0:row.rankProgress.target.title})));
+      else account.append(element('small',t('View rank requirements')));
+    }
     account.classList.toggle('attention',!!row?.stats?.warnings);account.hidden=appRole==='viewer';
     const q=globalThis.MediaSeedQueue,checking=torrentSnapshotValid?torrents.filter(r=>String(r.state).startsWith('checking')).length:null;
     counts.textContent=q?t('Downloads {0}/{1} · Waiting {2}',{0:q.active,1:q.limit===-1?t('Unlimited'):q.limit??'—',2:q.waiting}):t('Queue status unavailable');

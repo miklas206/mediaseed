@@ -40,3 +40,16 @@
 .seed-stats .stat-icon { display:inline-flex; width:24px; height:24px; flex:none; color:var(--accent); }
 .seed-stats .stat-icon svg { width:100%; height:100%; }
 @media(max-width:650px) { .download-route-node .route-icon { width:36px; height:36px; } }
+
+.download-account-totals { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 16px; margin:0; padding-top:12px; border-top:1px solid var(--line); }
+.download-account-totals dt { font-size:.75rem; color:var(--muted); font-weight:400; }
+.download-account-totals dd { margin:4px 0 0; font-size:1rem; font-weight:650; overflow-wrap:anywhere; }
+.tracker-ranks { border-top:1px solid var(--line); margin-top:14px; padding-top:10px; font-size:.85rem; }
+.tracker-ranks p { margin:6px 0; overflow-wrap:anywhere; }
+.tracker-ranks a { display:inline-block; margin-block:6px; }
+
+.rank-requirements { margin-block:12px; padding:12px; border:1px solid var(--line); border-radius:8px; }
+.rank-requirements p { display:flex; justify-content:space-between; gap:8px 16px; flex-wrap:wrap; }
+.tracker-ranks summary { cursor:pointer; padding-block:8px; }
+
+.download-status-card:has(.download-account-totals) { gap:8px; }
