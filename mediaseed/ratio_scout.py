@@ -31,6 +31,7 @@ class RatioSettings(BaseModel):
     maxGiB: int = Field(default=20, ge=1, le=10000, strict=True)
     reserveGiB: int = Field(default=20, ge=1, le=10000, strict=True)
     dailyLimit: int = Field(default=3, ge=1, le=100, strict=True)
+    scanMinutes: int = Field(default=10, ge=5, le=60, strict=True)
 
     @model_validator(mode="after")
     def validate_settings(self):
@@ -151,6 +152,10 @@ class RatioScout:
             c.execute(
                 "CREATE TABLE IF NOT EXISTS ratio_imports (hash TEXT PRIMARY KEY, created REAL NOT NULL, size INTEGER NOT NULL, location TEXT NOT NULL, status TEXT NOT NULL)"
             )
+        with database() as c:
+            c.execute(
+                "CREATE TABLE IF NOT EXISTS ratio_scan_state (tracker TEXT PRIMARY KEY, page_size INTEGER NOT NULL, not_before REAL NOT NULL)"
+            )
         self.status = "waiting" if self.settings().enabled else "disabled"
 
     def settings(self):
@@ -160,6 +165,7 @@ class RatioScout:
 
     async def save(self, settings):
         async with self.lock:
+            previous = self.settings()
             if settings.enabled:
                 self.account(settings)
                 self.storage.destination(settings.location, settings.folder)
@@ -169,10 +175,45 @@ class RatioScout:
                     (settings.model_dump_json(),),
                 )
                 c.execute("DELETE FROM ratio_candidates")
+            _, deadline = self.scan_state(settings.tracker)
+            if (
+                deadline
+                and settings.tracker == previous.tracker
+                and settings.scanMinutes > previous.scanMinutes
+            ):
+                deadline += (settings.scanMinutes - previous.scanMinutes) * 60
+                with self.database() as c:
+                    c.execute(
+                        "UPDATE ratio_scan_state SET not_before=? WHERE tracker=?",
+                        (deadline, settings.tracker),
+                    )
+            if deadline:
+                self.next_scan = max(
+                    self.next_scan, time.monotonic() + max(0, deadline - time.time())
+                )
             if self.last_scan:
-                self.next_scan = max(self.next_scan, self.last_scan + 300)
+                self.next_scan = max(
+                    self.next_scan, self.last_scan + settings.scanMinutes * 60
+                )
             self.status = "waiting" if settings.enabled else "disabled"
         return settings.model_dump()
+
+    def scan_state(self, tracker):
+        with self.database() as c:
+            row = c.execute(
+                "SELECT page_size,not_before FROM ratio_scan_state WHERE tracker=?",
+                (tracker,),
+            ).fetchone()
+        return (max(1, min(10, row[0])), row[1]) if row else (10, 0)
+
+    def plan_scan(self, tracker, page_size, delay):
+        deadline = time.time() + delay
+        with self.database() as c:
+            c.execute(
+                "INSERT INTO ratio_scan_state VALUES (?,?,?) ON CONFLICT(tracker) DO UPDATE SET page_size=excluded.page_size,not_before=excluded.not_before",
+                (tracker, page_size, deadline),
+            )
+        self.next_scan = time.monotonic() + delay
 
     def account(self, settings):
         account = next(
@@ -194,7 +235,8 @@ class RatioScout:
             return await self.tracker_read(account, path, params)
         except HTTPException as error:
             if error.status_code == 503:
-                self.next_scan = time.monotonic() + 900
+                page_size, _ = self.scan_state(account["id"])
+                self.plan_scan(account["id"], page_size, 900)
                 self.next_request = time.monotonic() + 900
             raise
 
@@ -225,9 +267,12 @@ class RatioScout:
                 "SELECT COUNT(*) FROM ratio_imports WHERE created>? AND status!='existing'",
                 (time.time() - 86400,),
             ).fetchone()[0]
+        page_size, deadline = self.scan_state(settings.tracker)
         for row in candidates:
             row["importStatus"] = imports.get(row["hash"])
-            row["stale"] = not 0 <= time.time() - row["checkedAt"] < 600
+            row["stale"] = (
+                not 0 <= time.time() - row["checkedAt"] < settings.scanMinutes * 120
+            )
         return {
             "status": self.status,
             "settings": settings.model_dump(),
@@ -235,7 +280,9 @@ class RatioScout:
                 candidates, key=lambda r: (-r["leechers"] / r["seeders"], r["size"])
             )[:50],
             "dailyUsed": count,
-            "scanMinutes": 5,
+            "scanMinutes": settings.scanMinutes,
+            "resultLimit": page_size,
+            "nextScanAt": deadline,
             "bounded": True,
         }
 
@@ -247,8 +294,12 @@ class RatioScout:
             if not settings.enabled:
                 self.status = "disabled"
                 return
+            page_size, not_before = self.scan_state(settings.tracker)
+            if time.time() < not_before:
+                self.next_scan = time.monotonic() + not_before - time.time()
+                return
             self.last_scan = time.monotonic()
-            self.next_scan = self.last_scan + 300
+            self.plan_scan(settings.tracker, page_size, settings.scanMinutes * 60)
             try:
                 account = self.account(settings)
                 result = await self.read(
@@ -256,7 +307,7 @@ class RatioScout:
                     "/api/torrents/filter",
                     {
                         "name": settings.query.strip(),
-                        "perPage": 50,
+                        "perPage": page_size,
                         "free[]": 100,
                         "sortField": "leechers",
                         "sortDirection": "desc",
@@ -267,7 +318,7 @@ class RatioScout:
                     raise HTTPException(503, "Invalid tracker discovery response")
                 matches = [
                     match
-                    for row in rows[:50]
+                    for row in rows[:page_size]
                     if (match := candidate(row, settings, time.time()))
                 ]
                 with self.database() as c:
@@ -306,7 +357,13 @@ class RatioScout:
                         except HTTPException as error:
                             self.status = str(error.detail)
                             match["blockedReason"] = self.status
-                            self.activity.record('ratio', match['hash'], match['name'], self.status, torrent_hash=match['hash'])
+                            self.activity.record(
+                                "ratio",
+                                match["hash"],
+                                match["name"],
+                                self.status,
+                                torrent_hash=match["hash"],
+                            )
                             with self.database() as c:
                                 c.execute(
                                     "UPDATE ratio_candidates SET payload=? WHERE id=?",
@@ -320,6 +377,14 @@ class RatioScout:
                                 break
             except HTTPException as error:
                 self.status = str(error.detail)
+                if error.detail == "Tracker response is too large":
+                    smaller = 5 if page_size > 5 else 1
+                    self.plan_scan(settings.tracker, smaller, settings.scanMinutes * 60)
+                    self.status = (
+                        "Tracker response too large; next scan requests fewer results"
+                        if page_size > 1
+                        else "Tracker response too large for a single result"
+                    )
             except (ValueError, TypeError, KeyError, OSError):
                 self.status = "Ratio discovery is temporarily unavailable"
 
@@ -333,10 +398,18 @@ class RatioScout:
                 return await self._add_locked(identifier, automatic)
             except HTTPException as error:
                 with self.database() as db:
-                    stored = db.execute("SELECT payload FROM ratio_candidates WHERE id=?", (identifier,)).fetchone()
+                    stored = db.execute(
+                        "SELECT payload FROM ratio_candidates WHERE id=?", (identifier,)
+                    ).fetchone()
                 if stored:
                     row = json.loads(stored[0])
-                    self.activity.record('ratio', row['hash'], row['name'], str(error.detail), torrent_hash=row['hash'])
+                    self.activity.record(
+                        "ratio",
+                        row["hash"],
+                        row["name"],
+                        str(error.detail),
+                        torrent_hash=row["hash"],
+                    )
                 raise
 
     async def _add_locked(self, identifier, automatic=False):
@@ -530,7 +603,9 @@ class RatioScout:
         return {"added": True, "startRequested": True, "hash": actual}
 
     def record(self, row, settings, status):
-        self.activity.record('ratio', row['hash'], row['name'], status, torrent_hash=row['hash'])
+        self.activity.record(
+            "ratio", row["hash"], row["name"], status, torrent_hash=row["hash"]
+        )
         with self.database() as c:
             c.execute(
                 "INSERT INTO ratio_imports VALUES (?,?,?,?,?) ON CONFLICT(hash) DO UPDATE SET status=excluded.status",

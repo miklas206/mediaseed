@@ -1,8 +1,8 @@
-# Build ratio — MediaSeed 0.1.15
+# Build ratio — MediaSeed 0.1.18
 
 The **Build ratio** tab discovers freeleech candidates through the configured
-NordicBytes API account. Discovery and automatic downloading are disabled on
-fresh installations and on upgrade. Existing RSS rules, tracker credentials,
+NordicBytes API account. Discovery and automatic downloading start disabled on fresh installations.
+Upgrades preserve existing explicit opt-in and saved rules. Existing RSS rules, tracker credentials,
 storage, torrents and cleanup policies are preserved.
 
 Select a tracker, an approved storage location and optionally an existing
@@ -21,13 +21,27 @@ Defaults:
 | Maximum torrent size | 20 GiB |
 | Storage reserve | 20 GiB |
 | Download allowance | 3 per rolling 24 hours |
+| Search interval | 10 minutes (configurable 5–60) |
 
 Title substring, seeder bounds, minimum leechers, double upload, size, free
 space and allowance are configurable. This first version has one rule set for
 one tracker. It requests the API's freeleech filter and leecher-descending sort,
-then inspects up to 50 results every five minutes, without
+then inspects up to 10 results every ten minutes by default, without
 scraping or walking the full catalog. Refreshing the UI only reads the cached
 scan. Rule changes clear old candidates but do not bypass the scan interval.
+The search interval is configurable from 5 to 60 minutes. Normal discovery
+uses one request per interval (six per hour by default). Approval and automatic
+import still make fresh detail/account requests. Other app features have their
+own requests. Smaller batches can omit candidates outside the top results.
+
+The 1 MiB response limit is retained. Oversized discovery responses shrink the
+next planned batch from 10 to 5 to 1 results, without an immediate retry or
+page walk. The adaptive limit and next-search deadline are stored in an
+additive SQLite table and survive restarts. Old settings preserve enabled mode,
+filters and credentials and gain the ten-minute default without a reset.
+Changing rules does not bypass the deadline; longer intervals extend it.
+The UI shows the actual interval, batch limit and next planned search.
+
 API calls from this worker are at least one second apart; HTTP 503/rate-limit
 responses postpone requests for 15 minutes. These are application defaults,
 not a claim that the tracker's unpublished API limits allow a particular rate.
@@ -91,7 +105,7 @@ VPN loss, uncertain writes, restart deduplication and API backoff. Isolated
 Chromium checks at 1440/390/320 cover translated UI, saving automatic opt-in,
 approval success/failure, duplicate prevention and horizontal overflow.
 
-Final local checks: 185 Python tests passed, 1 skipped; 50 JavaScript tests
+Final local checks: 194 Python tests passed, 1 skipped; 50 JavaScript tests
 passed; targeted Ruff and diff checks passed. Read-only checks against the
 configured tracker returned HTTP 200 for filtered discovery and account totals,
 and confirmed the expected field types. Pinned tracker entries can affect API

@@ -4,11 +4,13 @@
   if (!form) return;
   let loading = false, busy = false;
   const field = name => form.elements.namedItem(name);
-  const numeric = ['minSeeders','maxSeeders','minLeechers','maxGiB','reserveGiB','dailyLimit'];
+  const numeric = ['minSeeders','maxSeeders','minLeechers','maxGiB','reserveGiB','dailyLimit','scanMinutes'];
   const status = document.querySelector('#ratio-status');
   const formStatus = document.querySelector('#ratio-form-status');
   const admin = () => appRole === 'administrator';
   function render(data) {
+    document.querySelector('#ratio-scan-info').textContent=t('One tracker search every {0} minutes, up to {1} results. Refresh uses saved results; approval performs fresh safety checks.',{0:data.scanMinutes,1:data.resultLimit});
+    if(data.settings.enabled && data.nextScanAt>0) document.querySelector('#ratio-scan-info').textContent+=' '+t('Next search: {0}',{0:new Date(data.nextScanAt*1000).toLocaleString(locale())});
     status.textContent = t('Discovery status: {0} · Used in the last 24 hours: {1}/{2}', {0: t(data.status), 1: data.dailyUsed, 2: data.settings.dailyLimit});
     const cards = (data.candidates || []).map(row => {
       const card = element('article', undefined, 'source-row ratio-candidate');

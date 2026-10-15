@@ -2,6 +2,12 @@
 (() => {
 const messages = {
   "Torrent added": "Torrent tilføjet",
+  "Next search: {0}": "Næste søgning: {0}",
+  "Search interval (minutes)": "Søgeinterval (minutter)",
+  "One small tracker search per interval. Refresh uses saved results.": "Én lille trackersøgning pr. interval. Opdatér bruger gemte resultater.",
+  "One tracker search every {0} minutes, up to {1} results. Refresh uses saved results; approval performs fresh safety checks.": "Én trackersøgning hvert {0}. minut med højst {1} resultater. Opdatér bruger gemte resultater; godkendelse foretager nye sikkerhedskontroller.",
+  "Tracker response too large; next scan requests fewer results": "Trackerens svar er for stort; næste søgning henter færre resultater",
+  "Tracker response too large for a single result": "Trackerens svar er for stort selv for ét resultat",
   "Back to MediaHub": "Tilbage til MediaHub",
   "Navigation layout": "Navigationslayout",
   "Open navigation": "Åbn navigation",
@@ -187,7 +193,7 @@ const messages = {
   "Selected torrent files": "Valgte torrentfiler",
   "For individual ratio previews, select one file at a time.": "V\u00e6lg \u00e9n fil ad gangen for at forh\u00e5ndsvise individuelle ratioer.",
 
-  "MediaSeed 0.1.17": "MediaSeed 0.1.17",
+  "MediaSeed 0.1.18": "MediaSeed 0.1.18",
   "Waiting for the next bounded metadata check": "Afventer næste kontrol af torrentoplysninger",
   "Seeding progress": "Seedingfremdrift",
   "Downloaded": "Downloadet",

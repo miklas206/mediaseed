@@ -146,7 +146,7 @@ def test_fresh_disabled_upgrade_persistence_and_private_data(rig):
                 "/api/torrents/filter",
                 {
                     "name": "",
-                    "perPage": 50,
+                    "perPage": 10,
                     "free[]": 100,
                     "sortField": "leechers",
                     "sortDirection": "desc",
@@ -366,7 +366,7 @@ def test_stale_candidates_are_labeled_and_changed_rules_invalidate_them(rig):
         await scout.save(settings)
         await scout.tick()
         row = scout.public()["candidates"][0]
-        row["checkedAt"] -= 601
+        row["checkedAt"] -= 1201
         with database() as c:
             c.execute("UPDATE ratio_candidates SET payload=?", (json.dumps(row),))
         assert scout.public()["candidates"][0]["stale"]
@@ -462,3 +462,103 @@ def test_api_is_authenticated_csrf_guarded_and_additive_for_old_database(tmp_pat
                 "SELECT payload FROM settings WHERE kind='trackers'"
             ).fetchone()[0]
         )
+
+
+def test_small_scan_persists_deadline_and_adapts_without_immediate_retries(rig):
+    scout, settings, source, state, database = rig
+    attempts = []
+
+    async def sized(account, path, params=None):
+        attempts.append(params["perPage"])
+        if params["perPage"] > 1:
+            raise HTTPException(502, "Tracker response is too large")
+        return {"data": [copy.deepcopy(source)]}
+
+    async def check():
+        await scout.save(settings)
+        scout.tracker_read = sized
+        await scout.tick()
+        assert attempts == [10]
+        assert scout.public()["resultLimit"] == 5
+        assert scout.public()["nextScanAt"] > time.time() + 590
+        await scout.tick()
+        assert attempts == [10]
+        restarted = RatioScout(
+            database,
+            scout.accounts,
+            sized,
+            scout.qbit,
+            scout.vpn_status,
+            scout.storage,
+            add_stopped,
+        )
+        await restarted.tick()
+        assert attempts == [10]  # Restart cannot bypass the scheduled deadline.
+        for expected in [5, 1]:
+            with database() as db:
+                db.execute("UPDATE ratio_scan_state SET not_before=0")
+            restarted.next_scan = 0
+            await restarted.tick()
+            assert attempts[-1] == expected
+        assert attempts == [10, 5, 1]
+        assert restarted.public()["status"] == "ready"
+        assert len(restarted.public()["candidates"]) == 1
+        assert not state.calls
+        assert restarted.settings() == settings
+
+    asyncio.run(check())
+
+
+def test_old_settings_upgrade_defaults_and_configurable_scan_interval(rig):
+    scout, settings, _, state, database = rig
+    legacy = settings.model_dump()
+    legacy.pop("scanMinutes")
+    with database() as db:
+        db.execute("INSERT INTO ratio_settings VALUES (1,?)", (json.dumps(legacy),))
+    restarted = RatioScout(
+        database,
+        scout.accounts,
+        scout.tracker_read,
+        scout.qbit,
+        scout.vpn_status,
+        scout.storage,
+        add_stopped,
+    )
+    assert restarted.settings().scanMinutes == 10
+    assert restarted.settings().tracker == settings.tracker
+
+    async def check():
+        await restarted.save(
+            restarted.settings().model_copy(update={"scanMinutes": 30})
+        )
+        await restarted.tick()
+        assert restarted.public()["scanMinutes"] == 30
+        assert restarted.public()["nextScanAt"] > time.time() + 1790
+        await restarted.save(restarted.settings())
+        restarted.next_scan = 0
+        await restarted.tick()
+        assert len(state.reads) == 1  # Saving rules cannot trigger more tracker calls.
+        await restarted.save(
+            restarted.settings().model_copy(update={"scanMinutes": 60})
+        )
+        assert restarted.public()["nextScanAt"] > time.time() + 3590
+        again = RatioScout(
+            database,
+            scout.accounts,
+            scout.tracker_read,
+            scout.qbit,
+            scout.vpn_status,
+            scout.storage,
+            add_stopped,
+        )
+        await again.tick()
+        assert len(state.reads) == 1
+        assert len(restarted.public()["candidates"]) == 0
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("minutes", [4, 61, True, "10"])
+def test_scan_interval_validation(minutes):
+    with pytest.raises(ValidationError):
+        RatioSettings(scanMinutes=minutes)

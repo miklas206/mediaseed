@@ -1,5 +1,7 @@
 # MediaSeed
 
+MediaSeed 0.1.18 reduces ratio discovery to ten sorted results per ten-minute interval by default, with a configurable 5–60 minute interval, persisted scheduling and smaller batches after oversized responses. See [ratio discovery](docs/ratio-scout.md).
+
 MediaSeed 0.1.17 balances the workspace to the MediaHub Apps width, aligns icon navigation with the Hub, standardizes route/transfer SVG icons and adds a configured return-to-Hub link. Actionable status, automatic activity and compact RSS/tracker editing remain. See [behavior and upgrade notes](docs/responsive-workspace.md).
 
 MediaSeed 0.1.8 adds poster rows, tabbed torrent details, account-ratio preview and optional RSS title/size/badge filters with retained decision history. See [workspace behavior, upgrade and verification](docs/rich-workspace.md).
