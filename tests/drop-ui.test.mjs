@@ -24,7 +24,7 @@ function setup() {
   const nodes = new Map(), listeners = new Map(), uploads = [];
   const create = () => {
     const classes = new Set();
-    return {value: '', files: [], dataset: {}, style: {setProperty() {}},
+    return {value: '', files: [], children: [], contains(){return false;}, querySelector(){return null;}, dataset: {}, style: {setProperty() {}},
       classList: {add: x => classes.add(x), remove: x => classes.delete(x), contains: x => classes.has(x)},
       addEventListener() {}, append() {}, replaceChildren() {}, setAttribute() {}, querySelectorAll: () => [],
       showModal() {this.open = true; this.openCount = (this.openCount || 0) + 1;}, close() {this.open = false;},

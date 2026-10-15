@@ -169,6 +169,23 @@ document.querySelector('#remove-form').onsubmit = async event => {
   } catch (error) { notify(error); }
   finally { button.disabled = false; }
 };
+// Keep keyboard position and disclosures when a refreshed list replaces its rows.
+function preserveListInteraction(target, key) {
+  const controls = 'button, summary, a, input, select';
+  const active = document.activeElement;
+  const rows = [...target.children];
+  const focusedRow = rows.find(row => row.contains(active));
+  const focusedKey = focusedRow?.dataset[key];
+  const focusIndex = focusedRow ? [...focusedRow.querySelectorAll(controls)].indexOf(active) : -1;
+  const opened = new Set(rows.filter(row => row.querySelector('details[open]')).map(row => row.dataset[key]));
+  return () => {
+    for (const row of target.children) {
+      if (opened.has(row.dataset[key])) { const details = row.querySelector('details'); if (details) details.open = true; }
+      if (focusIndex >= 0 && row.dataset[key] === focusedKey) row.querySelectorAll(controls)[focusIndex]?.focus({preventScroll: true});
+    }
+  };
+}
+
 function renderTorrents() {
   const measured = torrentSnapshotValid ? torrentTraffic() : null;
   for (const [id, value] of [['seed-download-speed', measured ? `${bytes(measured.dl_info_speed)}/s` : '\u2014'], ['seed-upload-speed', measured ? `${bytes(measured.up_info_speed)}/s` : '\u2014'], ['seed-torrent-count', torrentSnapshotValid ? String(torrents.length) : '\u2014']]) {
@@ -181,7 +198,7 @@ function renderTorrents() {
   sortTorrentRows(rows, sort, document.querySelector('#sort-direction').value || (sort === 'name' ? 'asc' : 'desc'));
   const pending = [...pendingRemovals.values()].filter(row => !row.confirmed).length;
   document.querySelector('#count').textContent = t("{0} of {1} torrents{2}", {0: rows.length, 1: visible.length, 2: pending ? ' · ' + pending + ' fjernes' : ''});
-  const target = document.querySelector('#torrents'); target.replaceChildren(); if (!rows.length) target.append(element('p', torrents.length ? t("No matching torrents") : torrentSnapshotValid ? t("No torrents") : t("Torrent client unavailable"), 'muted'));
+  const target = document.querySelector('#torrents'); const restoreInteraction = preserveListInteraction(target, 'hash'); target.replaceChildren(); if (!rows.length) target.append(element('p', torrents.length ? t("No matching torrents") : torrentSnapshotValid ? t("No torrents") : t("Torrent client unavailable"), 'muted'));
   const pageSize = [10,25,50,100].includes(Number(document.querySelector('#page-size').value)) ? Number(document.querySelector('#page-size').value) : 25;
   const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   torrentPage = Math.max(1, Math.min(torrentPage, pages));
@@ -190,6 +207,7 @@ function renderTorrents() {
   document.querySelector('#next-page').disabled = torrentPage >= pages;
   document.querySelector('#page-status').textContent = t('Showing {0}–{1} of {2} · Page {3} of {4}', {0: rows.length ? start + 1 : 0, 1: Math.min(start + pageSize, rows.length), 2: rows.length, 3: torrentPage, 4: pages});
   for (const [index, row] of rows.slice(start, start + pageSize).entries()) target.append(seedTorrent(row, start + index));
+  restoreInteraction();
 
 }
 function torrentTraffic() {
@@ -610,7 +628,9 @@ document.querySelector('#feed-folder-up').onclick = () => { void loadFeedFolders
 feedForm.addEventListener('reset', () => { if (!feedEditing) queueMicrotask(() => { void loadFeedLocations().catch(notify); }); });
 
 async function loadSources(kind) {
-  const rows = await api(kind); const target = document.querySelector(kind === 'feeds' ? '#feed-list' : '#tracker-list'); target.replaceChildren(); if (!rows.length) target.append(element('p', kind === 'feeds' ? t("No feeds") : t("No accounts"), 'muted'));
+  const requests = loadSources.requests ||= {}; const generation = requests[kind] = (requests[kind] || 0) + 1;
+  const rows = await api(kind); if (generation !== requests[kind]) return;
+  const target = document.querySelector(kind === 'feeds' ? '#feed-list' : '#tracker-list'); const restoreInteraction = preserveListInteraction(target, 'sourceId'); target.replaceChildren(); if (!rows.length) target.append(element('p', kind === 'feeds' ? t("No feeds") : t("No accounts"), 'muted'));
   if (kind === 'feeds') {
     const preview = document.querySelector('#feed-preview');
     if (preview) {
@@ -631,17 +651,24 @@ async function loadSources(kind) {
     document.querySelector('#tracker-search-submit').disabled = !rows.length;
   }
   for (const row of rows) {
-    const item = kind === 'trackers' ? trackerCard(row) : element('article', undefined, 'source-row');
+    const item = kind === 'trackers' ? trackerCard(row) : element('article', undefined, 'source-row'); item.dataset.sourceId = row.id;
     if (kind === 'feeds') item.append(element('h2', row.name), element('p', `${row.location ? t(feedLocations.find(place => place.id === row.location)?.label || (row.location === 'local' ? 'Local downloads' : row.location)) + ' /' + (row.folder || '') : row.folder || '/downloads'} · Ratio ${row.ratio} · ${row.paused ? t("Paused") : t("Active")} · ${t(row.status || '')}`, 'muted'));
     if (kind === 'feeds') item.append(element('p', row.start_at ? t('Only fetch RSS entries from: {0}', {0: new Date(row.start_at).toLocaleString()}) : t('No start date selected'), 'muted'));
     const actions = element('div', undefined, 'actions');
-    if (kind === 'feeds') { item.append(element('p',t('Estimated credited upload')+': '+(typeof row.upload?.creditedUploadedBytes==='number'?'≈ '+trackerBytes(row.upload.creditedUploadedBytes):t('Unknown'))+(row.upload?.unknownDownloads?' · '+t('{0} downloads without measurements',{0:row.upload.unknownDownloads}):''),'feed-upload-total'));item.append(element('p', [row.include?.join(', '), row.exclude?.length ? t('Avoid') + ': ' + row.exclude.join(', ') : '', row.max_bytes ? t('Maximum size') + ': ' + trackerBytes(row.max_bytes) : '', row.badges?.join(' ? ')].filter(Boolean).join(' ? ') || t('No additional filters'), 'seed-feed-rules')); actions.append(command(t('History'), () => richFeedHistory(row.id, row.name))); }
+    if (kind === 'feeds') { item.append(element('p',t('Estimated credited upload')+': '+(typeof row.upload?.creditedUploadedBytes==='number'?'≈ '+trackerBytes(row.upload.creditedUploadedBytes):t('Unknown'))+(row.upload?.unknownDownloads?' · '+t('{0} downloads without measurements',{0:row.upload.unknownDownloads}):''),'feed-upload-total'));item.append(element('p', [row.include?.join(', '), row.exclude?.length ? t('Avoid') + ': ' + row.exclude.join(', ') : '', row.max_bytes ? t('Maximum size') + ': ' + trackerBytes(row.max_bytes) : '', row.badges?.join(' · ')].filter(Boolean).join(' · ') || t('No additional filters'), 'seed-feed-rules')); actions.append(command(t('History'), () => richFeedHistory(row.id, row.name))); }
     if (appRole === 'administrator') {
       if (kind === 'feeds') actions.append(command(row.paused ? 'Aktivér' : 'Pause', async () => { await api(`feeds/${row.id}/state`, {enabled: row.paused}, 'PUT'); await loadSources('feeds'); showNotification(row.paused ? t("Feed enabled through VPN.") : t("Feed paused. Existing torrents are preserved."), 'success'); }));
       actions.append(command(t("Edit"), () => { globalThis.MediaSeedWorkspace?.openEditor(kind);  const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); feedEditing = kind === 'feeds'; form.reset(); feedEditing = false; for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } if (kind === 'feeds') { for (const key of ['include','exclude']) form.elements.namedItem(key).value = (row[key] || []).join(', '); for (const option of form.elements.namedItem('badges').options) option.selected = (row.badges || []).includes(option.value); globalThis.MediaSeedWorkspace?.syncBadges(); form.elements.namedItem('max_gib').value = row.max_bytes ? row.max_bytes / (1024 ** 3) : ''; form.elements.namedItem('url').placeholder = t('Saved feed address is kept. Fill in only to change it.'); void loadFeedLocations(row.location || 'local', row.folder || '').catch(notify); } form.querySelector('input[name="name"]').focus(); }), command(t("Remove"), async () => { if (!confirm(t("Remove {0}? Files and torrents are preserved.", {0: row.name}))) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); }));
     }
     item.append(actions); target.append(item);
   }
+  restoreInteraction();
+}
+async function pollSources(kind) {
+  const pending = pollSources.pending ||= new Set();
+  if (pending.has(kind)) return;
+  pending.add(kind);
+  try { await loadSources(kind); } finally { pending.delete(kind); }
 }
 let trackerSearchGeneration = 0;
 document.querySelector('#tracker-account').onchange = () => { trackerSearchGeneration++; document.querySelector('#tracker-results').replaceChildren(); document.querySelector('#tracker-search-status').textContent = ''; };
@@ -865,8 +892,8 @@ addForm.onsubmit = async event => {
   finally { addingTorrent = false; controls.forEach((control, index) => { control.disabled = disabledStates[index]; }); updateAddStart(); if (fileMode) renderTorrentFiles(); }
 };
 document.querySelector('#logout').onclick = async () => { try { await api('auth/logout', {}); location.reload(); } catch (error) { notify(error); } };
-setInterval(() => { if (!document.hidden && document.body.classList.contains('signed-in')) { if (!document.querySelector('#vpn').hidden) refreshVpn().catch(() => {}); if (!document.querySelector('#feeds').hidden) loadSources('feeds').catch(() => {}); refresh(); } }, 5000);
-setInterval(() => { if (!document.hidden && document.body.classList.contains('signed-in')) { if (!document.querySelector('#trackers').hidden) loadSources('trackers').catch(() => {}); else if (!document.querySelector('#downloads').hidden) void refreshTrackerOverview(); } }, 60000);
+setInterval(() => { if (!document.hidden && document.body.classList.contains('signed-in')) { if (!document.querySelector('#vpn').hidden) refreshVpn().catch(() => {}); if (!document.querySelector('#feeds').hidden) pollSources('feeds').catch(() => {}); refresh(); } }, 5000);
+setInterval(() => { if (!document.hidden && document.body.classList.contains('signed-in')) { if (!document.querySelector('#trackers').hidden) pollSources('trackers').catch(() => {}); else if (!document.querySelector('#downloads').hidden) void refreshTrackerOverview(); } }, 60000);
 async function initializeLogin() {
   try {
     const status = await api('auth/status'); needsSetup = status.needsSetup;

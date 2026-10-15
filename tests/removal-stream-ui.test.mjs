@@ -5,7 +5,7 @@ import test from 'node:test';
 
 test('removal choice survives early-seeding confirmation and streams regenerate bits', async () => {
   const nodes = new Map();
-  const create = () => ({value: '', dataset: {}, style: {setProperty() {}}, children: [], listeners: {},
+  const create = () => ({value: '', dataset: {}, style: {setProperty() {}}, children: [], listeners: {}, contains(){return false;}, querySelector(){return null;},
     classList: {contains: () => false}, addEventListener(type, callback) {this.listeners[type] = callback;},
     append(...items) {this.children.push(...items);}, replaceChildren() {this.children = [];},
     showModal() {this.open = true;}, close() {this.open = false;}, focus() {this.focused = true;}, setAttribute() {}, querySelectorAll() {return [];},

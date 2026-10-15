@@ -1,5 +1,7 @@
 # MediaSeed
 
+mediaseed 0.1.24 preserves keyboard focus and open row menus during automatic refresh. RSS background reads no longer overlap, and late responses cannot replace newer feed/account state.
+
 MediaSeed 0.1.19 adds a compact add dialog with automatic batch ratio preview, lazy torrent details, estimated credited upload per torrent/feed, downloaded-only RSS history in a paginated popup, zero-seeder rules and stable tracker names. See [behavior and upgrade notes](docs/torrent-and-feed-ux.md).
 
 MediaSeed 0.1.18 reduces ratio discovery to ten sorted results per ten-minute interval by default, with a configurable 5–60 minute interval, persisted scheduling and smaller batches after oversized responses. See [ratio discovery](docs/ratio-scout.md).
