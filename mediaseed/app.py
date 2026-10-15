@@ -380,7 +380,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/healthz")
     def health():
-        return {"status": "healthy", "version": "0.1.16"}
+        return {"status": "healthy", "version": "0.1.17"}
 
     @app.get("/api/auth/status")
     async def status(request: Request):
@@ -427,8 +427,12 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         return {"csrf": csrf}
 
     @app.get("/api/auth/me")
-    def me(session=Depends(authorized)):
-        return {"managed": bool(hub_url), "themeOverride": theme_override(database, session.get("id")), "navigationOverride": navigation_override(database, session.get("id")), **{key: session[key] for key in ("csrf", "id", "username", "role", "language", "appearance", "theme") if key in session}}
+    def me(request: Request, session=Depends(authorized)):
+        try:
+            local = request.headers.get("host", "").lower() == urlsplit(base).netloc.lower() and ipaddress.ip_address(urlsplit(base).hostname).is_private
+        except ValueError:
+            local = False
+        return {"hubHomeUrl": (hub_url if local else hub_browser_url) if hub_url else None, "managed": bool(hub_url), "themeOverride": theme_override(database, session.get("id")), "navigationOverride": navigation_override(database, session.get("id")), **{key: session[key] for key in ("csrf", "id", "username", "role", "language", "appearance", "theme") if key in session}}
 
     @app.get("/api/storage")
     def storage(session=Depends(authorized)):

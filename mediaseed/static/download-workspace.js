@@ -5,11 +5,17 @@
   const flow = element('section', undefined, 'download-flow'); flow.id='download-flow';flow.setAttribute('aria-label',t('Protected transfer route'));
   const description=element('strong',t('Waiting for status check'));description.id='download-flow-status';description.setAttribute('role','status');
   const route=element('div',undefined,'download-route');
+  const svgIcon = path => {const holder=element('span',undefined,'route-icon');holder.setAttribute('aria-hidden','true');holder.innerHTML=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;return holder;};
+  const routePaths=['<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>','<path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Z"/><path d="m8 12 3 3 5-6"/>','<path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/>','<path d="m5 4-3 12v4h20v-4L19 4Z M2 16h20M17 18h2"/>'];
   for(const [index,label] of ['Internet','MediaVPN','MediaSeed','Media storage'].entries()) {
     if(index) {const link=element('span',undefined,'download-route-link');link.setAttribute('aria-hidden','true');link.append(element('i',undefined,'packet-down'),element('i',undefined,'packet-up'));route.append(link);}
-    const node=element('span',undefined,'download-route-node');node.append(element('span',['◎','◇','↓','▱'][index],'route-icon'),element('strong',t(label)));route.append(node);
+    const node=element('span',undefined,'download-route-node');node.append(svgIcon(routePaths[index]),element('strong',t(label)));route.append(node);
   }
   flow.append(description,route);workspace.querySelector('.seed-stats').before(flow);
+  for(const [index,article] of [...workspace.querySelectorAll('.seed-stats article')].entries()) {
+    const paths=['<path d="M12 3v18m-6-6 6 6 6-6"/>','<path d="M12 21V3m-6 6 6-6 6 6"/>','<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M4 9h16M4 15h16"/>'];
+    const mark=svgIcon(paths[index]);mark.className='stat-icon';article.querySelector(':scope > span').replaceWith(mark);
+  }
   const stats=workspace.querySelector('.seed-stats article:last-child');const activityCount=element('small');activityCount.id='torrent-activity-count';stats.append(activityCount);
   const cards=element('section',undefined,'download-status-cards');cards.setAttribute('aria-label',t('Download status'));
   const vpn=element('button',undefined,'download-status-card');vpn.type='button';vpn.onclick=()=>go('vpn');
