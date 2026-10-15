@@ -11,7 +11,7 @@
 @keyframes download-packet { from { transform: translateX(0); } to { transform: translateX(350%); } }
 .download-flow[data-download="true"] .packet-down { opacity: 1; animation: download-packet 2s linear infinite; }
 .download-flow[data-upload="true"] .packet-up { opacity: 1; animation: download-packet 2.7s linear infinite reverse; }
-.download-status-cards { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; margin-block: 22px; }
+.download-status-cards { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,2fr) minmax(0,1fr); align-items:center; gap: 16px; margin-block: 22px; }
 .download-status-card { display: grid; align-content: start; justify-content: stretch; gap: 12px; padding: 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; text-align: left; min-width: 0; }
 .download-status-card > span { color: var(--muted); font-size: .85rem; }.download-status-card > strong { font-size: 1.1rem; overflow-wrap: anywhere; }.download-status-card small { font-size: .8rem; color: var(--muted); }.download-status-card.attention { border-color: var(--danger); }
 .download-status-card .actions { flex-wrap: wrap; }.download-status-card .actions button { font-size: .75rem !important; padding: 5px 9px; }
@@ -23,7 +23,7 @@
 #feeds > .workspace-columns{grid-template-columns:1fr;}#feeds > button,#trackers > button{margin-block:14px;}#trackers > .workspace-columns{display:none;}#tracker-list{display:grid;gap:16px;}.tracker-card{min-width:0;}
 :root[data-reduced-motion="true"] .download-route-link i{animation:none!important;}
 @media(prefers-reduced-motion:reduce){.download-route-link i{animation:none!important;}}
-@media(max-width:1000px){.download-status-cards{grid-template-columns:1fr;}.automation-event{grid-template-columns:minmax(0,1fr) auto;}.automation-event span{grid-column:1;}}
+@media(max-width:1100px){.download-status-cards{grid-template-columns:1fr;}.automation-event{grid-template-columns:minmax(0,1fr) auto;}.automation-event span{grid-column:1;}}
 @media(max-width:650px){.download-flow{padding:16px 12px;}.download-route{gap:4px;}.download-route-node{min-width:48px;font-size:.65rem;}.route-icon{padding:6px 10px;}.source-editor .settings-form{grid-template-columns:1fr;}.source-editor .badge-choices{grid-template-columns:1fr;}.source-editor{padding:16px;}}
 
 #torrents .actions > .torrent-toggle { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); color: var(--text); display: inline-flex; align-items: center; justify-content: center; }
@@ -70,3 +70,6 @@
 @media(max-width:480px){#rank-requirements-dialog{padding:16px;}.rank-requirements{padding:12px;}}
 
 .download-status-card:has(.download-account-totals) { gap:8px; }
+
+/* Short status cards keep their own height around the wider central tracker. */
+@media(max-width:1100px){.download-status-cards{grid-template-columns:minmax(0,1fr);align-items:start;}}

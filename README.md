@@ -182,3 +182,5 @@ Storage is in normal document flow above the footer. Capacity shows used/free/to
 MediaSeed 0.1.20 adds tracker-wide upload/download totals and cached account ranks to the Downloads summary. The tracker view links to the official rank table; promotion thresholds are not guessed.
 
 MediaSeed 0.1.21 makes rank requirements compact and keeps the rank dialog open across automatic tracker refreshes.
+
+MediaSeed 0.1.22 aligns the add-dialog columns and gives the central tracker status card more width while the side cards retain their natural height.

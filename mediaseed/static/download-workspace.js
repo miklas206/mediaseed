@@ -24,6 +24,7 @@
   const queueActions=element('div',undefined,'actions');
   const filterTo = value => {document.querySelector('#filter').value=value;torrentPage=1;renderTorrents();document.querySelector('#torrents').scrollIntoView({block:'start',behavior:document.documentElement.dataset.reducedMotion==='true'?'instant':'smooth'});};
   queueActions.append(command(t('Show downloads'),()=>filterTo('downloading')),command(t('Check files'),()=>filterTo('checking')));queue.append(queueTitle,counts,queueActions);
+  const queueActivity=element('small');queue.append(queueActivity);
   cards.append(vpn,account,queue);document.querySelector('#downloads').prepend(cards);
   const events=element('details',undefined,'automatic-activity');events.id='automatic-activity';const summary=element('summary',t('Latest automatic activity'));const eventList=element('div');events.append(summary,eventList);cards.after(events);
   const technical=element('details',undefined,'client-details');technical.append(element('summary',t('Client details')));document.querySelector('#transfer').before(technical);technical.append(document.querySelector('#transfer'));
@@ -50,19 +51,22 @@
     flow.hidden=document.querySelector('#downloads').hidden;
     const runtime=document.querySelector('#connection-country').textContent;
     vpn.replaceChildren(element('span',t('Connection')),element('strong',active?t('VPN verified'):t('Status cannot be verified')),element('small',active?runtime:t('Check the connection under VPN')));
+    if(active)vpn.append(element('small',document.querySelector('#connection-ip').textContent+' · '+document.querySelector('#connection-port').textContent),element('small',document.querySelector('#connection-checked').textContent));
     const accounts=globalThis.MediaSeedTrackerRows||[],row=accounts[0];
-    account.replaceChildren(element('span',t('Tracker and ratio')),element('strong',row?.stats?t('Ratio {0} · Buffer {1}',{0:trackerNumber(row.stats.ratio),1:trackerBytes(row.stats.buffer)}):t('Account data unavailable')),element('small',row?.stats?t('{0} · Warnings {1}',{0:row.name,1:trackerNumber(row.stats.warnings)}):t('Manage trackers')));
+    account.replaceChildren(element('span',t('Tracker and ratio')),element('strong',row?.stats?t('Ratio {0} · Buffer {1}',{0:trackerNumber(row.stats.ratio),1:trackerBytes(row.stats.buffer)}):t('Account data unavailable')));
     if(row?.stats){
       const totals=element('dl',undefined,'download-account-totals');
       for(const [label,value] of [['Tracker upload',row.stats.uploaded],['Tracker download',row.stats.downloaded]]){const metric=element('div');metric.append(element('dt',t(label)),element('dd',trackerBytes(value)));totals.append(metric);}
-      account.append(totals,element('small',row.ranks?.automatic?t('Rank: {0}',{0:row.ranks.automatic}):t('Rank unavailable from tracker')));
+      const identity=[row.name,row.ranks?.automatic?t('Rank: {0}',{0:row.ranks.automatic}):t('Rank unavailable from tracker'),t('Warnings')+': '+trackerNumber(row.stats.warnings)].join(' · ');
+      account.append(totals,element('small',identity));
       if(row.rankProgress?.target)account.append(element('small',t('Next rank: {0} · View requirements',{0:row.rankProgress.target.title})));
       else account.append(element('small',t('View rank requirements')));
-    }
+    } else account.append(element('small',t('Manage trackers')));
     account.classList.toggle('attention',!!row?.stats?.warnings);account.hidden=appRole==='viewer';
     const q=globalThis.MediaSeedQueue,checking=torrentSnapshotValid?torrents.filter(r=>String(r.state).startsWith('checking')).length:null;
     counts.textContent=q?t('Downloads {0}/{1} · Waiting {2}',{0:q.active,1:q.limit===-1?t('Unlimited'):q.limit??'—',2:q.waiting}):t('Queue status unavailable');
     queueTitle.textContent=checking===null?t('Download queue'):t('Download queue · Checking {0}',{0:checking});
+    queueActivity.textContent=torrentSnapshotValid?t('{0} seeding · {1} stopped',{0:torrents.filter(row=>['uploading','forcedUP','stalledUP'].includes(row.state)).length,1:torrents.filter(row=>/^(stopped|paused)(DL|UP)$/.test(row.state)).length}):t('Status unavailable');
     for(const button of queueActions.querySelectorAll('button'))button.disabled=!torrentSnapshotValid;
     activityCount.textContent=torrentSnapshotValid?t('{0} uploading · {1} downloading',{0:torrents.filter(r=>r.upspeed>0).length,1:torrents.filter(r=>r.dlspeed>0).length}):t('Status unavailable');
     for(const button of document.querySelectorAll('[data-admin-only]'))button.hidden=appRole!=='administrator';

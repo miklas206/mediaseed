@@ -11,3 +11,9 @@ Other media requires an approved storage location. Core 0.6.37 provisions it on 
 New automatic-activity and per-user navigation tables are additive and idempotent. Existing accounts, feeds, credentials, preferences and torrents are retained. Activity is deduplicated, bounded to 1000 records, and exposes ten recent entries without feed URLs or credentials. Reduced-motion preferences stop the new route animation.
 
 Validation: Python tests cover persistence, authenticated navigation updates, activity retention and older databases. Isolated Chromium with synthetic APIs checks 320, 390, 768, 1440, 1920, 2560 and 3840 pixel viewports, all five navigation modes, retained transfer cards, badge selection and a single tracker account view. This is not live server installation evidence.
+
+## Status balance and add-dialog alignment — 0.1.22
+
+Desktop status uses 1:2:1 columns with the tracker in the centre. Connection and queue retain their natural height and align vertically to the centre; at 1100px and below all three stack. Tracker account/rank/warnings share a compact footer. The side cards reuse the verified connection IP/forwarded port/check time and current seeding/stopped counts; unavailable torrent snapshots do not become zero counts and unverified VPN observations do not display stale IP information. Transfer graphs are unchanged.
+
+The add-dialog estimate aligns with the source buttons below their legend. Destination and cleanup fieldsets align at the start of the second grid row. The first-row offset is desktop-only; mobile retains its natural single-column order. Verified with synthetic APIs and both magnet and five-file modes across 320–2560px viewports.

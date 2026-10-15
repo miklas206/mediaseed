@@ -1,6 +1,7 @@
 // Account language; English source keys and Danish translations.
 (() => {
 const messages = {
+  "{0} seeding · {1} stopped": "{0} seeder · {1} stoppede",
   "Rank requirements": "Rangkrav",
   "Choose rank": "Vælg rang",
   "Open NordicBytes rank table": "Åbn NordicBytes’ rangtabel",
@@ -237,7 +238,7 @@ const messages = {
   "Selected torrent files": "Valgte torrentfiler",
   "For individual ratio previews, select one file at a time.": "V\u00e6lg \u00e9n fil ad gangen for at forh\u00e5ndsvise individuelle ratioer.",
 
-  "MediaSeed 0.1.21": "MediaSeed 0.1.21",
+  "MediaSeed 0.1.22": "MediaSeed 0.1.22",
   "Waiting for the next bounded metadata check": "Afventer næste kontrol af torrentoplysninger",
   "Seeding progress": "Seedingfremdrift",
   "Downloaded": "Downloadet",

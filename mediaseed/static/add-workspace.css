@@ -59,7 +59,7 @@
 #add-torrent-form .input-mode label > span { font-size:12px; }
 @media(max-width:760px) { #add-torrent > .heading { top:-16px; } }
 
-#add-torrent-form .add-settings-column { padding-top:7px; }
+#add-torrent-form .add-settings-column { padding-top:0; }
 #add-torrent-form .add-settings-column > label { margin:0; }
 #add-torrent-form .cleanup-settings { display:grid; gap:10px; }
 #add-torrent-form .cleanup-settings label { margin:0; }
@@ -70,3 +70,9 @@
 }
 
 #add-torrent-form .add-ratio-summary > label { display:grid; gap:6px; margin:16px 0 0; padding-top:12px; border-top:1px solid var(--accent-line); }
+
+/* Reserve the source legend (20px), its 8px gap and 14px fieldset padding. */
+@media(min-width:761px) {
+ #add-torrent-form .input-mode legend { line-height:20px; }
+ #add-torrent-form > .add-ratio-summary { margin-block-start:42px; }
+}
