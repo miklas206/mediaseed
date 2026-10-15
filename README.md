@@ -180,3 +180,5 @@ Download queue settings read the client's actual configuration rather than a har
 Storage is in normal document flow above the footer. Capacity shows used/free/total for the filesystem, and locations sharing the same device are grouped. Local downloads commonly share the LXC system disk with the OS, image layers and app data: that filesystem's used space is not the download directory's size. Files are not moved or deleted by this display change.
 
 MediaSeed 0.1.20 adds tracker-wide upload/download totals and cached account ranks to the Downloads summary. The tracker view links to the official rank table; promotion thresholds are not guessed.
+
+MediaSeed 0.1.21 makes rank requirements compact and keeps the rank dialog open across automatic tracker refreshes.

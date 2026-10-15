@@ -474,14 +474,38 @@ function trackerBytes(value) {
   while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index++; }
   return `${value < 0 ? '−' : ''}${amount.toLocaleString(locale(), {maximumFractionDigits: index ? 2 : 0})} ${units[index]}`;
 }
-function rankRequirements(entry) {
-  const section=element('section',undefined,'rank-requirements');section.append(element('strong',entry.title));
+function rankGoal(item) {
+  return item.unit==='bytes'?trackerBytes(item.goal):item.unit==='days'?t('{0} days',{0:trackerNumber(item.goal)}):trackerNumber(item.goal);
+}
+function rankRequirements(entry,compact=false) {
+  const section=element('section',undefined,compact?'rank-next-summary':'rank-requirements');section.append(element('strong',entry.title));
   const labels={trueUpload:'True upload',membership:'Membership',comments:'Comments',posts:'Posts',averageSeeding:'Average seeding time',seedingSize:'Seeding size'};
+  const list=element('dl');
   for(const item of entry.requirements){
-    const format=value=>item.unit==='bytes'?trackerBytes(value):item.unit==='days'?t('{0} days',{0:trackerNumber(value)}):trackerNumber(value);
-    const line=element('p');line.append(element('span',t(labels[item.metric])+': '+format(item.goal)),element('small',item.missing===null?t('Current value unavailable from tracker'):item.missing===0?t('Requirement met'):t('Missing: {0}',{0:format(item.missing)}),'muted'));section.append(line);
+    const line=element('div');line.append(element('dt',t(labels[item.metric])),element('dd',rankGoal(item)));
+    if(!compact && item.missing!==null){const missing={...item,goal:item.missing};line.append(element('small',item.missing===0?t('Requirement met'):t('Missing: {0}',{0:rankGoal(missing)}),'muted'));}
+    list.append(line);
   }
-  return section;
+  section.append(list);return section;
+}
+function showRankDialog(row) {
+  let dialog=document.querySelector('#rank-requirements-dialog');
+  if(!dialog){dialog=element('dialog');dialog.id='rank-requirements-dialog';dialog.setAttribute('aria-labelledby','rank-dialog-title');document.body.append(dialog);}
+  const heading=element('div',undefined,'heading'),title=element('h2',t('Rank requirements'));title.id='rank-dialog-title';
+  const close=command(t('Close'),()=>dialog.close());close.type='button';heading.append(title,close);
+  const select=document.createElement('select');select.id='rank-choice';const label=element('label',t('Choose rank'));label.append(select);
+  const entries=row.rankProgress?.table||[];
+  for(const entry of entries){const option=element('option',entry.title);option.value=entry.title;select.append(option);}
+  select.value=row.rankProgress?.target?.title||row.rankProgress?.firstListed?.title||entries[0]?.title||'';
+  const content=element('div');
+  const note=element('p',t('Progress is only shown for values supplied by the tracker. True upload and credited upload are different.'),'muted');
+  const source=element('a',t('Open NordicBytes rank table'));source.href='https://nordicbytes.org/pages/groups';source.target='_blank';source.rel='noopener noreferrer';
+  dialog.replaceChildren(heading,element('p',t('Rank: {0}',{0:row.ranks?.automatic||t('Unknown')}),'muted'),label,content,note,source);
+  function paint(){const entry=entries.find(item=>item.title===select.value);content.replaceChildren();if(entry){content.append(rankRequirements(entry));if(entry.requirements.some(item=>item.missing===null))content.append(element('p',t('Some account values are unavailable; the remaining requirements cannot yet be calculated.'),'muted'));}}
+  select.onchange=paint;paint();
+  // This dialog lives outside the periodically replaced tracker cards.
+  // A background account refresh must not close it or reset the selected rank.
+  if(!dialog.open)dialog.showModal();
 }
 function trackerCard(row) {
   const card = element('article', undefined, 'source-row tracker-card');
@@ -510,13 +534,9 @@ function trackerCard(row) {
       if(row.ranks?.[key])ranks.append(element('p',t(label)+': '+row.ranks[key]));
     }
     if(!row.ranks?.automatic)ranks.append(element('p',t('Rank unavailable from tracker'),'muted'));
-    const requirements=element('a',t('View next-rank requirements on NordicBytes'));requirements.href='https://nordicbytes.org/pages/groups';requirements.target='_blank';requirements.rel='noopener noreferrer';ranks.append(requirements);
-    const progress=row.rankProgress;
-    if(progress?.target)ranks.append(element('h4',t('Next rank')),rankRequirements(progress.target));
-    else if(progress?.firstListed)ranks.append(element('h4',t('First rank in this table')),rankRequirements(progress.firstListed));
-    const table=element('details');table.append(element('summary',t('All rank requirements')));
-    for(const entry of progress?.table||[])table.append(rankRequirements(entry));
-    ranks.append(table,element('p',t('True upload is not the same as credited upload. Missing tracker counters are shown as unknown.'),'muted'),element('small',t('Requirements from the rank table dated {0}',{0:progress?.sourceDate||'—'}),'muted'));
+    const progress=row.rankProgress,goal=progress?.target||progress?.firstListed;
+    if(goal){ranks.append(element('small',t(progress?.target?'Next rank':'First rank in this table'),'muted'),rankRequirements(goal,true));}
+    const view=command(t('View rank requirements'),()=>showRankDialog(row));view.type='button';ranks.append(view);
     card.append(ranks);
 
     const checked = new Date(row.checkedAt * 1000);

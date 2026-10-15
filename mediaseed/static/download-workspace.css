@@ -48,8 +48,25 @@
 .tracker-ranks p { margin:6px 0; overflow-wrap:anywhere; }
 .tracker-ranks a { display:inline-block; margin-block:6px; }
 
-.rank-requirements { margin-block:12px; padding:12px; border:1px solid var(--line); border-radius:8px; }
-.rank-requirements p { display:flex; justify-content:space-between; gap:8px 16px; flex-wrap:wrap; }
-.tracker-ranks summary { cursor:pointer; padding-block:8px; }
+/* One compact goal in the card; the full table is a stable, separate dialog. */
+.rank-next-summary { margin:8px 0 12px; padding:12px; border:1px solid var(--line); border-radius:8px; max-width:620px; }
+.rank-next-summary dl { display:flex; flex-wrap:wrap; gap:8px 24px; margin:10px 0 0; }
+.rank-next-summary dl > div { display:flex; gap:8px; align-items:baseline; }
+.rank-next-summary dt { color:var(--muted); font-size:.8rem; }
+.rank-next-summary dd { margin:0; font-weight:600; font-size:.85rem; }
+#rank-requirements-dialog { width:min(640px,calc(100vw - 24px)); max-height:85dvh; padding:24px; }
+#rank-requirements-dialog .heading { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:12px; }
+#rank-requirements-dialog .heading h2 { font-size:1.2rem; margin:0; }
+#rank-requirements-dialog label { display:grid; gap:8px; font-size:.85rem; }
+#rank-requirements-dialog select { width:100%; }
+#rank-requirements-dialog p,#rank-requirements-dialog a { font-size:.85rem; line-height:1.5; }
+.rank-requirements { margin:16px 0; padding:16px; border:1px solid var(--line); border-radius:8px; }
+.rank-requirements dl { margin:12px 0 0; }
+.rank-requirements dl > div { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 16px; padding:8px 0; border-bottom:1px solid var(--line); }
+.rank-requirements dl > div:last-child { border-bottom:0; }
+.rank-requirements dt,.rank-requirements dd { font-size:.85rem; margin:0; }
+.rank-requirements dd { font-weight:600; }
+.rank-requirements small { grid-column:1/-1; font-size:.75rem; }
+@media(max-width:480px){#rank-requirements-dialog{padding:16px;}.rank-requirements{padding:12px;}}
 
 .download-status-card:has(.download-account-totals) { gap:8px; }

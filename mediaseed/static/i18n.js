@@ -1,6 +1,12 @@
 // Account language; English source keys and Danish translations.
 (() => {
 const messages = {
+  "Rank requirements": "Rangkrav",
+  "Choose rank": "Vælg rang",
+  "Open NordicBytes rank table": "Åbn NordicBytes’ rangtabel",
+  "Progress is only shown for values supplied by the tracker. True upload and credited upload are different.": "Fremdrift vises kun for værdier, trackeren oplyser. True upload og krediteret upload er forskellige tal.",
+  "Some account values are unavailable; the remaining requirements cannot yet be calculated.": "Nogle kontotal er ikke tilgængelige, så de resterende krav kan endnu ikke beregnes.",
+
   "Next rank": "Næste rang",
   "First rank in this table": "Første rang i denne tabel",
   "All rank requirements": "Alle rangkrav",
@@ -231,7 +237,7 @@ const messages = {
   "Selected torrent files": "Valgte torrentfiler",
   "For individual ratio previews, select one file at a time.": "V\u00e6lg \u00e9n fil ad gangen for at forh\u00e5ndsvise individuelle ratioer.",
 
-  "MediaSeed 0.1.20": "MediaSeed 0.1.20",
+  "MediaSeed 0.1.21": "MediaSeed 0.1.21",
   "Waiting for the next bounded metadata check": "Afventer næste kontrol af torrentoplysninger",
   "Seeding progress": "Seedingfremdrift",
   "Downloaded": "Downloadet",
