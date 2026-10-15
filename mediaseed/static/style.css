@@ -130,7 +130,7 @@ th { color: var(--muted); font-weight: 550; }
 .file-drop { padding: 16px; border: 1px dashed var(--line); border-radius: 6px; overflow-wrap: anywhere; }
 .file-drop.dragging { border-color: var(--accent); background: var(--accent-bg); }
 body.torrent-dragging::after {
-  content: "Slip din torrentfil her for at åbne Tilføj torrent";
+  content: "Slip dine torrentfiler her for at åbne Tilføj torrent";
   position: fixed; inset: 16px; z-index: 100; pointer-events: none;
   display: grid; place-items: center; padding: 24px; text-align: center;
   color: var(--accent); background: var(--surface); opacity: .96;
@@ -195,3 +195,14 @@ footer { position: fixed; bottom: 0; width: 100%; min-height: 42px; display: fle
 .storage-location{display:block;padding:.25rem 0;overflow-wrap:anywhere}.download-location{display:grid;gap:12px;min-width:0;margin:0;padding:16px;border:1px solid var(--line);border-radius:var(--select-radius,6px)}.download-location legend{padding:0 6px;font-weight:600}.download-location p{margin:0;font-size:13px}.download-location .actions{align-items:center;flex-wrap:wrap}#add-folder-path{overflow-wrap:anywhere;min-width:0}
 
 .rss-download-location{grid-column:1/-1}#feed-folder-path{overflow-wrap:anywhere;min-width:0}
+
+#torrent-file-list {list-style:none; padding:0; margin:12px 0; max-height:260px; overflow:auto; display:grid; gap:8px;}
+.torrent-file-row {display:flex; gap:12px; align-items:center; justify-content:space-between; border:1px solid var(--line); border-radius:8px; padding:10px;}
+.torrent-file-row > div {min-width:0; display:grid; gap:5px;}
+.torrent-file-row strong, .torrent-file-row small {overflow-wrap:anywhere;}
+.torrent-file-row button {flex-shrink:0; font-size:12px;}
+.torrent-file-row[data-state="added"] {border-color:#3a8063;}
+.torrent-file-row[data-state="error"] {border-color:#ba695d;}
+@media(max-width:480px) {.torrent-file-row {align-items:stretch; flex-direction:column;} .torrent-file-row button {align-self:flex-start;}}
+
+html[lang="en"] body.torrent-dragging::after {content: "Drop your torrent files here to open Add torrent";}

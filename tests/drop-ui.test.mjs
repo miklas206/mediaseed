@@ -78,9 +78,9 @@ test('page drop opens a populated dialog, preserves its draft, and uploads only 
   ratio.value = '3'; const replacement = torrent('Other.TORRENT'); drag('drop', [replacement]);
   assert.equal(ratio.value, '3'); assert.equal(find('#add-torrent').openCount, 1);
   await form.onsubmit({preventDefault() {}});
-  assert.equal(uploads.length, 1); assert.equal(uploads[0].body, replacement);
-  assert.match(uploads[0].url, /filename=Other.TORRENT&ratio=3&start=false&location=local&folder=$/);
-  assert.equal(find('#add-torrent').open, false);
+  assert.equal(uploads.length, 2); assert.equal(uploads[1].body, replacement);
+  assert.match(uploads[1].url, /filename=Other.TORRENT&ratio=3&start=false&location=local&folder=$/);
+  assert.equal(find('#add-torrent').open, true);
 });
 
 test('start button submits the explicit start choice; pause remains available without VPN', async () => {
@@ -98,7 +98,7 @@ test('start button submits the explicit start choice; pause remains available wi
 
 test('invalid drops never open the dialog or upload; leaving clears the cue', () => {
   const {find, body, drag, uploads} = setup();
-  for (const files of [[torrent(), torrent()], [torrent('notes.txt')], [torrent('huge.torrent', 4194305)]]) {
+  for (const files of [[torrent('notes.txt')], [torrent('huge.torrent', 4194305)]]) {
     assert.equal(drag('drop', files).prevented, true);
     assert.ok(find('#message').textContent); assert.ok(!find('#add-torrent').open);
   }
@@ -195,4 +195,65 @@ test('download destination controls belong to the add dialog, not a hidden feed 
   const start = html.indexOf('<form id="add-torrent-form">');
   const addForm = html.slice(start, html.indexOf('</form>', start));
   for (const id of ['add-location', 'add-folder', 'add-folder-path']) assert.ok(addForm.includes(`id="${id}"`));
+});
+
+
+test('file picker accumulates selections and ignores duplicates', async () => {
+  const {find, context, form, uploads} = setup();
+  find('#new-torrent').onclick();
+  form.querySelector('[name="mode"][value="file"]').checked = true;
+  const picker = find('#add-file');
+  picker.files = [torrent('One.torrent'), torrent('Two.torrent')]; picker.onchange();
+  picker.files = [torrent('Two.torrent'), torrent('Three.torrent')]; picker.onchange();
+  assert.equal(vm.runInContext('torrentFiles.length', context), 3);
+  assert.equal(find('#seed-preview-button').disabled, true);
+  await form.onsubmit({preventDefault() {}});
+  assert.equal(uploads.length, 3);
+  await form.onsubmit({preventDefault() {}});
+  assert.equal(uploads.length, 3, 'successful files cannot be re-uploaded');
+});
+
+test('one rejection does not stop a batch and retry sends only unsuccessful files', async () => {
+  const {context, drag, form, uploads} = setup();
+  const original = context.fetch; let reject = true;
+  context.fetch = async (url, options) => {
+    const response = await original(url, options);
+    if (url.includes('filename=Bad.torrent') && reject) return {ok:false,json:async()=>({detail:'Invalid torrent file'})};
+    return response;
+  };
+  drag('drop', [torrent('Good.torrent'), torrent('Bad.torrent'), torrent('Last.torrent')]);
+  await form.onsubmit({preventDefault() {},submitter:{value:'pause'}});
+  assert.equal(uploads.length, 3);
+  assert.equal(vm.runInContext('torrentFiles.filter(item => item.state === "added").length', context), 2);
+  assert.equal(vm.runInContext('torrentFiles.filter(item => item.state === "error").length', context), 1);
+  reject = false;
+  await form.onsubmit({preventDefault() {},submitter:{value:'pause'}});
+  assert.equal(uploads.length, 4); assert.match(uploads[3].url, /filename=Bad.torrent/);
+});
+
+test('mixed selections retain valid files and enforce file count and aggregate limits', () => {
+  const {context, drag} = setup();
+  drag('drop', [torrent('Valid.torrent'), torrent('Empty.torrent',0), torrent('Not.txt'),torrent('Huge.torrent',4194305)]);
+  assert.equal(vm.runInContext('torrentFiles.length', context),1);
+  drag('drop', Array.from({length:110},(_,index)=>torrent(index+'.torrent')));
+  assert.equal(vm.runInContext('torrentFiles.length', context),100);
+  const second = setup();
+  second.drag('drop',Array.from({length:20},(_,index)=>torrent(index+'.torrent',4*1024*1024)));
+  assert.equal(vm.runInContext('torrentFiles.length',second.context),16);
+});
+
+
+test('lost acknowledgement is not retried automatically and does not stop later files', async () => {
+  const {context, drag, form, uploads} = setup();
+  const original = context.fetch;
+  context.fetch = async (url, options) => {
+    const response = await original(url, options);
+    if (url.includes('filename=Uncertain.torrent')) throw new Error('Synthetic connection lost');
+    return response;
+  };
+  drag('drop', [torrent('Uncertain.torrent'),torrent('Next.torrent')]);
+  await form.onsubmit({preventDefault() {}});
+  assert.equal(uploads.length, 2);
+  assert.equal(vm.runInContext('torrentFiles[0].state',context),'error');
+  assert.equal(vm.runInContext('torrentFiles[1].state',context),'added');
 });

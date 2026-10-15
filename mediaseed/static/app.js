@@ -565,7 +565,39 @@ const addForm = document.querySelector('#add-torrent-form');
 document.querySelector('#seed-preview-button').onclick = richPreview;
 const fileInput = document.querySelector('#add-file');
 const fileField = document.querySelector('#file-field');
-let droppedTorrent = null;
+let torrentFiles = [];
+const torrentFileKey = file => JSON.stringify([file.name, file.size, file.lastModified || 0]);
+function renderTorrentFiles() {
+  const list = document.querySelector('#torrent-file-list'); list.replaceChildren();
+  const statuses = {pending: 'Ready to add', uploading: 'Adding…', added: 'Added', error: 'Failed — check the torrent list before retrying'};
+  for (const item of torrentFiles) {
+    const row = element('li', undefined, 'torrent-file-row'); row.dataset.state = item.state;
+    const info = element('div'); info.append(element('strong', item.file.name), element('small', `${bytes(item.file.size)} · ${t(statuses[item.state])}${item.message ? ' · ' + t(item.message) : ''}`, 'muted'));
+    row.append(info);
+    if (item.state !== 'added') {
+      const remove = element('button', t('Remove from selection')); remove.type = 'button'; remove.disabled = addingTorrent;
+      remove.setAttribute('aria-label', t('Remove {0} from selection', {0: item.file.name}));
+      remove.onclick = () => { torrentFiles = torrentFiles.filter(entry => entry !== item); renderTorrentFiles(); setAddMode(); };
+      row.append(remove);
+    }
+    list.append(row);
+  }
+  document.querySelector('#file-name').textContent = torrentFiles.length === 1 ? torrentFiles[0].file.name : t('{0} files selected', {0: torrentFiles.length});
+  document.querySelector('#torrent-batch-status').textContent = t('{0} of {1} files added', {0: torrentFiles.filter(item => item.state === 'added').length, 1: torrentFiles.length});
+  document.querySelector('#seed-preview-button').disabled = addingTorrent || (addForm.elements.namedItem('mode').value === 'file' && torrentFiles.length > 1);
+  updateAddStart();
+}
+function selectTorrentFiles(files) {
+  const rejected = [];
+  for (const file of files) {
+    if (!file.name.toLowerCase().endsWith('.torrent') || file.size > 4 * 1024 * 1024 || file.size === 0) { rejected.push(file.name); continue; }
+    if (torrentFiles.some(item => torrentFileKey(item.file) === torrentFileKey(file))) continue;
+    if (torrentFiles.length >= 100 || torrentFiles.reduce((sum, item) => sum + item.file.size, 0) + file.size > 64 * 1024 * 1024) { rejected.push(file.name); continue; }
+    torrentFiles.push({file, state: 'pending', message: ''});
+  }
+  fileInput.value = ''; renderTorrentFiles(); setAddMode();
+  if (rejected.length) showNotification(t('{0} files were skipped. Choose .torrent files up to 4 MiB each; at most 100 files and 64 MiB per selection.', {0: rejected.length}));
+}
 let addingTorrent = false;
 function addCleanupPolicy() {
   return {mode: document.querySelector('#add-cleanup-mode').value || 'never', hours: Number(document.querySelector('#add-cleanup-hours').value || 49), ratio: Number(document.querySelector('#add-cleanup-ratio').value || 1), delete_files: document.querySelector('#add-cleanup-action').value === 'files'};
@@ -588,18 +620,21 @@ document.querySelector('#add-cleanup-action').onchange = updateCleanupFields;
 function setAddMode() {
   richPreview.request++; document.querySelector('#seed-add-preview').replaceChildren();
   const fileMode = addForm.elements.namedItem('mode').value === 'file';
-  document.querySelector('#magnet-field').hidden = fileMode; fileField.hidden = !fileMode;
+  document.querySelector('#magnet-field').hidden = fileMode; fileField.hidden = !fileMode; document.querySelector('#torrent-file-selection').hidden = !fileMode;
   document.querySelector('#add-magnet').disabled = fileMode; document.querySelector('#add-magnet').required = !fileMode;
-  fileInput.disabled = !fileMode; fileInput.required = fileMode && !droppedTorrent;
+  fileInput.disabled = !fileMode; fileInput.required = fileMode && !torrentFiles.length;
+  document.querySelector('#seed-preview-button').disabled = addingTorrent || (fileMode && torrentFiles.length > 1);
+  updateAddStart();
 }
 function updateAddStart() {
-  if (!addingTorrent) document.querySelector('#add-start').disabled = !downloadsEnabled;
+  const complete = addForm.elements.namedItem('mode').value === 'file' && torrentFiles.length > 0 && torrentFiles.every(item => item.state === 'added');
+  if (!addingTorrent) { document.querySelector('#add-start').disabled = !downloadsEnabled || complete; document.querySelector('#add-submit').disabled = complete; }
   document.querySelector('#add-start-help').hidden = downloadsEnabled;
 }
 for (const radio of addForm.querySelectorAll('[name="mode"]')) radio.onchange = setAddMode;
 function openAdd() {
   if (addDialog.open) return;
-  showNotification(''); addForm.reset(); droppedTorrent = null; richPreview.request++; document.querySelector('#seed-add-preview').replaceChildren();
+  showNotification(''); addForm.reset(); torrentFiles = []; renderTorrentFiles(); richPreview.request++; document.querySelector('#seed-add-preview').replaceChildren();
   document.querySelector('#file-name').textContent = ''; setAddMode();
   updateAddStart();
   updateCleanupFields();
@@ -640,7 +675,7 @@ function closeAdd() { if (!addingTorrent) addDialog.close(); }
 document.querySelector('#close-add').onclick = closeAdd; document.querySelector('#cancel-add').onclick = closeAdd;
 addDialog.addEventListener('cancel', event => { if (addingTorrent) event.preventDefault(); });
 document.querySelector('#add-magnet').addEventListener('input', () => {richPreview.request++; document.querySelector('#seed-add-preview').replaceChildren();});
-fileInput.onchange = () => { richPreview.request++; document.querySelector('#seed-add-preview').replaceChildren(); droppedTorrent = null; document.querySelector('#file-name').textContent = fileInput.files[0]?.name || ''; setAddMode(); };
+fileInput.onchange = () => { if (!addingTorrent) selectTorrentFiles(Array.from(fileInput.files)); };
 fileField.ondragover = event => { event.preventDefault(); if (!addingTorrent) fileField.classList.add('dragging'); };
 fileField.ondragleave = () => fileField.classList.remove('dragging');
 function canDropTorrent() { return document.body.classList.contains('signed-in') && appRole !== 'viewer' && !addingTorrent; }
@@ -668,15 +703,11 @@ document.addEventListener('drop', event => {
   if (!isFileDrag(event)) return;
   event.preventDefault(); clearFileDrag();
   if (!canDropTorrent()) return;
-  const files = event.dataTransfer.files;
-  if (files.length !== 1) { showNotification(t("Choose one torrent file.")); return; }
-  const file = files[0];
-  if (!file.name.toLowerCase().endsWith('.torrent')) { showNotification(t("Choose a .torrent file.")); return; }
-  if (file.size > 4 * 1024 * 1024) { showNotification(t("Torrent files must not exceed 4 MiB.")); return; }
+  const files = Array.from(event.dataTransfer.files);
+  if (!files.some(file => file.name.toLowerCase().endsWith('.torrent') && file.size > 0 && file.size <= 4 * 1024 * 1024)) { showNotification(t("Choose .torrent files up to 4 MiB each.")); return; }
   openAdd();
   addForm.querySelector('[name="mode"][value="file"]').checked = true;
-  droppedTorrent = file; fileInput.value = '';
-  document.querySelector('#file-name').textContent = file.name; setAddMode();
+  selectTorrentFiles(files);
 });
 addForm.onsubmit = async event => {
   event.preventDefault(); if (addingTorrent) return;
@@ -686,20 +717,33 @@ addForm.onsubmit = async event => {
   const location = addLocation.value, folder = addFolderPath;
   const cleanup = addCleanupPolicy();
   const cleanupQuery = cleanup.mode === 'never' ? '' : `&cleanup_mode=${cleanup.mode}&cleanup_hours=${cleanup.hours}&cleanup_ratio=${cleanup.ratio}&cleanup_delete_files=${cleanup.delete_files}`;
-  const file = droppedTorrent || fileInput.files[0];
-  if (fileMode && (!file || !file.name.toLowerCase().endsWith('.torrent'))) { showNotification(t("Choose a .torrent file.")); return; }
-  if (fileMode && file.size > 4 * 1024 * 1024) { showNotification(t("Torrent files must not exceed 4 MiB.")); return; }
+  const pending = torrentFiles.filter(item => item.state !== 'added');
+  if (fileMode && !pending.length) { showNotification(t("Choose torrent files that have not been added yet.")); return; }
   addingTorrent = true; const controls = [...addForm.elements, document.querySelector('#close-add')]; const disabledStates = controls.map(control => control.disabled); controls.forEach(control => { control.disabled = true; });
   try {
     let result;
     if (fileMode) {
-      const response = await fetch(`/api/torrents/upload?filename=${encodeURIComponent(file.name)}&ratio=${ratio}${cleanupQuery}&start=${start}&location=${encodeURIComponent(location)}&folder=${encodeURIComponent(folder)}`, {method: 'POST', headers: {'Content-Type': 'application/x-bittorrent', 'X-MediaSeed-CSRF': csrf}, body: file});
-      result = await response.json(); if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : t("The torrent file could not be added."));
+      let added = 0;
+      for (const item of pending) {
+        item.state = 'uploading'; item.message = ''; renderTorrentFiles();
+        try {
+          const response = await fetch(`/api/torrents/upload?filename=${encodeURIComponent(item.file.name)}&ratio=${ratio}${cleanupQuery}&start=${start}&location=${encodeURIComponent(location)}&folder=${encodeURIComponent(folder)}`, {method: 'POST', headers: {'Content-Type': 'application/x-bittorrent', 'X-MediaSeed-CSRF': csrf}, body: item.file});
+          const payload = await response.json(); if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : t("The torrent file could not be added."));
+          result = payload; item.state = 'added'; added++;
+          item.message = payload.cleanupPending ? 'Cleanup preparation pending' : payload.startRequested ? 'Start requested through VPN' : 'Added paused';
+        } catch (error) { item.state = 'error'; item.message = errorLabels[error.message] || t('The addition could not be confirmed. Check the torrent list before retrying.'); }
+        renderTorrentFiles();
+      }
+      const failed = pending.filter(item => item.state === 'error').length;
+      if (torrentFiles.length > 1 || failed) {
+        showNotification(t('{0} files added; {1} failed. Successful files will not be sent again.', {0: added, 1: failed}), failed ? 'danger' : 'success');
+        await refreshTorrents(); return;
+      }
     } else { result = await api('torrents', {url: addForm.elements.namedItem('url').value.trim(), ratio, start, location, folder, ...(cleanup.mode === 'never' ? {} : {cleanup})}); }
     addDialog.close(); showNotification((result.cleanupPending ? t("Torrent added paused. The cleanup rule is awaiting preparation; your selected start will follow.") : result.startRequested ? (result.pending ? t("Magnet link received. Start selected; waiting for metadata from the torrent network.") : t("Torrent added. Start requested through VPN.")) : (result.pending ? t("Magnet link received paused. Metadata is waiting for VPN.") : t("Torrent added paused. Press Start when you want to download."))) + (result.webSourcesIgnored ? t(" Extra web sources in the link were omitted; the hash and trackers are used.") : ''), 'success');
     await refreshTorrents();
   } catch (error) { notify(error); }
-  finally { addingTorrent = false; controls.forEach((control, index) => { control.disabled = disabledStates[index]; }); updateAddStart(); }
+  finally { addingTorrent = false; controls.forEach((control, index) => { control.disabled = disabledStates[index]; }); updateAddStart(); if (fileMode) renderTorrentFiles(); }
 };
 document.querySelector('#logout').onclick = async () => { try { await api('auth/logout', {}); location.reload(); } catch (error) { notify(error); } };
 setInterval(() => { if (!document.hidden && document.body.classList.contains('signed-in')) { if (!document.querySelector('#vpn').hidden) refreshVpn().catch(() => {}); if (!document.querySelector('#feeds').hidden) loadSources('feeds').catch(() => {}); refresh(); } }, 5000);

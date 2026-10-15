@@ -96,7 +96,7 @@ async function richPreview() {
   const target = document.querySelector('#seed-add-preview'); target.replaceChildren(element('p', t('Reading torrent information…'), 'muted'));
   const generation = ++richPreview.request;
   try {
-    const file = droppedTorrent || fileInput.files[0], mode = addForm.elements.namedItem('mode').value;
+    const file = torrentFiles[0]?.file, mode = addForm.elements.namedItem('mode').value;
     let response;
     if (mode === 'file') {if (!file || file.size > 4 * 1024 * 1024) throw new Error(t('Choose a torrent file up to 4 MiB')); response = await fetch('/api/torrent-preview', {method: 'POST', headers: {'Content-Type':'application/x-bittorrent', 'X-MediaSeed-CSRF':csrf}, body:file});}
     else response = await fetch('/api/torrent-preview', {method:'POST', headers:{'Content-Type':'application/json','X-MediaSeed-CSRF':csrf}, body:JSON.stringify({magnet:document.querySelector('#add-magnet').value})});
