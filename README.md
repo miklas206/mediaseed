@@ -188,3 +188,17 @@ MediaSeed 0.1.21 makes rank requirements compact and keeps the rank dialog open 
 MediaSeed 0.1.22 aligns the add-dialog columns and gives the central tracker status card more width while the side cards retain their natural height.
 
 MediaSeed 0.1.23 processes bounded RSS batches independently of cover and tracker background jobs, preserving feed settings, history and the native download queue.
+
+
+### Navigation follows MediaHub
+
+The app shell uses MediaHub's theme-dependent dock and top-navigation geometry,
+active colors, icon framing and stroke weight. Edge Signal decorations only apply
+to Edge Signal. Legacy app tabs no longer override the shared navigation. Managed
+accounts inherit MediaHub appearance and navigation; explicit per-app overrides
+remain available, with Follow MediaHub restoring inheritance. Updated CSS/JS URLs
+invalidate old cached shell assets on upgrade; no settings migration is needed.
+
+Local isolated-browser verification compares computed dock/topbar styles with
+MediaHub's actual frontend CSS for five looks, and checks all five navigation
+layouts at 320, 1440 and 3840 pixels. No live deployment is implied.

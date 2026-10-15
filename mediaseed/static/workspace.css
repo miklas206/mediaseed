@@ -29,13 +29,13 @@
 .connection-traffic > span { padding: 5px 8px; font-size: 10px; }
 .connection-details { grid-column: 1 / -1; margin: 6px 0 0; padding-top: 10px; border-top: 1px solid var(--line); font-size: 10px; justify-content: flex-start; }
 .connection-note { display: none; }
-#workspace > nav { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; padding: 0 0 14px; margin: 0 0 22px; border-bottom: 1px solid var(--line); }
-#workspace > nav button { display: inline-flex; align-items: center; gap: 9px; padding: 10px 18px; border-color: transparent; background: transparent; font-size: 13px; }
-#workspace > nav button::before { content: "↓"; font-size: 18px; color: var(--accent); }
-#workspace > nav button[data-view="feeds"]::before { content: "◔"; }
-#workspace > nav button[data-view="trackers"]::before { content: "◇"; }
-#workspace > nav button[data-view="vpn"]::before { content: "⌁"; }
-#workspace > nav button[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent-line); color: var(--accent); }
+#workspace > nav:not(.app-navigation) { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; padding: 0 0 14px; margin: 0 0 22px; border-bottom: 1px solid var(--line); }
+#workspace > nav:not(.app-navigation) button { display: inline-flex; align-items: center; gap: 9px; padding: 10px 18px; border-color: transparent; background: transparent; font-size: 13px; }
+#workspace > nav:not(.app-navigation) button::before { content: "↓"; font-size: 18px; color: var(--accent); }
+#workspace > nav:not(.app-navigation) button[data-view="feeds"]::before { content: "◔"; }
+#workspace > nav:not(.app-navigation) button[data-view="trackers"]::before { content: "◇"; }
+#workspace > nav:not(.app-navigation) button[data-view="vpn"]::before { content: "⌁"; }
+#workspace > nav:not(.app-navigation) button[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent-line); color: var(--accent); }
 #tracker-overview { padding: 20px 24px; border: 1px solid var(--line); border-radius: 16px; background: var(--glass, var(--surface)); margin-bottom: 20px; }
 .tracker-card { margin: 12px 0 0; padding: 16px; background: var(--glass-raised, var(--raised)); }
 .tracker-metrics { gap: 14px; }
@@ -87,8 +87,8 @@ button.primary { color: var(--accent-contrast); }
   .toolbar { grid-template-columns: repeat(2,minmax(0,1fr)); }
   #tracker-search { grid-template-columns: minmax(0,1fr); }
   #tracker-form { grid-template-columns: minmax(0,1fr); }
-  #workspace > nav { gap: 3px; }
-  #workspace > nav button { padding: 9px; font-size: 12px; gap: 6px; }
+  #workspace > nav:not(.app-navigation) { gap: 3px; }
+  #workspace > nav:not(.app-navigation) button { padding: 9px; font-size: 12px; gap: 6px; }
   .torrent-table-header { display: none; }
   #torrents { border-top: 1px solid var(--line); border-radius: 12px; }
   .torrent { grid-template-columns: minmax(0,1fr); }
@@ -128,9 +128,9 @@ button.primary { color: var(--accent-contrast); }
 .seed-stats article { border-radius: 8px; padding: 15px; min-height: 85px; }
 .seed-stats strong { font-size: 21px; }
 .seed-spark { width: 90px; height: 32px; margin-left: auto; color: var(--accent); flex-shrink: 1; }
-#workspace > nav { padding-bottom: 12px; margin-bottom: 12px; }
-#workspace > nav button { padding: 6px 13px; min-height: 33px; font-size: 12px; border-radius: 6px; }
-#workspace > nav button::before { display: none; }
+#workspace > nav:not(.app-navigation) { padding-bottom: 12px; margin-bottom: 12px; }
+#workspace > nav:not(.app-navigation) button { padding: 6px 13px; min-height: 33px; font-size: 12px; border-radius: 6px; }
+#workspace > nav:not(.app-navigation) button::before { display: none; }
 .downloads-heading { margin: 10px 0 12px; }
 .downloads-heading h2 { font-size: 14px; margin: 0; }
 .downloads-heading button { font-size: 12px; padding: 7px 12px; min-height: 34px; }
@@ -233,7 +233,7 @@ footer { position: static; flex-shrink: 0; }
 #ratio-form { grid-template-columns: minmax(0, 1fr); gap: 16px; }
 #ratio-form > button { justify-self: start; }
 .ratio-workspace > .workspace-card { align-self: start; }
-#workspace > nav button[data-view="ratio-scout"]::before { content: "↗"; }
+#workspace > nav:not(.app-navigation) button[data-view="ratio-scout"]::before { content: "↗"; }
 .ratio-check { display: flex !important; align-items: center; gap: 10px; }
 .ratio-check input { width: auto; }
 .ratio-candidate { padding: 18px 0; border-bottom: 1px solid var(--line); }
