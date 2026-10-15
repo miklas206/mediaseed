@@ -82,11 +82,11 @@ class TrackerSettings(BaseModel):
     api_key: str = Field(default="", max_length=512)
 
 
-def queue_summary(torrents):
+def queue_summary(torrents, limit=None):
     active = [row for row in torrents if isinstance(row, dict) and row.get("state") in {"downloading", "stalledDL", "metaDL", "forcedDL"}]
     waiting = sum(isinstance(row, dict) and row.get("state") == "queuedDL" for row in torrents)
     rss = sum(str(row.get("category", "")).startswith("MediaSeed-RSS-") for row in active)
-    return {"limit": 8, "active": len(active), "waiting": waiting, "rssActive": rss, "manualActive": len(active) - rss, "boundedView": len(torrents) >= 500}
+    return {"limit": limit, "active": len(active), "waiting": waiting, "rssActive": rss, "manualActive": len(active) - rss, "boundedView": len(torrents) >= 500}
 
 
 async def add_stopped(qbit, ratio, content=None, magnet=None, start=False, vpn_status=None, tag=None, savepath="/downloads"):
@@ -335,7 +335,11 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         torrents = await read_json("/api/v2/torrents/info", {"limit": 500})
         if not isinstance(torrents, list):
             raise HTTPException(503, "Invalid queue response")
-        return queue_summary(torrents)
+        preferences = await read_json("/api/v2/app/preferences", {})
+        limit = preferences.get("max_active_downloads") if isinstance(preferences, dict) else None
+        if isinstance(preferences, dict) and preferences.get("queueing_enabled") is False:
+            limit = -1
+        return queue_summary(torrents, limit)
 
     @app.get("/api/runtime")
     async def runtime(session=Depends(authorized)):
@@ -356,6 +360,7 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
             raise HTTPException(503, "Invalid torrent details")
         return {
             "properties": {key: value for key, value in properties.items() if key in allowed},
+            "downloadFolder": storage.describe(properties.get("save_path")) if storage else None,
             "files": [{key: row.get(key) for key in ("index", "name", "size", "progress", "priority")} for row in files[:1000]],
             "trackers": [{"host": urlsplit(row.get("url", "")).hostname or "DHT / PeX / LSD", "status": row.get("status"), "num_peers": row.get("num_peers")} for row in trackers[:100]],
             "peers": [{key: row.get(key) for key in ("ip", "port", "client", "progress", "dl_speed", "up_speed")} for row in list(peers.get("peers", {}).values())[:200]],

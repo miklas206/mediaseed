@@ -209,3 +209,23 @@ button.primary { color: var(--accent-contrast); }
  .app-settings-dialog { padding: 18px; }
  .app-settings-panel { padding: 14px; }
 }
+
+/* Keep storage readable below paged torrents, above the footer in document flow. */
+body { min-height: 100svh; display: flex; flex-direction: column; }
+.app-main { flex: 1; }
+footer { position: static; flex-shrink: 0; }
+#workspace { padding-bottom: 28px; }
+#storage { width: min(1344px, calc(100% - 32px)); margin: 18px auto 32px; display: grid; gap: 12px; }
+#storage[hidden] { display: none; }
+#storage h2 { margin: 0; font-size: 17px; }
+.storage-capacity { padding: 12px 0; border-top: 1px solid var(--line); }
+.storage-capacity p { margin: 6px 0 0; overflow-wrap: anywhere; }
+.download-filters .toolbar { flex-wrap: wrap; }
+.torrent-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; }
+.torrent-pagination span { text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; }
+#download-settings-form { display: grid; gap: 12px; }
+#download-settings-form label { display: grid; gap: 8px; }
+#download-settings-form p { margin: 0; }
+@media (max-width: 540px) { .torrent-pagination { flex-wrap: wrap; } .torrent-pagination span { order: 3; flex-basis: 100%; } .download-filters .toolbar > label { flex: 1 1 130px; min-width: 0; } }
+
+:root[data-look]:not([data-look="classic"]) #message[data-tone="info"]::before { content: "i"; background: var(--accent); color: var(--accent-contrast); }

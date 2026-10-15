@@ -42,7 +42,13 @@
   const topbar = document.querySelector('.topbar'); topbar?.insertBefore(button,topbar.querySelector('#logout'));
   document.body.append(settings);
   const localMessage=settings.querySelector('.app-settings-message');
-  button.addEventListener('click',()=>{localMessage.hidden=true;settings.showModal();});
+  if (document.querySelector('#downloads')) {
+    const downloadsPanel = document.createElement('section'); downloadsPanel.className = 'app-settings-panel';
+    downloadsPanel.innerHTML = '<h3 data-i18n="Download queue">Download queue</h3><form id="download-settings-form"><label><span data-i18n="Simultaneous downloads">Simultaneous downloads</span><input id="max-active-downloads" type="number" min="1" max="100" step="1" required></label><p class="muted" data-i18n="RSS and manual torrents share this limit. File checking has its own queue.">RSS and manual torrents share this limit. File checking has its own queue.</p><p id="download-settings-status" role="status"></p><button id="save-download-settings" type="submit" data-i18n="Save download settings">Save download settings</button></form>';
+    settings.insertBefore(downloadsPanel, localMessage);
+  }
+
+  button.addEventListener('click',()=>{localMessage.hidden=true;settings.showModal();window.dispatchEvent(new Event('mediaseed-settings-open'));});
   const close=settings.querySelector('.app-settings-close');close.textContent='\u00d7';close.addEventListener('click',()=>settings.close());
   settings.addEventListener('click',event=>{const r=settings.getBoundingClientRect();if(event.target===settings && (event.clientX<r.left || event.clientX>r.right || event.clientY<r.top || event.clientY>r.bottom))settings.close();});
   const extensionLink=document.querySelector('.browser-extension-link');

@@ -43,7 +43,7 @@ async def verify():
             if path == "app/preferences":
                 fields = {key: data.get(key) for key in ("current_network_interface", "listen_port", "queueing_enabled", "max_active_downloads", "rss_processing_enabled", "rss_auto_downloading_enabled")}
                 print("Native preferences", json.dumps(fields))
-                assert data["max_active_downloads"] == 8 and data["queueing_enabled"] and data["rss_processing_enabled"] and not data["rss_auto_downloading_enabled"]
+                assert type(data["max_active_downloads"]) is int and 1 <= data["max_active_downloads"] <= 100 and data["queueing_enabled"] and data["rss_processing_enabled"] and not data["rss_auto_downloading_enabled"]
             else:
                 assert isinstance(data, dict)
                 print("Native RSS API verified")

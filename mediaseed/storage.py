@@ -68,6 +68,25 @@ class Storage:
         row, _ = self.directory(location, relative, writable=True)
         return row["path"] + ("/" + relative if relative else "")
 
+    def describe(self, destination):
+        """Expose only client paths inside explicitly approved download locations."""
+        if not isinstance(destination, str) or not destination.startswith("/downloads"):
+            return None
+        if "\\" in destination or any(ord(c) < 32 for c in destination):
+            return None
+        path = PurePosixPath(destination)
+        if ".." in path.parts or str(path) != destination.rstrip("/"):
+            return None
+        for row in sorted(self.locations, key=lambda r: len(r["path"]), reverse=True):
+            root = PurePosixPath(row["path"])
+            if path.is_relative_to(root):
+                relative = path.relative_to(root)
+                if row["id"] == "local" and relative.parts[:1] == ("media",):
+                    return None
+                return {"path": str(path), "label": row["label"], "location": row["id"],
+                        "folder": "" if str(relative) == "." else str(relative)}
+        return None
+
     def snapshot(self):
         result = []
         for row in self.locations:
@@ -76,6 +95,7 @@ class Storage:
                 _, path = self.directory(row["id"])
                 usage = shutil.disk_usage(path)
                 observed.update(
+                    filesystemId=str(path.stat().st_dev),
                     available=True,
                     writable=os.access(path, os.W_OK | os.X_OK),
                     totalBytes=usage.total,

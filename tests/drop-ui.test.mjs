@@ -66,6 +66,42 @@ function setup() {
 }
 const torrent = (name = 'Sintel.torrent', size = 100) => ({name, size});
 
+test('pagination limits rendered rows, clamps after filtering, and sorts missing values last', () => {
+  const {find, context} = setup();
+  const rows = Array.from({length: 26}, (_,i) => ({hash:String(i).padStart(40,'0'),name:'Torrent '+i,size:i,progress:.5,category:''}));
+  context.seedTorrent = row => ({name:row.name});
+  const rendered=[];
+  find('#torrents').replaceChildren = () => {rendered.length=0;};
+  find('#torrents').append = item => rendered.push(item);
+  find('#page-size').value='10';find('#filter').value='all';find('#source-filter').value='all';find('#sort').value='name';find('#sort-direction').value='asc';
+  vm.runInContext(`torrents=${JSON.stringify(rows)}`,context);
+  context.renderTorrents();assert.equal(rendered.length,10);assert.equal(rendered[0].name,'Torrent 0');
+  find('#next-page').onclick();assert.equal(rendered[0].name,'Torrent 10');
+  find('#next-page').onclick();assert.equal(rendered.length,6);assert.equal(find('#next-page').disabled,true);
+  find('#search').value='Torrent 25';context.renderTorrents();assert.equal(rendered.length,1);assert.equal(find('#previous-page').disabled,true);
+  const sorted=context.sortTorrentRows([{hash:'a',eta:8640000},{hash:'b',eta:10},{hash:'c',eta:100},{hash:'d'}],'eta','desc');
+  assert.deepEqual(Array.from(sorted,r=>r.hash),['c','b','a','d']);
+});
+
+test('file checking requires confirmation and sends one exact hash without a start or delete', async () => {
+  const {find, context} = setup();
+  const requests = [], messages = [];
+  context.fetch = async (url, options) => {requests.push({url, body: JSON.parse(options.body)}); return {ok: true, json: async () => ({accepted: true, stopped: true})};};
+  context.showNotification = message => messages.push(message);
+  context.chooseRecheck({hash: 'a'.repeat(40), name: 'Synthetic'});
+  assert.equal(find('#recheck-torrent').open, true);
+  assert.equal(find('#recheck-name').textContent, 'Synthetic');
+  assert.equal(requests.length, 0);
+  find('#cancel-recheck').onclick();
+  assert.equal(find('#recheck-torrent').open, false);
+  assert.equal(requests.length, 0);
+  context.chooseRecheck({hash: 'b'.repeat(40), name: 'Second'});
+  await find('#confirm-recheck').onclick();
+  assert.deepEqual(requests, [{url: '/api/torrents/recheck', body: {torrent_hash: 'b'.repeat(40)}}]);
+  assert.equal(find('#recheck-torrent').open, false);
+  assert.match(messages[0], /requested.*paused/);
+});
+
 test('page drop opens a populated dialog, preserves its draft, and uploads only after confirmation', async () => {
   const {find, body, drag, uploads, form, ratio, mode} = setup();
   drag('dragenter'); assert.equal(body.classList.contains('torrent-dragging'), true);

@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import ipaddress
+import json
 import os
 import re
 import secrets
@@ -70,6 +71,11 @@ class TorrentAction(BaseModel):
     torrent_hash: str = Field(pattern=r"^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$")
     confirm_early: bool = False
     delete_files: bool = False
+
+
+class DownloadSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    maxActiveDownloads: int = Field(ge=1, le=100, strict=True)
 
 
 class VpnSettings(BaseModel):
@@ -276,7 +282,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
                 if public["role"] == "viewer":
                     raise HTTPException(403, "Read-only app access")
                 tracker_admin = request.url.path == "/api/trackers" or (request.url.path.startswith("/api/trackers/") and request.method == "PUT")
-                if public["role"] != "administrator" and (tracker_admin or request.url.path == "/api/vpn" or request.url.path.startswith(("/api/accounts", "/api/feeds", "/api/settings", "/api/runtime"))):
+                if public["role"] != "administrator" and (tracker_admin or request.url.path in {"/api/vpn", "/api/download-settings"} or request.url.path.startswith(("/api/accounts", "/api/feeds", "/api/settings", "/api/runtime"))):
                     raise HTTPException(403, "App administrator access required")
         if request.method not in {"GET", "HEAD", "OPTIONS"} and not secrets.compare_digest(request.headers.get("X-MediaSeed-CSRF", ""), session["csrf"]):
             raise HTTPException(403, "Session verification failed")
@@ -369,7 +375,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/healthz")
     def health():
-        return {"status": "healthy", "version": "0.1.12"}
+        return {"status": "healthy", "version": "0.1.13"}
 
     @app.get("/api/auth/status")
     async def status(request: Request):
@@ -465,7 +471,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     async def read_torrents():
         response = await qbit("/api/v2/torrents/info", payload={"limit": 500})
-        allowed = {"hash", "name", "progress", "state", "dlspeed", "upspeed", "ratio", "eta", "size", "seeding_time", "ratio_limit", "category", "num_seeds", "num_leechs", "downloaded", "uploaded"}
+        allowed = {"hash", "name", "progress", "state", "dlspeed", "upspeed", "ratio", "eta", "size", "seeding_time", "ratio_limit", "category", "num_seeds", "num_leechs", "downloaded", "uploaded", "added_on", "completion_on"}
         try:
             rows = response.json()
             if not isinstance(rows, list):
@@ -499,8 +505,50 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
         # One authorized request and one bounded torrent read for list, queue and traffic.
         # VPN evidence remains fresh; no readiness or action results are cached.
-        observed, rows = await asyncio.gather(vpn_status(), snapshot())
-        return {"runtime": observed, "torrents": rows, "queue": queue_summary(rows) if rows is not None else None}
+        observed, rows, queue = await asyncio.gather(vpn_status(), snapshot(), queue_observation())
+        return {"runtime": observed, "torrents": rows, "queue": queue_summary(rows, queue.get("maxActiveDownloads")) if rows is not None else None}
+
+    queue_cache = {}
+    queue_lock = asyncio.Lock()
+
+    async def queue_observation(force=False):
+        async with queue_lock:
+            if not force and time.time() - queue_cache.get("checkedAt", 0) < 60:
+                return queue_cache
+            try:
+                preferences = (await qbit("/api/v2/app/preferences")).json()
+                limit = preferences.get("max_active_downloads")
+                if type(limit) is not int or limit < -1:
+                    raise ValueError()
+                result = {"maxActiveDownloads": limit if preferences.get("queueing_enabled") else -1,
+                          "queueingEnabled": preferences.get("queueing_enabled") is True}
+            except (HTTPException, ValueError, AttributeError):
+                result = {"maxActiveDownloads": None, "queueingEnabled": None}
+            queue_cache.clear()
+            queue_cache.update(result, checkedAt=time.time())
+            return queue_cache
+
+    @app.get("/api/download-settings")
+    async def download_settings(session=Depends(authorized)):
+        result = await queue_observation(force=True)
+        if result["maxActiveDownloads"] is None:
+            raise HTTPException(503, "Download settings are unavailable. Connect the torrent client and try again.")
+        return result
+
+    @app.put("/api/download-settings")
+    async def save_download_settings(body: DownloadSettings, session=Depends(authorized)):
+        async with credit.lock:
+            if vpn_url:
+                observed = await vpn_status()
+                if "queue-settings" not in observed.get("torrentCapabilities", []):
+                    raise HTTPException(409, "Changing the download limit requires MediaVPN 0.2.18 or newer. Update MediaVPN separately.")
+                await vpn_request("queue", "PUT", body.model_dump())
+            else:
+                await qbit("/api/v2/app/setPreferences", "POST", {"json": json.dumps({"max_active_downloads": body.maxActiveDownloads, "queueing_enabled": True})})
+            result = await queue_observation(force=True)
+            if result["maxActiveDownloads"] != body.maxActiveDownloads or not result["queueingEnabled"]:
+                raise HTTPException(503, "The download limit could not be verified. Refresh the settings before trying again.")
+            return result
 
     @app.get("/api/hub/overview")
     async def hub_overview(request: Request):
@@ -544,6 +592,46 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.post("/api/torrents/{action}")
     async def action(action: str, body: TorrentAction, session=Depends(authorized)):
+        if action == "recheck":
+            if body.delete_files:
+                raise HTTPException(422, "File checking cannot delete files")
+            if vpn_url:
+                observed = await vpn_status()
+                if "recheck" not in observed.get("torrentCapabilities", []):
+                    raise HTTPException(409, "File checking requires MediaVPN 0.2.18 or newer. Update MediaVPN separately.")
+            async with credit.lock:
+                async def current():
+                    response = await qbit("/api/v2/torrents/info", payload={"hashes": body.torrent_hash, "limit": 1})
+                    try:
+                        rows = response.json()
+                    except ValueError:
+                        raise HTTPException(503, "Invalid torrent client response") from None
+                    if not isinstance(rows, list):
+                        raise HTTPException(503, "Invalid torrent client response")
+                    row = next((row for row in rows if isinstance(row, dict) and row.get("hash", "").lower() == body.torrent_hash.lower()), None)
+                    if row is None:
+                        raise HTTPException(404, "Torrent not found")
+                    return row
+                row = await current()
+                if row.get("state", "").startswith("checking") or row.get("state") == "moving":
+                    raise HTTPException(409, "The torrent is already checking or moving files. Wait until it finishes.")
+                if row.get("state") in {"metaDL", "forcedMetaDL"}:
+                    raise HTTPException(409, "Torrent metadata must be available before checking files")
+                stopped = await qbit("/api/v2/torrents/stop", "POST", {"hashes": body.torrent_hash})
+                if stopped.status_code not in {200, 204}:
+                    raise HTTPException(503, "The torrent could not be stopped. File checking was not started.")
+                for attempt in range(20):
+                    row = await current()
+                    # qBittorrent reports error/missingFiles ahead of its paused flag.
+                    if row.get("state", "").startswith(("paused", "stopped")) or row.get("state") in {"error", "missingFiles"}:
+                        break
+                    await asyncio.sleep(0.25)
+                else:
+                    raise HTTPException(409, "The torrent was not confirmed stopped. File checking was not started.")
+                checked = await qbit("/api/v2/torrents/recheck", "POST", {"hashes": body.torrent_hash})
+                if checked.status_code not in {200, 204}:
+                    raise HTTPException(503, "File checking was not accepted. The torrent remains paused.")
+            return {"accepted": True, "stopped": True}
         if action == "start":
             if not (await vpn_status())["downloadsEnabled"]:
                 raise HTTPException(409, "Starting downloads is disabled until the VPN gate is implemented")

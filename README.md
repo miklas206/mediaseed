@@ -150,3 +150,25 @@ The image Content Security Policy permits the generated SVG data favicon, so loc
 The Docker build extracts a stable manifest of runtime and build dependencies from pyproject.toml in a separate stage. Release versions, static assets and application code do not change this manifest. Unchanged dependencies can therefore reuse their installed Docker layer. Dependency changes invalidate that layer automatically. The application package is installed separately with --no-deps --no-build-isolation --no-index using the already installed build tools, preserving package metadata and bundled assets without dependency downloads during that step.
 
 This applies on fresh installs and upgrades through the existing source update path; no new files, packages, mappings or migrations are required on the host. The first build creates the new cache layers, and later builds benefit while those layers remain cached. User configuration, credentials and data mounts are unchanged. Real update timing depends on cache availability, downloads and host capacity; it has not been benchmarked on the running server.
+
+
+## Existing files and file checking
+
+Authenticated torrent details show the download folder only when its client path belongs to an operator-approved storage location. The general torrent list continues to omit private host paths. Existing configuration and media are not migrated or moved.
+
+Use **Check files** from a torrent's action menu or its Files tab. Confirmation pauses the selected torrent, verifies its paused state, and requests qBittorrent's checksum recheck. It does not start downloads, remove files, or claim the asynchronous check has finished. Start the torrent manually afterward if missing pieces should be downloaded. A failed or interrupted request is not automatically retried.
+
+When reusing existing data, add on pause and choose the exact folder expected by the torrent's file layout. A matching filename or byte count does not prove matching checksums. The file list shows the client's latest observed progress, which may be stale until a recheck completes.
+
+The MediaVPN-backed runtime requires **MediaVPN 0.2.18+** for the narrowly scoped recheck RPC. Update MediaVPN separately before using this feature. Older installations receive a concrete upgrade message before any torrent is paused. Standalone preview uses the existing internal client API. Fresh installs and upgrades use the same additive routes and storage validation, preserving credentials, torrent metadata, cleanup settings and files.
+
+Download and checking queues are separate qBittorrent preferences: the managed default is eight active downloads and one active file check. Settings now allow 1–100 simultaneous downloads. The selected value is verified against the client and preserved by MediaVPN across reconnects and restarts; the checking limit remains unchanged.
+
+
+## Torrent list and storage display (0.1.13)
+
+Choose 10, 25, 50 or 100 torrents per page. Search and source/state filters apply before pagination. Sorting supports name, progress, credited ratio, size, added/completed date, transfer rates, remaining time, seeding time, uploaded bytes, seed count and state, with ascending/descending direction. Missing values and unknown ETA sort last. Page size and sort preferences are browser-local, and page boundaries are clamped after refresh/removal. The existing 500-torrent bounded observation remains explicit in the queue summary.
+
+Download queue settings read the client's actual configuration rather than a hardcoded display value. The dashboard reuses the queue observation for up to 60 seconds; saving settings verifies and refreshes it immediately. MediaVPN 0.2.18+ provides an authenticated dedicated queue endpoint instead of exposing arbitrary qBittorrent preference writes. Viewer accounts cannot change settings.
+
+Storage is in normal document flow above the footer. Capacity shows used/free/total for the filesystem, and locations sharing the same device are grouped. Local downloads commonly share the LXC system disk with the OS, image layers and app data: that filesystem's used space is not the download directory's size. Files are not moved or deleted by this display change.

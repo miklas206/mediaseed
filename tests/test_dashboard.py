@@ -15,6 +15,8 @@ def test_dashboard_reuses_one_bounded_sanitized_read_for_queue_and_traffic(tmp_p
         calls.append(request)
         if request.url.path.endswith("/login"):
             return httpx.Response(204)
+        if request.url.path.endswith("/app/preferences"):
+            return httpx.Response(200, json={"max_active_downloads": 8, "queueing_enabled": True})
         assert request.url.path.endswith("/torrents/info")
         assert request.url.params["limit"] == "500"
         return httpx.Response(200, json=rows)
@@ -29,7 +31,7 @@ def test_dashboard_reuses_one_bounded_sanitized_read_for_queue_and_traffic(tmp_p
         assert snapshot["torrents"][0]["dlspeed"] == 4096
         assert snapshot["queue"] == {"active": 2, "limit": 8, "waiting": 1, "rssActive": 1, "manualActive": 1, "boundedView": False}
         assert snapshot["runtime"]["downloadsEnabled"] is False
-        assert len(calls) == 2  # login plus one list read, no duplicate queue/version query
+        assert len(calls) == 4  # One list read and one cached queue-preferences read, with login each.
         rows.clear()
         empty = client.get("/api/dashboard").json()
         assert empty["torrents"] == [] and empty["queue"]["active"] == 0

@@ -36,6 +36,15 @@ function seedTorrent(row, index) {
   const heading = command(row.name, () => showDetails(row)); heading.className = 'torrent-name'; heading.title = row.name;
   const info = element('small', `${trackerBytes(row.size)} · ${row.tracker_benefits?.tracker || t('Tracker unknown')} · ${seedSource(row)}`, 'seed-subline');
   identity.append(heading, info, seedBadges(row));
+  const sortKey = document.querySelector('#sort').value;
+  const hints = {
+    added_on: ['Added', row.added_on > 0 ? new Date(row.added_on * 1000).toLocaleString(locale()) : '—'],
+    completion_on: ['Completed', row.completion_on > 0 ? new Date(row.completion_on * 1000).toLocaleString(locale()) : '—'],
+    uploaded: ['Uploaded', trackerBytes(row.uploaded)],
+    num_seeds: ['Seeders', row.num_seeds ?? '—'],
+    ratio: ['Credited ratio', trackerNumber(row.credited_ratio ?? row.ratio)],
+  };
+  if (hints[sortKey]) identity.append(element('small', `${t(hints[sortKey][0])}: ${hints[sortKey][1]}`, 'seed-subline'));
   const transfer = element('div', undefined, 'seed-progress-cell');
   const progress = element('progress'); progress.max = 1; progress.value = Math.max(0, Math.min(1, Number(row.progress || 0))); progress.setAttribute('aria-label', t('Download progress'));
   if (state(row) === 'seeding' && Number(row.ratio_limit) >= 1) { progress.value = Math.max(0, Math.min(1, Number(row.credited_ratio ?? row.ratio) / Number(row.ratio_limit) || 0)); progress.setAttribute('aria-label', t('Seeding progress')); }
@@ -47,7 +56,7 @@ function seedTorrent(row, index) {
   if (appRole !== 'viewer') { const stopped = state(row) === 'stopped'; const toggle = command(stopped ? '▶' : 'Ⅱ', () => torrentAction(row, stopped ? 'start' : 'stop')); toggle.title = stopped ? t('Start') : t('Stop'); toggle.setAttribute('aria-label', toggle.title + ': ' + row.name); toggle.disabled = stopped && !downloadsEnabled; actions.append(toggle); }
   const menu = element('details', undefined, 'torrent-menu'), trigger = element('summary', '⋯'); trigger.setAttribute('aria-label', t('Actions'));
   const commands = element('div', undefined, 'torrent-menu-content'); commands.append(command(t('Details'), () => showDetails(row)));
-  if (appRole !== 'viewer') commands.append(command(t('Remove'), () => chooseRemoval(row)));
+  if (appRole !== 'viewer') commands.append(command(t('Check files'), () => chooseRecheck(row)), command(t('Remove'), () => chooseRemoval(row)));
   menu.append(trigger, commands); actions.append(menu);
   item.append(seedPoster(row), identity, transfer, activity, actions); return item;
 }
@@ -69,11 +78,14 @@ async function richDetails(row) {
     const content = element('div', undefined, 'seed-detail-content'); content.id = 'seed-detail-tabpanel'; content.setAttribute('role','tabpanel'); target.replaceChildren(hero, tabs, content);
     const overview = () => {
       const list = element('dl', undefined, 'seed-detail-facts');
-      for (const [label, value] of [[t('Downloaded'), trackerBytes(details.properties.total_downloaded)], [t('Uploaded'), trackerBytes(details.properties.total_uploaded)], [t('Source'), seedSource(row)], [t('Added'), details.properties.addition_date ? new Date(details.properties.addition_date * 1000).toLocaleString(locale()) : '—'], [t('Download folder'), row.save_path || t('Unknown')]]) list.append(element('dt', label), element('dd', value));
+      for (const [label, value] of [[t('Downloaded'), trackerBytes(details.properties.total_downloaded)], [t('Uploaded'), trackerBytes(details.properties.total_uploaded)], [t('Source'), seedSource(row)], [t('Added'), details.properties.addition_date ? new Date(details.properties.addition_date * 1000).toLocaleString(locale()) : '—'], [t('Download folder'), details.downloadFolder ? `${t(details.downloadFolder.label)} · ${details.downloadFolder.path}` : t('Download folder is outside approved storage or unavailable')]]) list.append(element('dt', label), element('dd', value));
       content.append(list);
     };
     const panels = [ ['Overview', overview], ['Seeding', () => { content.append(trackerCreditView(credited)); renderCleanupDetails(details.cleanup, row, content); }],
-      ['Files', () => content.append(detailTable(t('Files'), [['name', t('Name')], ['displaySize', t('Size')], ['displayProgress', t('Progress')]], details.files.map(file => ({...file, displaySize: trackerBytes(file.size), displayProgress: `${Math.round(file.progress * 100)}%`})) ))],
+      ['Files', () => {
+        if (appRole !== 'viewer') content.append(command(t('Check files'), () => chooseRecheck(row)));
+        content.append(element('p', t('File progress is the last client observation. Check files to verify existing data and detect missing or damaged pieces.'), 'muted'), detailTable(t('Files'), [['name', t('Name')], ['displaySize', t('Size')], ['displayProgress', t('Progress')]], details.files.map(file => ({...file, displaySize: trackerBytes(file.size), displayProgress: typeof file.progress === 'number' ? `${Math.round(file.progress * 100)}%` : '—'})) ));
+      }],
       ['Connections', () => content.append(detailTable(t('Trackers'), [['host', 'Tracker'], ['status', t('Status')], ['num_peers', 'Peers']], details.trackers), detailTable('Peers', [['ip', 'IP'], ['client', t('Client')], ['progress', t('Progress')]], details.peers))],
       ['Activity', () => { content.append(element('p', torrentStatus(row.state)), element('p', t('VPN availability is checked before starting. Historical controller events are available in MediaHub Logs.'), 'muted')); renderCleanupDetails(details.cleanup, row, content); }]];
     function select(index) {
