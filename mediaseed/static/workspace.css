@@ -226,6 +226,9 @@ footer { position: static; flex-shrink: 0; }
 #download-settings-form { display: grid; gap: 12px; }
 #download-settings-form label { display: grid; gap: 8px; }
 #download-settings-form p { margin: 0; }
+#rss-settings-form { display: grid; gap: 12px; }
+#rss-settings-form label { display: grid; gap: 8px; }
+#rss-settings-form p { margin: 0; }
 @media (max-width: 540px) { .torrent-pagination { flex-wrap: wrap; } .torrent-pagination span { order: 3; flex-basis: 100%; } .download-filters .toolbar > label { flex: 1 1 130px; min-width: 0; } }
 
 :root[data-look]:not([data-look="classic"]) #message[data-tone="info"]::before { content: "i"; background: var(--accent); color: var(--accent-contrast); }

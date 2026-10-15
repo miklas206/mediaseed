@@ -1,6 +1,17 @@
 // Account language; English source keys and Danish translations.
 (() => {
 const messages = {
+  "RSS refresh": "RSS-opdatering",
+  "Fetch RSS every (minutes)": "Hent RSS hvert (minutter)",
+  "Default: 5 minutes. Follow the minimum interval required by your tracker. This applies to all MediaSeed feeds; downloaded entries are checked approximately every 15 seconds.": "Standard: 5 minutter. Følg trackerens minimumsinterval. Gælder alle MediaSeed-feeds; hentede opslag gennemgås cirka hvert 15. sekund.",
+  "Save RSS settings": "Gem RSS-indstillinger",
+  "Loading RSS settings...": "Henter RSS-indstillinger...",
+  "Only an administrator can change the RSS interval.": "Kun en administrator kan ændre RSS-intervallet.",
+  "Current interval: {0} minutes": "Aktuelt interval: {0} minutter",
+  "RSS interval saved.": "RSS-interval gemt.",
+  "Changing the RSS interval requires MediaVPN 0.2.19 or newer. Update MediaVPN separately.": "Ændring af RSS-interval kræver MediaVPN 0.2.19 eller nyere. Opdatér MediaVPN separat.",
+  "RSS settings are unavailable. Connect the torrent client and try again.": "RSS-indstillinger er ikke tilgængelige. Tilslut torrentklienten, og prøv igen.",
+  "The RSS interval could not be verified. Refresh the settings before trying again.": "RSS-intervallet kunne ikke bekræftes. Genindlæs indstillingerne, før du prøver igen.",
   "Only an administrator can change the shared download limit.": "Kun en administrator kan ændre den fælles downloadgrænse.",
   "Completed": "Færdighentet",
   "Download speed": "Downloadhastighed",
@@ -71,7 +82,7 @@ const messages = {
   "Selected torrent files": "Valgte torrentfiler",
   "For individual ratio previews, select one file at a time.": "V\u00e6lg \u00e9n fil ad gangen for at forh\u00e5ndsvise individuelle ratioer.",
 
-  "MediaSeed 0.1.13": "MediaSeed 0.1.13",
+  "MediaSeed 0.1.14": "MediaSeed 0.1.14",
   "Waiting for the next bounded metadata check": "Afventer næste kontrol af torrentoplysninger",
   "Seeding progress": "Seedingfremdrift",
   "Downloaded": "Downloadet",

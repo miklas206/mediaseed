@@ -10,6 +10,22 @@ def initialize(config_root=Path("/config"), secret_root=Path("/secrets")):
     config = config_root / "qBittorrent" / "qBittorrent.conf"
     password_file = secret_root / "qbit-password"
     if config.exists() and password_file.exists():
+        # Add the new default to older preview installs without changing an
+        # explicitly saved interval or replacing their client credentials.
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.optionxform = str
+        parser.read(config)
+        if not parser.has_option("RSS", "Session\\RefreshInterval"):
+            if not parser.has_section("RSS"):
+                parser.add_section("RSS")
+            parser["RSS"]["Session\\RefreshInterval"] = "5"
+            temporary = config.with_suffix(".tmp")
+            with temporary.open("w") as output:
+                parser.write(output, space_around_delimiters=False)
+            temporary.chmod(config.stat().st_mode & 0o777)
+            if hasattr(os, "chown"):
+                os.chown(temporary, config.stat().st_uid, config.stat().st_gid)
+            temporary.replace(config)
         return
     if config.exists() or password_file.exists():
         raise RuntimeError("Incomplete client configuration; preserve existing files and repair explicitly")
@@ -34,6 +50,7 @@ def initialize(config_root=Path("/config"), secret_root=Path("/secrets")):
     }
     parser["BitTorrent"] = {"Session\\DefaultSavePath": "/downloads", "Session\\AddTorrentStopped": "true", "Session\\UPnP": "false"}
     parser["LegalNotice"] = {"Accepted": "true"}
+    parser["RSS"] = {"Session\\RefreshInterval": "5"}
     def private_opener(path, flags):
         return os.open(path, flags, 0o600)
 

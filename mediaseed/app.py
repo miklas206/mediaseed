@@ -78,6 +78,11 @@ class DownloadSettings(BaseModel):
     maxActiveDownloads: int = Field(ge=1, le=100, strict=True)
 
 
+class RssSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rssRefreshMinutes: int = Field(ge=1, le=1440, strict=True)
+
+
 class VpnSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool
@@ -282,7 +287,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
                 if public["role"] == "viewer":
                     raise HTTPException(403, "Read-only app access")
                 tracker_admin = request.url.path == "/api/trackers" or (request.url.path.startswith("/api/trackers/") and request.method == "PUT")
-                if public["role"] != "administrator" and (tracker_admin or request.url.path in {"/api/vpn", "/api/download-settings"} or request.url.path.startswith(("/api/accounts", "/api/feeds", "/api/settings", "/api/runtime"))):
+                if public["role"] != "administrator" and (tracker_admin or request.url.path in {"/api/vpn", "/api/download-settings", "/api/rss-settings"} or request.url.path.startswith(("/api/accounts", "/api/feeds", "/api/settings", "/api/runtime"))):
                     raise HTTPException(403, "App administrator access required")
         if request.method not in {"GET", "HEAD", "OPTIONS"} and not secrets.compare_digest(request.headers.get("X-MediaSeed-CSRF", ""), session["csrf"]):
             raise HTTPException(403, "Session verification failed")
@@ -375,7 +380,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/healthz")
     def health():
-        return {"status": "healthy", "version": "0.1.13"}
+        return {"status": "healthy", "version": "0.1.14"}
 
     @app.get("/api/auth/status")
     async def status(request: Request):
@@ -548,6 +553,32 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             result = await queue_observation(force=True)
             if result["maxActiveDownloads"] != body.maxActiveDownloads or not result["queueingEnabled"]:
                 raise HTTPException(503, "The download limit could not be verified. Refresh the settings before trying again.")
+            return result
+
+    @app.get("/api/rss-settings")
+    async def rss_settings(session=Depends(authorized)):
+        try:
+            preferences = (await qbit("/api/v2/app/preferences")).json()
+        except ValueError:
+            raise HTTPException(503, "RSS settings are unavailable. Connect the torrent client and try again.") from None
+        minutes = preferences.get("rss_refresh_interval") if isinstance(preferences, dict) else None
+        if type(minutes) is not int or not 1 <= minutes <= 1440:
+            raise HTTPException(503, "RSS settings are unavailable. Connect the torrent client and try again.")
+        return {"rssRefreshMinutes": minutes}
+
+    @app.put("/api/rss-settings")
+    async def save_rss_settings(body: RssSettings, session=Depends(authorized)):
+        async with credit.lock:
+            if vpn_url:
+                observed = await vpn_status()
+                if "rss-settings" not in observed.get("torrentCapabilities", []):
+                    raise HTTPException(409, "Changing the RSS interval requires MediaVPN 0.2.19 or newer. Update MediaVPN separately.")
+                await vpn_request("rss", "PUT", body.model_dump())
+            else:
+                await qbit("/api/v2/app/setPreferences", "POST", {"json": json.dumps({"rss_refresh_interval": body.rssRefreshMinutes})})
+            result = await rss_settings(session=session)
+            if result["rssRefreshMinutes"] != body.rssRefreshMinutes:
+                raise HTTPException(503, "The RSS interval could not be verified. Refresh the settings before trying again.")
             return result
 
     @app.get("/api/hub/overview")

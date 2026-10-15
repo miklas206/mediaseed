@@ -46,6 +46,9 @@
     const downloadsPanel = document.createElement('section'); downloadsPanel.className = 'app-settings-panel';
     downloadsPanel.innerHTML = '<h3 data-i18n="Download queue">Download queue</h3><form id="download-settings-form"><label><span data-i18n="Simultaneous downloads">Simultaneous downloads</span><input id="max-active-downloads" type="number" min="1" max="100" step="1" required></label><p class="muted" data-i18n="RSS and manual torrents share this limit. File checking has its own queue.">RSS and manual torrents share this limit. File checking has its own queue.</p><p id="download-settings-status" role="status"></p><button id="save-download-settings" type="submit" data-i18n="Save download settings">Save download settings</button></form>';
     settings.insertBefore(downloadsPanel, localMessage);
+    const rssPanel = document.createElement('section'); rssPanel.className = 'app-settings-panel';
+    rssPanel.innerHTML = '<h3 data-i18n="RSS refresh">RSS refresh</h3><form id="rss-settings-form"><label><span data-i18n="Fetch RSS every (minutes)">Fetch RSS every (minutes)</span><input id="rss-refresh-minutes" type="number" min="1" max="1440" step="1" required></label><p class="muted" data-i18n="Default: 5 minutes. Follow the minimum interval required by your tracker. This applies to all MediaSeed feeds; downloaded entries are checked approximately every 15 seconds.">Default: 5 minutes. Follow the minimum interval required by your tracker. This applies to all MediaSeed feeds; downloaded entries are checked approximately every 15 seconds.</p><p id="rss-settings-status" role="status"></p><button id="save-rss-settings" type="submit" data-i18n="Save RSS settings">Save RSS settings</button></form>';
+    settings.insertBefore(rssPanel, localMessage);
   }
 
   button.addEventListener('click',()=>{localMessage.hidden=true;settings.showModal();window.dispatchEvent(new Event('mediaseed-settings-open'));});
@@ -95,6 +98,7 @@
   const inheritedName = document.createElement('span'); inheritedName.className = 'managed-theme-name'; inheritedName.hidden = true; control.append(inheritedName);
   function label() {
     const da=root.lang==='da';
+    for (const node of settings.querySelectorAll('[data-i18n]')) node.textContent = globalThis.MediaAppI18n?.t(node.dataset.i18n) || node.dataset.i18n;
     settings.querySelector('h2').textContent=da?'Indstillinger':'Settings';
     button.querySelector('span').textContent=da?'Indstillinger':'Settings';button.title=da?'Indstillinger':'Settings';button.setAttribute('aria-label',button.title);
     close.setAttribute('aria-label',da?'Luk indstillinger':'Close settings');

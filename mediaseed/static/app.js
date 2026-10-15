@@ -866,3 +866,21 @@ window.addEventListener('mediaseed-settings-open', async () => {
     finally {button.disabled = appRole !== 'administrator';}
   };
 });
+
+window.addEventListener('mediaseed-settings-open', async () => {
+  const form = document.querySelector('#rss-settings-form'); if (!form) return;
+  const input = document.querySelector('#rss-refresh-minutes'), button = document.querySelector('#save-rss-settings'), status = document.querySelector('#rss-settings-status');
+  button.disabled = true; input.disabled = true; status.textContent = t('Loading RSS settings...');
+  try {
+    const settings = await api('rss-settings'); input.value = settings.rssRefreshMinutes;
+    input.disabled = appRole !== 'administrator'; button.disabled = appRole !== 'administrator';
+    status.textContent = appRole !== 'administrator' ? t('Only an administrator can change the RSS interval.') : t('Current interval: {0} minutes', {0: settings.rssRefreshMinutes});
+  } catch (error) {status.textContent = errorLabels[error.message] || t(error.message);}
+  form.onsubmit = async event => {
+    event.preventDefault(); if (button.disabled) return;
+    button.disabled = true; input.disabled = true;
+    try { const saved = await api('rss-settings', {rssRefreshMinutes: Number(input.value)}, 'PUT'); input.value = saved.rssRefreshMinutes; status.textContent = t('Current interval: {0} minutes', {0: saved.rssRefreshMinutes}); showNotification(t('RSS interval saved.'), 'success'); }
+    catch (error) {notify(error);}
+    finally {button.disabled = appRole !== 'administrator'; input.disabled = appRole !== 'administrator';}
+  };
+});
