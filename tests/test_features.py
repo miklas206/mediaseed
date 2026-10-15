@@ -98,6 +98,18 @@ def test_torrent_details_policy_and_early_stop(tmp_path):
         assert result.status_code == 200
         assert "passkey" not in result.text and "/secret" not in result.text
         assert result.json()["files"][0]["name"] == "file.iso"
+        calls.clear()
+        overview = client.get(f"/api/torrents/{identifier}/details?section=overview")
+        assert overview.status_code == 200 and 'files' not in overview.json()
+        assert [r.url.path for r in calls if not r.url.path.endswith('/login')] == ['/api/v2/torrents/properties']
+        calls.clear()
+        assert client.get(f"/api/torrents/{identifier}/details?section=files").json()['files'][0]['name'] == 'file.iso'
+        assert [r.url.path for r in calls if not r.url.path.endswith('/login')] == ['/api/v2/torrents/files']
+        calls.clear()
+        connections = client.get(f"/api/torrents/{identifier}/details?section=connections")
+        assert connections.status_code == 200 and 'passkey' not in connections.text
+        assert {r.url.path for r in calls if not r.url.path.endswith('/login')} == {'/api/v2/torrents/trackers','/api/v2/sync/torrentPeers'}
+
         assert client.post("/api/torrents/stop", json={"torrent_hash": identifier}).status_code == 409
         assert not any(request.url.path.endswith("/stop") for request in calls)
         assert client.post("/api/torrents/remove", json={"torrent_hash": identifier, "confirm_early": True}).status_code == 200

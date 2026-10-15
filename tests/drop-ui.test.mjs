@@ -242,7 +242,7 @@ test('file picker accumulates selections and ignores duplicates', async () => {
   picker.files = [torrent('One.torrent'), torrent('Two.torrent')]; picker.onchange();
   picker.files = [torrent('Two.torrent'), torrent('Three.torrent')]; picker.onchange();
   assert.equal(vm.runInContext('torrentFiles.length', context), 3);
-  assert.equal(find('#seed-preview-button').disabled, true);
+  assert.equal(find('#seed-preview-button').disabled, false);
   await form.onsubmit({preventDefault() {}});
   assert.equal(uploads.length, 3);
   await form.onsubmit({preventDefault() {}});

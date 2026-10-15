@@ -17,6 +17,7 @@ from mediaseed.covers import Covers
 from mediaseed.rss_worker import RssWorker
 from mediaseed.ratio_scout import RatioScout, RatioSettings
 from mediaseed.activity import Activity
+from mediaseed import feed_uploads
 
 
 class SeedingPolicy(BaseModel):
@@ -295,14 +296,18 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
                 discount = evidence.get("freeleech") if evidence.get("tracker") == account["name"] else None
                 charged = size * (1 - discount / 100) if discount in {0,25,50,75,100} else size
                 estimates.append({"name": account["name"], "current": uploaded / downloaded if downloaded else None,
-                                  "projected": uploaded / (downloaded + charged) if downloaded + charged else None})
+                                  "projected": uploaded / (downloaded + charged) if downloaded + charged else None, "accountId": account["id"], "uploaded":uploaded, "downloaded":downloaded, "charged":charged})
         return {"name": metadata["name"], "size": size, "estimates": estimates}
 
     @app.get("/api/feeds/{identifier}/history")
-    def feed_history(identifier: str, session=Depends(authorized)):
+    def feed_history(identifier: str, page: int = Query(default=1,ge=1,le=100000), pageSize: int = Query(default=25,ge=1,le=50), session=Depends(authorized)):
         if not any(row["id"] == identifier for row in rows("feeds")):
             raise HTTPException(404, "Feed not found")
-        return {"entries": rss_worker.history(identifier) if rss_worker else []}
+        with database() as db:
+            stats = feed_uploads.summary(db,identifier)
+            count = stats['downloads']
+            values = db.execute("SELECT hash,title,added,credited FROM rss_downloads WHERE feed=? ORDER BY added DESC,hash LIMIT ? OFFSET ?", (identifier,pageSize,(page-1)*pageSize)).fetchall()
+        return {"entries":[{"hash":h,"title":title or h,"created":at,"status":"added","creditedUploadedBytes":uploaded} for h,title,at,uploaded in values],"page":page,"pageSize":pageSize,"total":count,"upload":stats}
 
     @app.get("/api/covers/{identifier}")
     def cover(identifier: str, session=Depends(authorized)):
@@ -376,12 +381,22 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         return {**observed, "rssWorker": "vpn_bound" if rss_worker and observed.get("downloadsEnabled") else "blocked", "trackerSync": "configured" if rows("trackers") else "not_configured"}
 
     @app.get("/api/torrents/{identifier}/details")
-    async def details(identifier: str, session=Depends(authorized)):
+    async def details(identifier: str, section: Literal["all","overview","files","connections"] = "all", session=Depends(authorized)):
         identifier = torrent_hash(identifier)
+        if section == "files":
+            files = await read_json("/api/v2/torrents/files", {"hash":identifier})
+            if not isinstance(files,list): raise HTTPException(503,"Invalid torrent details")
+            return {"files":[{key:row.get(key) for key in ("index","name","size","progress","priority")} for row in files[:1000]]}
+        if section == "connections":
+            trackers,peers = await asyncio.gather(read_json("/api/v2/torrents/trackers",{"hash":identifier}),read_json("/api/v2/sync/torrentPeers",{"hash":identifier}))
+            if not isinstance(trackers,list) or not isinstance(peers,dict) or not isinstance(peers.get("peers",{}),dict): raise HTTPException(503,"Invalid torrent details")
+            return {"trackers":[{"host":urlsplit(row.get("url","")).hostname or "DHT / PeX / LSD","status":row.get("status"),"num_peers":row.get("num_peers")} for row in trackers[:100]],"peers":[{key:row.get(key) for key in ("ip","port","client","progress","dl_speed","up_speed")} for row in list(peers.get("peers",{}).values())[:200]]}
         properties = await read_json("/api/v2/torrents/properties", {"hash": identifier})
         if not isinstance(properties, dict):
             raise HTTPException(503, "Invalid torrent properties")
         allowed = {"total_size", "total_downloaded", "total_uploaded", "seeding_time", "share_ratio", "addition_date", "completion_date", "peers", "seeds", "dl_limit", "up_limit", "pieces_have", "pieces_num"}
+        if section == "overview":
+            return {"properties":{key:value for key,value in properties.items() if key in allowed},"downloadFolder":storage.describe(properties.get("save_path")) if storage else None,"cleanup":cleanup.public(identifier) if cleanup else {"mode":"never"},"credit":credit.observe({"hash":identifier,"uploaded":properties.get("total_uploaded"),"downloaded":properties.get("total_downloaded"),"ratio":properties.get("share_ratio"),"added_on":properties.get("addition_date")}) if credit else {}}
         files = await read_json("/api/v2/torrents/files", {"hash": identifier})
         trackers = await read_json("/api/v2/torrents/trackers", {"hash": identifier})
         peers = await read_json("/api/v2/sync/torrentPeers", {"hash": identifier})
@@ -404,9 +419,13 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         await qbit("/api/v2/torrents/setShareLimits", "POST", {"hashes": torrent_hash(identifier), "ratioLimit": str(body.ratio), "seedingTimeLimit": "2940", "inactiveSeedingTimeLimit": "-1", "shareLimitAction": "Stop"})
         return {"saved": True, "ratio": body.ratio, "seedingMinutes": 2940}
 
+    def feed_summary(identifier):
+        with database() as db:
+            return feed_uploads.summary(db,identifier)
+
     @app.get("/api/feeds")
     def feeds(session=Depends(authorized)):
-        return [{key: value for key, value in row.items() if key != "url"} | {"configured": True, "paused": not row.get("enabled", False), "status": rss_worker.reports.get(row["id"], "Afventer VPN/feedposter") if rss_worker and row.get("enabled") else "Pauset"} for row in rows("feeds")]
+        return [{key: value for key, value in row.items() if key != "url"} | {"configured": True, "upload":feed_summary(row["id"]), "paused": not row.get("enabled", False), "status": rss_worker.reports.get(row["id"], "Afventer VPN/feedposter") if rss_worker and row.get("enabled") else "Pauset"} for row in rows("feeds")]
 
     @app.put("/api/feeds/{identifier}/state")
     async def feed_state(identifier: str, body: FeedState, session=Depends(authorized)):
@@ -503,7 +522,7 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
             cached = tracker_cache.get(account["id"])
             fresh = cached and cached["key"] == account["api_key"] and time.monotonic() - cached["checked"] < 360
             public = cached["public"] if fresh else {}
-            result.append({"name": account["name"], "status": public.get("status", "pending"), "stats": public.get("stats"), "checkedAt": public.get("checkedAt")})
+            result.append({"id": account["id"], "name": account["name"], "status": public.get("status", "pending"), "stats": public.get("stats"), "checkedAt": public.get("checkedAt")})
         return result
 
     app.state.tracker_overview = tracker_overview

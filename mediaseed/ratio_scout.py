@@ -24,8 +24,8 @@ class RatioSettings(BaseModel):
     query: str = Field(default="", max_length=120, pattern=r"^[^\x00-\x1f]*$")
     location: str = Field(default="local", pattern=r"^[A-Za-z0-9-]{1,80}$")
     folder: str = Field(default="", max_length=1000)
-    minSeeders: int = Field(default=1, ge=1, le=1000000, strict=True)
-    maxSeeders: int = Field(default=2, ge=1, le=1000000, strict=True)
+    minSeeders: int = Field(default=1, ge=0, le=1000000, strict=True)
+    maxSeeders: int = Field(default=2, ge=0, le=1000000, strict=True)
     minLeechers: int = Field(default=20, ge=1, le=1000000, strict=True)
     requireDouble: bool = Field(default=False, strict=True)
     maxGiB: int = Field(default=20, ge=1, le=10000, strict=True)
@@ -277,7 +277,7 @@ class RatioScout:
             "status": self.status,
             "settings": settings.model_dump(),
             "candidates": sorted(
-                candidates, key=lambda r: (-r["leechers"] / r["seeders"], r["size"])
+                candidates, key=lambda r: (-r["leechers"] / max(1, r["seeders"]), r["size"])
             )[:50],
             "dailyUsed": count,
             "scanMinutes": settings.scanMinutes,
@@ -346,7 +346,7 @@ class RatioScout:
                         m
                         for m in sorted(
                             matches,
-                            key=lambda r: (-r["leechers"] / r["seeders"], r["size"]),
+                            key=lambda r: (-r["leechers"] / max(1, r["seeders"]), r["size"]),
                         )
                         if m["hash"] not in imported
                     ]

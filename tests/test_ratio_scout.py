@@ -294,7 +294,7 @@ def test_automatic_mode_is_explicit_and_survives_restart_with_dedup(rig):
 @pytest.mark.parametrize(
     "changes",
     [
-        {"minSeeders": 0},
+        {"minSeeders": -1},
         {"minSeeders": 3, "maxSeeders": 2},
         {"dailyLimit": True},
         {"enabled": True},
@@ -562,3 +562,14 @@ def test_old_settings_upgrade_defaults_and_configurable_scan_interval(rig):
 def test_scan_interval_validation(minutes):
     with pytest.raises(ValidationError):
         RatioSettings(scanMinutes=minutes)
+
+
+def test_zero_seeders_can_be_saved_ranked_and_reviewed(rig):
+    scout,settings,source,_,_=rig
+    source['attributes']['seeders']=0
+    async def check():
+        await scout.save(settings.model_copy(update={'minSeeders':0,'maxSeeders':0}))
+        await scout.tick()
+        rows=scout.public()['candidates']
+        assert len(rows)==1 and rows[0]['seeders']==0
+    asyncio.run(check())

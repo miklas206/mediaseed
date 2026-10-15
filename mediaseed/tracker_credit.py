@@ -15,6 +15,7 @@ import time
 
 from fastapi import HTTPException
 from mediaseed.cleanup import source_hashes
+from mediaseed import feed_uploads
 
 
 def number(value):
@@ -36,6 +37,7 @@ class TrackerCredit:
         self._connection = None
         self.cleanup = lambda identifier: {"mode": "never"}
         with database() as db:
+            feed_uploads.initialize(db)
             db.execute("CREATE TABLE IF NOT EXISTS torrent_credit (hash TEXT PRIMARY KEY, payload TEXT NOT NULL)")
 
     @contextmanager
@@ -101,6 +103,7 @@ class TrackerCredit:
         evidence = self.evidence(identifier) or record.get("policy", {})
         if evidence:
             record["policy"] = evidence
+        tracker_name = evidence.get("tracker") if isinstance(evidence.get("tracker"),str) and evidence.get("infoHash")==identifier else None
         created = publication(evidence.get("createdAt"))
         # Like FjordSeed, allow 30 minutes for announce/clock skew. The API
         # publication time, never the local add time, starts the 24-hour rule.
@@ -116,7 +119,7 @@ class TrackerCredit:
             # A different added_on identity is reset separately above.
             return {"credited_ratio": 0, "credited_uploaded": None, "green_uploaded": None,
                     "green_pending": True, "green_active": False, "green_until": until,
-                    "credit_observation_stale": True, "ratio_limit": record["target"], "native_ratio_limit": record["target"] * 2}
+                    "credit_observation_stale": True, "tracker_name": tracker_name, "account_credited_uploaded": record.get("account_credited_uploaded"), "account_credit_estimated":True, "ratio_limit": record["target"], "native_ratio_limit": record["target"] * 2}
         delta = max(0, uploaded - record["uploaded"])
         if not exempt and until and (record["at"] < until or not record.get("classified")) and (not added or added < until):
             record["discounted"] += delta
@@ -139,6 +142,16 @@ class TrackerCredit:
             denominator = uploaded / row["ratio"]
         active = bool(not exempt and until and until > now)
         native = record["target"] * 2 if active or pending else record["target"] + (discounted / 2 / denominator if denominator else 0)
+        # Bonus credit is accumulated only across two fresh matching observations.
+        # Older unobserved bonus periods cannot be reconstructed from today's badge.
+        fresh_double = evidence.get("doubleUpload") is True and 0 <= now-number(evidence.get("checkedAt")) < 300
+        bonus = number(record.get("account_bonus"))
+        base_delta = min(delta,max(0,credited-number(record.get("account_base",credited))))
+        if fresh_double and record.get("account_double") and record.get("at",0) >= number(evidence.get("checkedAt")):
+            bonus += base_delta
+        record.update(account_bonus=bonus,account_double=fresh_double,account_base=credited,account_credited_uploaded=credited+bonus)
+        with self.connection() as db:
+            feed_uploads.observe(db,row,credited+bonus)
         record.update(uploaded=uploaded, at=now, classified=not pending)
         raw_seconds = row.get("seeding_time")
         if type(raw_seconds) in (int, float) and math.isfinite(raw_seconds) and raw_seconds >= 0:
@@ -152,12 +165,13 @@ class TrackerCredit:
             record["added_on"] = added
         self.save(identifier, record)
         return {"credited_ratio": credited / denominator if denominator else number(row.get("ratio")) / (2 if active or pending else 1),
-                "credited_uploaded": credited, "green_uploaded": discounted, "green_until": until,
+                "credited_uploaded": credited, "account_credited_uploaded": credited+bonus, "account_credit_estimated": True, "green_uploaded": discounted, "green_until": until,
                 "green_active": active, "green_pending": pending, "green_history_estimated": bool(record.get("estimated")),
                 "ratio_limit": record["target"], "native_ratio_limit": native,
                 "green_rule_until": created + 24 * 3600 if created and not exempt else None,
                 **({"seeding_time": record["seed_clock"]["seconds"]} if "seed_clock" in record else {}),
                 "tracker_benefits": evidence if 0 <= now - number(evidence.get("checkedAt")) < 300 else None,
+                "tracker_name": tracker_name,
                 "tracker_rule": "NordicBytes Green: 0,5× upload i 24 timer + 30 minutters sikkerhedsmargin"}
 
     async def request(self, path, method="GET", payload=None, files=None):

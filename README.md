@@ -1,5 +1,7 @@
 # MediaSeed
 
+MediaSeed 0.1.19 adds a compact add dialog with automatic batch ratio preview, lazy torrent details, estimated credited upload per torrent/feed, downloaded-only RSS history in a paginated popup, zero-seeder rules and stable tracker names. See [behavior and upgrade notes](docs/torrent-and-feed-ux.md).
+
 MediaSeed 0.1.18 reduces ratio discovery to ten sorted results per ten-minute interval by default, with a configurable 5–60 minute interval, persisted scheduling and smaller batches after oversized responses. See [ratio discovery](docs/ratio-scout.md).
 
 MediaSeed 0.1.17 balances the workspace to the MediaHub Apps width, aligns icon navigation with the Hub, standardizes route/transfer SVG icons and adds a configured return-to-Hub link. Actionable status, automatic activity and compact RSS/tracker editing remain. See [behavior and upgrade notes](docs/responsive-workspace.md).

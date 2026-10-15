@@ -11,6 +11,7 @@ from fastapi import HTTPException
 
 from mediaseed.cleanup import source_hashes
 from mediaseed.activity import Activity
+from mediaseed import feed_uploads
 
 
 def title_matches(title, feed):
@@ -48,6 +49,9 @@ class RssWorker:
         with database() as connection:
             connection.execute("CREATE TABLE IF NOT EXISTS rss_history (token TEXT PRIMARY KEY, feed TEXT NOT NULL, status TEXT NOT NULL, created REAL NOT NULL, torrent_hash TEXT)")
             connection.execute("CREATE TABLE IF NOT EXISTS rss_observations (feed TEXT NOT NULL, token TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, created REAL NOT NULL, PRIMARY KEY(feed,token))")
+
+        with database() as connection:
+            feed_uploads.migrate(connection)
 
     def observe(self, feed, token, article, status):
         if status in {'added', 'import_unconfirmed', 'metadata_unknown', 'badges_unverified', 'too_large', 'size_unknown'}:
@@ -196,6 +200,7 @@ class RssWorker:
             identifier = identifiers[0].lower()
             self.observe(feed, observation, article, 'added')
             with self.database() as connection:
+                feed_uploads.record(connection, feed["id"], identifier, article.get("title", ""), time.time())
                 connection.execute("UPDATE rss_history SET status='added',torrent_hash=? WHERE token IN (?,?)", (identifier, token, file_token))
             current = next((row for row in self.rows("feeds") if row["id"] == feed["id"]), None)
             if current == feed and (await self.vpn_status()).get("downloadsEnabled"):

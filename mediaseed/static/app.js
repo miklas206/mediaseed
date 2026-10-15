@@ -58,6 +58,7 @@ async function api(path, body, method) {
   const response = await fetch('/api/' + path, {method: method || (body ? 'POST' : 'GET'), headers: {'Content-Type': 'application/json', 'X-MediaSeed-CSRF': csrf}, ...(body ? {body: JSON.stringify(body)} : {})});
   const result = await response.json();
   if (!response.ok) throw Object.assign(new Error(typeof result.detail === 'string' ? result.detail : t("Check the fields and try again.")), {status: response.status});
+  if((method || (body ? 'POST' : 'GET'))!=='GET' && typeof seedDetailCache!=='undefined')seedDetailCache.clear();
   return result;
 }
 globalThis.MediaAppTheme.setOverrideHandler(themeOverride => api('auth/preferences', {themeOverride}, 'PUT'));
@@ -430,7 +431,8 @@ function trackerCreditView(row) {
   const panel = element('section', undefined, 'tracker-credit');
   const title = row.credit_observation_stale ? t("Waiting for traffic measurement · ratio goal protected") : row.green_pending ? t("Waiting for tracker rules · provisional 0.5× credit") : row.green_active ? t("Green period · 0.5× upload") : row.green_uploaded > 0 ? t("Green period ended · new uploads count 1×") : t("Tracker rules · uploads count 1×");
   panel.append(element('strong', title));
-  panel.append(element('p', t("Raw upload {0} · Estimated credited upload {1} · Credited ratio {2} / goal {3}", {0: trackerBytes(row.uploaded), 1: trackerBytes(row.credited_uploaded), 2: trackerNumber(row.credited_ratio), 3: trackerNumber(row.ratio_limit)})));
+  const accountUpload=row.account_credited_uploaded??row.credited_uploaded;panel.append(element('p',t('Estimated credited upload')+': '+(typeof accountUpload==='number'?'≈ '+trackerBytes(accountUpload):t('Unknown'))));
+  panel.append(element('p', t("Raw upload {0} · Conservative seeding credit {1} · Goal ratio {2} / {3}", {0: trackerBytes(row.uploaded), 1: trackerBytes(row.credited_uploaded), 2: trackerNumber(row.credited_ratio), 3: trackerNumber(row.ratio_limit)})));
   if (row.green_pending) panel.append(element('p', row.credit_observation_stale ? t("Waiting for a stable traffic measurement. An old measurement or reset counter must not trigger a ratio goal.") : t("Waiting for the tracker to confirm the creation date. Ratio and automatic cleanup provisionally use half upload credit."), 'muted'));
   if (row.green_rule_until) panel.append(element('p', t("The first 24 hours end at {0}. MediaSeed uses a 30-minute safety margin until {1}.", {0: new Date(row.green_rule_until * 1000).toLocaleString(locale()), 1: new Date(row.green_until * 1000).toLocaleTimeString(locale())}), 'muted'));
   if (row.green_uploaded > 0) panel.append(element('p', t("{0} of uploads were recorded at 0.5×. That portion retains half credit after the period ends.", {0: trackerBytes(row.green_uploaded)}), 'muted'));
@@ -590,7 +592,7 @@ async function loadSources(kind) {
     if (kind === 'feeds') item.append(element('h2', row.name), element('p', `${row.location ? t(feedLocations.find(place => place.id === row.location)?.label || (row.location === 'local' ? 'Local downloads' : row.location)) + ' /' + (row.folder || '') : row.folder || '/downloads'} · Ratio ${row.ratio} · ${row.paused ? t("Paused") : t("Active")} · ${t(row.status || '')}`, 'muted'));
     if (kind === 'feeds') item.append(element('p', row.start_at ? t('Only fetch RSS entries from: {0}', {0: new Date(row.start_at).toLocaleString()}) : t('No start date selected'), 'muted'));
     const actions = element('div', undefined, 'actions');
-    if (kind === 'feeds') { item.append(element('p', [row.include?.join(', '), row.exclude?.length ? t('Avoid') + ': ' + row.exclude.join(', ') : '', row.max_bytes ? t('Maximum size') + ': ' + trackerBytes(row.max_bytes) : '', row.badges?.join(' ? ')].filter(Boolean).join(' ? ') || t('No additional filters'), 'seed-feed-rules')); actions.append(command(t('History'), () => richFeedHistory(row.id, row.name))); }
+    if (kind === 'feeds') { item.append(element('p',t('Estimated credited upload')+': '+(typeof row.upload?.creditedUploadedBytes==='number'?'≈ '+trackerBytes(row.upload.creditedUploadedBytes):t('Unknown'))+(row.upload?.unknownDownloads?' · '+t('{0} downloads without measurements',{0:row.upload.unknownDownloads}):''),'feed-upload-total'));item.append(element('p', [row.include?.join(', '), row.exclude?.length ? t('Avoid') + ': ' + row.exclude.join(', ') : '', row.max_bytes ? t('Maximum size') + ': ' + trackerBytes(row.max_bytes) : '', row.badges?.join(' ? ')].filter(Boolean).join(' ? ') || t('No additional filters'), 'seed-feed-rules')); actions.append(command(t('History'), () => richFeedHistory(row.id, row.name))); }
     if (appRole === 'administrator') {
       if (kind === 'feeds') actions.append(command(row.paused ? 'Aktivér' : 'Pause', async () => { await api(`feeds/${row.id}/state`, {enabled: row.paused}, 'PUT'); await loadSources('feeds'); showNotification(row.paused ? t("Feed enabled through VPN.") : t("Feed paused. Existing torrents are preserved."), 'success'); }));
       actions.append(command(t("Edit"), () => { globalThis.MediaSeedWorkspace?.openEditor(kind);  const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); feedEditing = kind === 'feeds'; form.reset(); feedEditing = false; for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } if (kind === 'feeds') { for (const key of ['include','exclude']) form.elements.namedItem(key).value = (row[key] || []).join(', '); for (const option of form.elements.namedItem('badges').options) option.selected = (row.badges || []).includes(option.value); globalThis.MediaSeedWorkspace?.syncBadges(); form.elements.namedItem('max_gib').value = row.max_bytes ? row.max_bytes / (1024 ** 3) : ''; form.elements.namedItem('url').placeholder = t('Saved feed address is kept. Fill in only to change it.'); void loadFeedLocations(row.location || 'local', row.folder || '').catch(notify); } form.querySelector('input[name="name"]').focus(); }), command(t("Remove"), async () => { if (!confirm(t("Remove {0}? Files and torrents are preserved.", {0: row.name}))) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); }));
@@ -658,7 +660,7 @@ function renderTorrentFiles() {
   }
   document.querySelector('#file-name').textContent = torrentFiles.length === 1 ? torrentFiles[0].file.name : t('{0} files selected', {0: torrentFiles.length});
   document.querySelector('#torrent-batch-status').textContent = t('{0} of {1} files added', {0: torrentFiles.filter(item => item.state === 'added').length, 1: torrentFiles.length});
-  document.querySelector('#seed-preview-button').disabled = addingTorrent || (addForm.elements.namedItem('mode').value === 'file' && torrentFiles.length > 1);
+  document.querySelector('#seed-preview-button').disabled = addingTorrent;
   updateAddStart();
 }
 function selectTorrentFiles(files) {
@@ -697,8 +699,8 @@ function setAddMode() {
   document.querySelector('#magnet-field').hidden = fileMode; fileField.hidden = !fileMode; document.querySelector('#torrent-file-selection').hidden = !fileMode;
   document.querySelector('#add-magnet').disabled = fileMode; document.querySelector('#add-magnet').required = !fileMode;
   fileInput.disabled = !fileMode; fileInput.required = fileMode && !torrentFiles.length;
-  document.querySelector('#seed-preview-button').disabled = addingTorrent || (fileMode && torrentFiles.length > 1);
-  updateAddStart();
+  document.querySelector('#seed-preview-button').disabled = addingTorrent;
+  updateAddStart();globalThis.MediaSeedAdd?.changed();
 }
 function updateAddStart() {
   const complete = addForm.elements.namedItem('mode').value === 'file' && torrentFiles.length > 0 && torrentFiles.every(item => item.state === 'added');
@@ -748,7 +750,7 @@ addDialog.addEventListener('close', () => { document.body.append(document.queryS
 function closeAdd() { if (!addingTorrent) addDialog.close(); }
 document.querySelector('#close-add').onclick = closeAdd; document.querySelector('#cancel-add').onclick = closeAdd;
 addDialog.addEventListener('cancel', event => { if (addingTorrent) event.preventDefault(); });
-document.querySelector('#add-magnet').addEventListener('input', () => {richPreview.request++; document.querySelector('#seed-add-preview').replaceChildren();});
+document.querySelector('#add-magnet').addEventListener('input', () => {richPreview.request++; document.querySelector('#seed-add-preview').replaceChildren();globalThis.MediaSeedAdd?.changed();});
 fileInput.onchange = () => { if (!addingTorrent) selectTorrentFiles(Array.from(fileInput.files)); };
 fileField.ondragover = event => { event.preventDefault(); if (!addingTorrent) fileField.classList.add('dragging'); };
 fileField.ondragleave = () => fileField.classList.remove('dragging');

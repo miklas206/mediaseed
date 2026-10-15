@@ -54,7 +54,7 @@ def test_feed_rules_persist_and_blank_url_keeps_private_address(tmp_path):
         client.cookies.update(cookies)
         public = client.get('/api/feeds').json()[0]
         assert public['max_bytes']==1024 and public['badges']==['freeleech']
-        assert client.get('/api/feeds/'+identifier+'/history').json()=={'entries':[]}
+        assert client.get('/api/feeds/'+identifier+'/history').json()['entries']==[]
     with sqlite3.connect(tmp_path/'mediaseed.sqlite') as connection:
         assert 'private-passkey' in connection.execute("SELECT payload FROM settings WHERE id=?",(identifier,)).fetchone()[0]
 
@@ -93,3 +93,24 @@ def test_feed_filters_history_and_existing_upgrade_preserve_intent(tmp_path, sce
         assert history[0]['status']=='added'
         asyncio.run(restarted.process(feed,item))
         assert sum(path.endswith('/add') for path in calls)==1
+
+
+def test_downloaded_feed_history_is_paginated_deduplicated_and_keeps_credit(tmp_path):
+    from mediaseed import feed_uploads
+    app=create_app(tmp_path,'http://testserver')
+    with TestClient(app) as client:
+        sign_in(client)
+        identifier=client.post('/api/feeds',json={'name':'Feed','url':'https://nordicbytes.org/rss/private'}).json()['id']
+        with sqlite3.connect(tmp_path/'mediaseed.sqlite') as db:
+            for index in range(28):
+                feed_uploads.record(db,identifier,f'{index:040x}',f'Release {index}',index)
+                db.execute('UPDATE rss_downloads SET credited=100,last_value=100 WHERE feed=? AND hash=?',(identifier,f'{index:040x}'))
+            db.execute('INSERT INTO rss_observations VALUES (?,?,?,?,?)',(identifier,'skipped','Filtered release','title_filtered',100))
+        page=client.get(f'/api/feeds/{identifier}/history').json()
+        assert len(page['entries'])==25 and page['total']==28
+        assert page['upload']['creditedUploadedBytes']==2800
+        assert all(row['status']=='added' for row in page['entries'])
+        assert 'Filtered release' not in str(page)
+        assert len(client.get(f'/api/feeds/{identifier}/history?page=2').json()['entries'])==3
+        assert client.get('/api/feeds').json()[0]['upload']['creditedUploadedBytes']==2800
+        assert client.get(f'/api/feeds/{identifier}/history?page=0').status_code==422

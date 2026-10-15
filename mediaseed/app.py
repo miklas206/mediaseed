@@ -380,7 +380,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/healthz")
     def health():
-        return {"status": "healthy", "version": "0.1.18"}
+        return {"status": "healthy", "version": "0.1.19"}
 
     @app.get("/api/auth/status")
     async def status(request: Request):

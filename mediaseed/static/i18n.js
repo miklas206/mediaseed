@@ -2,6 +2,17 @@
 (() => {
 const messages = {
   "Torrent added": "Torrent tilføjet",
+  "Raw upload {0} · Conservative seeding credit {1} · Goal ratio {2} / {3}": "Faktisk upload {0} · Konservativ seedingkredit {1} · Målratio {2} / {3}",
+  "Estimated credited upload": "Krediteret upload (estimat)",
+  "{0} downloads without measurements": "{0} downloads uden målinger",
+  "Account ratio after adding": "Kontoratio efter tilføjelse",
+  "Current ratio → Estimated ratio": "Nuværende ratio → Forventet ratio",
+  "Choose files or paste a magnet to see the estimated account ratio.": "Vælg filer eller indsæt et magnetlink for at se forventet kontoratio.",
+  "Refresh estimate": "Opdater beregning",
+  "Folder help": "Hjælp til mappevalg",
+  "Seeding and VPN": "Seeding og VPN",
+  "No downloaded torrents in this feed yet.": "Ingen hentede torrents i dette feed endnu.",
+  "Updated {0}": "Opdateret {0}",
   "Next search: {0}": "Næste søgning: {0}",
   "Search interval (minutes)": "Søgeinterval (minutter)",
   "One small tracker search per interval. Refresh uses saved results.": "Én lille trackersøgning pr. interval. Opdatér bruger gemte resultater.",
@@ -193,7 +204,7 @@ const messages = {
   "Selected torrent files": "Valgte torrentfiler",
   "For individual ratio previews, select one file at a time.": "V\u00e6lg \u00e9n fil ad gangen for at forh\u00e5ndsvise individuelle ratioer.",
 
-  "MediaSeed 0.1.18": "MediaSeed 0.1.18",
+  "MediaSeed 0.1.19": "MediaSeed 0.1.19",
   "Waiting for the next bounded metadata check": "Afventer næste kontrol af torrentoplysninger",
   "Seeding progress": "Seedingfremdrift",
   "Downloaded": "Downloadet",

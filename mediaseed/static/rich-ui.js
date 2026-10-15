@@ -35,8 +35,9 @@ function seedTorrent(row, index) {
   const item = element('article', undefined, 'torrent seed-rich-row'); item.dataset.state = state(row); item.dataset.hash = row.hash;
   const identity = element('div', undefined, 'seed-identity');
   const heading = command(row.name, () => showDetails(row)); heading.className = 'torrent-name'; heading.title = row.name;
-  const info = element('small', `${trackerBytes(row.size)} · ${row.tracker_benefits?.tracker || t('Tracker unknown')} · ${seedSource(row)}`, 'seed-subline');
+  const info = element('small', `${trackerBytes(row.size)} · ${row.tracker_name || row.tracker_benefits?.tracker || t('Tracker unknown')} · ${seedSource(row)}`, 'seed-subline');
   identity.append(heading, info, seedBadges(row));
+  const uploaded=row.account_credited_uploaded??row.credited_uploaded;identity.append(element('small',t('Estimated credited upload')+': '+(typeof uploaded==='number'?'≈ '+trackerBytes(uploaded):t('Unknown')),'seed-upload-credit'));
   const sortKey = document.querySelector('#sort').value;
   const hints = {
     added_on: ['Added', row.added_on > 0 ? new Date(row.added_on * 1000).toLocaleString(locale()) : '—'],
@@ -61,42 +62,49 @@ function seedTorrent(row, index) {
   menu.append(trigger, commands); actions.append(menu);
   item.append(seedPoster(row), identity, transfer, activity, actions); return item;
 }
+const seedDetailCache = new Map();
 let seedDetailRequest = 0;
+function cachedDetail(hash, section, force=false) {
+  const key=csrf+':'+hash+':'+section;
+  if(force)seedDetailCache.delete(key);
+  const saved=seedDetailCache.get(key);
+  if(saved && (saved.pending || Date.now()-saved.at<15000))return saved.promise;
+  const entry={pending:true,at:0};
+  entry.promise=api(`torrents/${hash}/details?section=${section}`).then(data=>{entry.pending=false;entry.at=Date.now();return data;},error=>{if(seedDetailCache.get(key)===entry)seedDetailCache.delete(key);throw error;});
+  seedDetailCache.set(key,entry);while(seedDetailCache.size>60)seedDetailCache.delete(seedDetailCache.keys().next().value);
+  return entry.promise;
+}
 async function richDetails(row) {
-  const request = ++seedDetailRequest; selectedHash = row.hash;
-  document.querySelector('#detail-name').textContent = row.name;
-  document.querySelector('#detail-message').textContent = '';
-  const target = document.querySelector('#detail-data'); target.replaceChildren(element('p', t('Fetching details…'), 'muted'));
-  document.querySelector('#policy-form input').value = Number(row.ratio_limit) >= 1 ? row.ratio_limit : 1;
-  document.querySelector('#policy-form').hidden = true;
-  if (!dialog.open) dialog.showModal();
-  try {
-    const details = await api(`torrents/${row.hash}/details`); if (request !== seedDetailRequest || !dialog.open) return;
-    const credited = {...row, ...details.credit}, hero = element('div', undefined, 'seed-detail-hero');
-    const summary = element('div'); summary.append(element('span', torrentStatus(row.state), 'seed-badge'), seedBadges(credited), element('p', `${trackerBytes(row.size)} · ${seedSource(row)}`, 'muted'));
-    hero.append(seedPoster(row, true), summary);
-    const tabs = element('div', undefined, 'seed-detail-tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', t('Torrent details'));
-    const content = element('div', undefined, 'seed-detail-content'); content.id = 'seed-detail-tabpanel'; content.setAttribute('role','tabpanel'); target.replaceChildren(hero, tabs, content);
-    const overview = () => {
-      const list = element('dl', undefined, 'seed-detail-facts');
-      for (const [label, value] of [[t('Downloaded'), trackerBytes(details.properties.total_downloaded)], [t('Uploaded'), trackerBytes(details.properties.total_uploaded)], [t('Source'), seedSource(row)], [t('Added'), details.properties.addition_date ? new Date(details.properties.addition_date * 1000).toLocaleString(locale()) : '—'], [t('Download folder'), details.downloadFolder ? `${t(details.downloadFolder.label)} · ${details.downloadFolder.path}` : t('Download folder is outside approved storage or unavailable')]]) list.append(element('dt', label), element('dd', value));
-      content.append(list);
-    };
-    const panels = [ ['Overview', overview], ['Seeding', () => { content.append(trackerCreditView(credited)); renderCleanupDetails(details.cleanup, row, content); }],
-      ['Files', () => {
-        if (appRole !== 'viewer') content.append(command(t('Check files'), () => chooseRecheck(row)));
-        content.append(element('p', t('File progress is the last client observation. Check files to verify existing data and detect missing or damaged pieces.'), 'muted'), detailTable(t('Files'), [['name', t('Name')], ['displaySize', t('Size')], ['displayProgress', t('Progress')]], details.files.map(file => ({...file, displaySize: trackerBytes(file.size), displayProgress: typeof file.progress === 'number' ? `${Math.round(file.progress * 100)}%` : '—'})) ));
-      }],
-      ['Connections', () => content.append(detailTable(t('Trackers'), [['host', 'Tracker'], ['status', t('Status')], ['num_peers', 'Peers']], details.trackers), detailTable('Peers', [['ip', 'IP'], ['client', t('Client')], ['progress', t('Progress')]], details.peers))],
-      ['Activity', () => { content.append(element('p', torrentStatus(row.state)), element('p', t('VPN availability is checked before starting. Historical controller events are available in MediaHub Logs.'), 'muted')); renderCleanupDetails(details.cleanup, row, content); }]];
-    function select(index) {
-      content.replaceChildren(); panels[index][1]();
-      content.setAttribute('aria-labelledby', 'seed-detail-tab-' + index);
-      [...tabs.children].forEach((button, i) => {button.setAttribute('aria-selected', String(i === index)); button.tabIndex = i === index ? 0 : -1;});
-      document.querySelector('#policy-form').hidden = index !== 1 || appRole === 'viewer' || (details.cleanup?.mode && details.cleanup.mode !== 'never');
-    }
-    panels.forEach(([name], index) => { const button = command(t(name), () => select(index)); button.id = 'seed-detail-tab-' + index; button.setAttribute('aria-controls','seed-detail-tabpanel'); button.setAttribute('role', 'tab'); button.onkeydown = event => { if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return; event.preventDefault(); const next = (index + (event.key === 'ArrowRight' ? 1 : -1) + panels.length) % panels.length; select(next); tabs.children[next].focus(); }; tabs.append(button); }); select(0);
-  } catch (error) {if (request === seedDetailRequest && dialog.open) target.replaceChildren(element('p', t(error.message), 'muted'));}
+  const request=++seedDetailRequest;selectedHash=row.hash;
+  document.querySelector('#detail-name').textContent=row.name;document.querySelector('#detail-message').textContent='';
+  document.querySelector('#policy-form input').value=Number(row.ratio_limit)>=1?row.ratio_limit:1;
+  document.querySelector('#policy-form').hidden=true;
+  const target=document.querySelector('#detail-data'),hero=element('div',undefined,'seed-detail-hero'),summary=element('div');
+  summary.append(element('span',torrentStatus(row.state),'seed-badge'),seedBadges(row),element('p',`${trackerBytes(row.size)} · ${seedSource(row)}`,'muted'));hero.append(seedPoster(row,true),summary);
+  const controls=element('div',undefined,'actions'),notice=element('small',t('Fetching details…'),'muted'),reload=command(t('Refresh'),()=>load(true));reload.type='button';controls.append(notice,reload);
+  const tabs=element('div',undefined,'seed-detail-tabs'),content=element('div',undefined,'seed-detail-content');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label',t('Torrent details'));content.id='seed-detail-tabpanel';content.setAttribute('role','tabpanel');
+  target.replaceChildren(hero,controls,tabs,content);if(!dialog.open)dialog.showModal();
+  let details={properties:{total_downloaded:row.downloaded,total_uploaded:row.uploaded,addition_date:row.added_on},files:[],trackers:[],peers:[],credit:{}},selected=0,overviewLoaded=false,loadCycle=0;
+  const sectionFor=index=>index===2?'files':index===3?'connections':'overview';
+  function paint(){
+    content.replaceChildren();const credited={...row,...details.credit};
+    if(selected===0){const list=element('dl',undefined,'seed-detail-facts');
+      const amount=credited.account_credited_uploaded??credited.credited_uploaded;
+      for(const [label,value] of [['Downloaded',trackerBytes(details.properties.total_downloaded)],['Uploaded',trackerBytes(details.properties.total_uploaded)],['Estimated credited upload',typeof amount==='number'?'≈ '+trackerBytes(amount):t('Unknown')],['Source',seedSource(row)],['Added',details.properties.addition_date?new Date(details.properties.addition_date*1000).toLocaleString(locale()):'—'],['Download folder',details.downloadFolder?`${t(details.downloadFolder.label)} · ${details.downloadFolder.path}`:overviewLoaded?t('Download folder is outside approved storage or unavailable'):t('Fetching details…')]])list.append(element('dt',t(label)),element('dd',value));content.append(list);
+    } else if(selected===1){content.append(trackerCreditView(credited));if(overviewLoaded)renderCleanupDetails(details.cleanup,row,content);}
+    else if(selected===2){if(appRole!=='viewer')content.append(command(t('Check files'),()=>chooseRecheck(row)));content.append(element('p',t('File progress is the last client observation. Check files to verify existing data and detect missing or damaged pieces.'),'muted'),detailTable(t('Files'),[['name',t('Name')],['displaySize',t('Size')],['displayProgress',t('Progress')]],details.files.map(file=>({...file,displaySize:trackerBytes(file.size),displayProgress:typeof file.progress==='number'?`${Math.round(file.progress*100)}%`:'—'}))));}
+    else if(selected===3)content.append(detailTable(t('Trackers'),[['host','Tracker'],['status',t('Status')],['num_peers','Peers']],details.trackers),detailTable('Peers',[['ip','IP'],['client',t('Client')],['progress',t('Progress')]],details.peers));
+    else {content.append(element('p',torrentStatus(row.state)),element('p',t('VPN availability is checked before starting. Historical controller events are available in MediaHub Logs.'),'muted'));if(overviewLoaded)renderCleanupDetails(details.cleanup,row,content);}
+    [...tabs.children].forEach((button,i)=>{button.setAttribute('aria-selected',String(i===selected));button.tabIndex=i===selected?0:-1;});content.setAttribute('aria-labelledby','seed-detail-tab-'+selected);
+    document.querySelector('#policy-form').hidden=selected!==1||!overviewLoaded||appRole==='viewer'||(details.cleanup?.mode&&details.cleanup.mode!=='never');
+  }
+  async function load(force=false){const section=sectionFor(selected),cycle=++loadCycle;reload.disabled=true;notice.textContent=t('Fetching details…');
+    try{const data=await cachedDetail(row.hash,section,force);if(request!==seedDetailRequest||cycle!==loadCycle||!dialog.open)return;details={...details,...data};if(section==='overview')overviewLoaded=true;if(section===sectionFor(selected)){notice.textContent=t('Updated {0}',{0:new Date(seedDetailCache.get(csrf+':'+row.hash+':'+section)?.at||Date.now()).toLocaleTimeString(locale())});paint();}}
+    catch(error){if(request===seedDetailRequest&&cycle===loadCycle&&dialog.open)notice.textContent=t(error.message);}
+    finally{if(cycle===loadCycle)reload.disabled=false;}
+  }
+  for(const [index,name] of ['Overview','Seeding','Files','Connections','Activity'].entries()){const button=command(t(name),()=>{selected=index;paint();void load();});button.id='seed-detail-tab-'+index;button.setAttribute('role','tab');button.setAttribute('aria-controls',content.id);button.onkeydown=event=>{if(!['ArrowLeft','ArrowRight'].includes(event.key))return;event.preventDefault();selected=(index+(event.key==='ArrowRight'?1:4))%5;paint();void load();tabs.children[selected].focus();};tabs.append(button);}
+  paint();await load();
 }
 function richTrackerSummary(rows) {
   const target = document.querySelector('#seed-accounts'); if (!target) return;
@@ -106,28 +114,41 @@ function richTrackerSummary(rows) {
     if (row.checkedAt) card.append(element('small', new Date(row.checkedAt * 1000).toLocaleTimeString(locale()), 'muted')); target.append(card); }
 }
 async function richPreview() {
-  const target = document.querySelector('#seed-add-preview'); target.replaceChildren(element('p', t('Reading torrent information…'), 'muted'));
-  const generation = ++richPreview.request;
+  const target=document.querySelector('#seed-add-preview'),generation=++richPreview.request;
+  target.replaceChildren(element('strong',t('Account ratio after adding')),element('p',t('Reading torrent information…'),'muted'));
   try {
-    const file = torrentFiles[0]?.file, mode = addForm.elements.namedItem('mode').value;
-    let response;
-    if (mode === 'file') {if (!file || file.size > 4 * 1024 * 1024) throw new Error(t('Choose a torrent file up to 4 MiB')); response = await fetch('/api/torrent-preview', {method: 'POST', headers: {'Content-Type':'application/x-bittorrent', 'X-MediaSeed-CSRF':csrf}, body:file});}
-    else response = await fetch('/api/torrent-preview', {method:'POST', headers:{'Content-Type':'application/json','X-MediaSeed-CSRF':csrf}, body:JSON.stringify({magnet:document.querySelector('#add-magnet').value})});
-    const result = await response.json(); if (generation !== richPreview.request || !addDialog.open) return;
-    if (!response.ok) throw new Error(t('Torrent information unavailable'));
-    target.replaceChildren(element('strong', result.name || t('Torrent information')), element('p', `${t('Size')}: ${result.size === null ? t('Unknown') : trackerBytes(result.size)}`, 'muted'));
-    for (const estimate of result.estimates) target.append(element('p', `${estimate.name} · ${t('Estimated account ratio')}: ${trackerNumber(estimate.current)} → ${estimate.projected === null ? '∞' : trackerNumber(estimate.projected)}`, estimate.projected !== null && estimate.projected <= .5 ? 'seed-ratio-warning' : ''));
-    target.append(element('small', t('Estimate excludes future uploads and other downloads. Unknown freeleech counts as a normal download.'), 'muted'));
-    if (!result.estimates.length) target.append(element('p', t('Ratio estimate needs a known torrent size and fresh tracker account data.'), 'muted'));
-  } catch (error) {if (generation === richPreview.request) target.replaceChildren(element('p', t(error.message), 'muted'));}
+    const fileMode=addForm.elements.namedItem('mode').value==='file',files=torrentFiles.filter(item=>item.state!=='added').map(item=>item.file);
+    if(fileMode&&!files.length)throw new Error(t('Choose a torrent file up to 4 MiB'));
+    const results=[];
+    const sources=fileMode?files:[document.querySelector('#add-magnet').value];
+    for(let offset=0;offset<sources.length;offset+=4){const group=await Promise.all(sources.slice(offset,offset+4).map(async source=>{
+      const response=await fetch('/api/torrent-preview',{method:'POST',headers:{'Content-Type':fileMode?'application/x-bittorrent':'application/json','X-MediaSeed-CSRF':csrf},body:fileMode?source:JSON.stringify({magnet:source})});const data=await response.json();if(!response.ok)throw new Error(t('Torrent information unavailable'));return data;
+    }));if(generation!==richPreview.request||!addDialog.open)return;results.push(...group);}
+    const accounts=new Map();for(const result of results)for(const estimate of result.estimates){const key=estimate.accountId||estimate.name;const saved=accounts.get(key)||{...estimate,charged:0,count:0};saved.charged+=estimate.charged??0;saved.count++;accounts.set(key,saved);}
+    target.replaceChildren(element('strong',t('Account ratio after adding')));
+    for(const estimate of accounts.values()){
+      const known=estimate.count===results.length&&results.every(result=>typeof result.size==='number'),denominator=estimate.downloaded+estimate.charged;
+      const projected=known&&typeof estimate.downloaded==='number'?(denominator?estimate.uploaded/denominator:null):results.length===1?results[0].estimates.find(e=>e.name===estimate.name)?.projected:undefined;
+      const card=element('article',undefined,'ratio-estimate-card'),numbers=element('div',undefined,'ratio-estimate-numbers');card.append(element('span',estimate.name));
+      const format=value=>value===null?'∞':typeof value==='number'?Number(value).toLocaleString(locale(),{minimumFractionDigits:2,maximumFractionDigits:4}):t('Unknown');
+      numbers.append(element('span',format(estimate.current)),element('span','→'),element('strong',format(projected)));card.append(numbers,element('small',t('Current ratio → Estimated ratio'),'muted'));if(typeof projected==='number'&&projected<=.5)card.classList.add('seed-ratio-warning');target.append(card);
+    }
+    if(!accounts.size)target.append(element('p',t('Ratio estimate needs a known torrent size and fresh tracker account data.'),'muted'));
+    const total=results.every(r=>typeof r.size==='number')?results.reduce((sum,r)=>sum+r.size,0):null;
+    target.append(element('p',`${sources.length} · ${t('Size')}: ${total===null?t('Unknown'):trackerBytes(total)}`,'muted'),element('small',t('Estimate excludes future uploads and other downloads. Unknown freeleech counts as a normal download.'),'muted'));
+  }catch(error){if(generation===richPreview.request)target.replaceChildren(element('strong',t('Account ratio after adding')),element('p',t(error.message),'muted'));}
 }
-richPreview.request = 0;
-async function richFeedHistory(id, name) {
-  const request = ++richFeedHistory.request;
-  const box = document.querySelector('#seed-feed-history'); box.replaceChildren(element('h2', name), element('p', t('Loading…'), 'muted'));
-  try { const result = await api(`feeds/${id}/history`); if (request !== richFeedHistory.request) return; box.replaceChildren(element('h2', name));
-    if (!result.entries.length) box.append(element('p', t('No feed observations yet. Existing downloads are preserved.'), 'muted'));
-    for (const row of result.entries) { const line = element('div', undefined, 'seed-history-row'); line.append(element('strong', row.title || t('RSS entry')), element('span', t('RSS status: ' + row.status)), element('small', new Date(row.created * 1000).toLocaleString(locale()), 'muted')); box.append(line); }
-  } catch (error) {if (request === richFeedHistory.request) box.append(element('p', t(error.message), 'muted'));}
+richPreview.request=0;
+async function richFeedHistory(id,name,page=1){
+  const request=++richFeedHistory.request;
+  let popup=document.querySelector('#feed-history-dialog');if(!popup){popup=element('dialog');popup.id='feed-history-dialog';popup.setAttribute('aria-labelledby','feed-history-title');document.body.append(popup);}
+  const heading=element('div',undefined,'heading'),title=element('h2',name);title.id='feed-history-title';const close=command(t('Close'),()=>popup.close());close.type='button';heading.append(title,close);const box=element('div');popup.replaceChildren(heading,box);box.append(element('p',t('Loading…'),'muted'));if(!popup.open)popup.showModal();
+  try{const result=await api(`feeds/${id}/history?page=${page}&pageSize=25`);if(request!==richFeedHistory.request||!popup.open)return;box.replaceChildren();
+    const sum=result.upload;box.append(element('p',t('Estimated credited upload')+': '+(typeof sum?.creditedUploadedBytes==='number'?'≈ '+trackerBytes(sum.creditedUploadedBytes):t('Unknown')),'feed-upload-total'));
+    if(sum?.unknownDownloads)box.append(element('p',t('{0} downloads without measurements',{0:sum.unknownDownloads}),'muted'));
+    if(!result.entries.length)box.append(element('p',t('No downloaded torrents in this feed yet.'),'muted'));
+    for(const row of result.entries){const line=element('article',undefined,'seed-history-row');line.append(element('strong',row.title||t('RSS entry')),element('span',t('Estimated credited upload')+': '+(typeof row.creditedUploadedBytes==='number'?'≈ '+trackerBytes(row.creditedUploadedBytes):t('Unknown'))),element('small',new Date(row.created*1000).toLocaleString(locale()),'muted'));box.append(line);}
+    const nav=element('div',undefined,'actions'),previous=command(t('Previous page'),()=>richFeedHistory(id,name,page-1)),next=command(t('Next page'),()=>richFeedHistory(id,name,page+1));previous.disabled=page<=1;next.disabled=page*25>=result.total;nav.append(previous,element('span',`${page} / ${Math.max(1,Math.ceil(result.total/25))}`),next);box.append(nav);
+  }catch(error){if(request===richFeedHistory.request)box.replaceChildren(element('p',t(error.message),'muted'));}
 }
-richFeedHistory.request = 0;
+richFeedHistory.request=0;

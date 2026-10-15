@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 import sqlite3
+import time
 
 import httpx
 import pytest
@@ -209,3 +210,15 @@ def test_rejected_high_goal_import_never_starts_a_torrent(tmp_path):
     ledger.raw_qbit=reject
     asyncio.run(ledger.request('/api/v2/torrents/add','POST',{'urls':'magnet:?xt=urn:btih:'+HASH,'ratioLimit':'750','stopped':'false','paused':'false'}))
     assert len(calls)==1 and calls[0][0].endswith('/add')
+
+
+def test_tracker_identity_survives_expired_benefits_without_extending_bonus_evidence(tmp_path):
+    ledger,_,_,_=setup(tmp_path,created=1000000000)
+    now=time.time()
+    first=ledger.observe(row(0,added_on=now-10),now)
+    assert first['tracker_name']=='Test' and first['tracker_benefits'] is not None
+    later=ledger.observe(row(100,added_on=now-10),now+301)
+    assert later['tracker_name']=='Test' and later['tracker_benefits'] is None
+    assert later['account_credited_uploaded']==100
+    stale=ledger.observe(row(90,added_on=now-10),now+302)
+    assert stale['credit_observation_stale'] and stale['tracker_name']=='Test'
