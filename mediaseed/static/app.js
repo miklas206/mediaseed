@@ -175,7 +175,7 @@ function renderTorrents() {
   }
   const search = document.querySelector('#search').value.toLocaleLowerCase(); const filter = document.querySelector('#filter').value; const sort = document.querySelector('#sort').value;
   const visible = torrents.filter(row => !pendingRemovals.has(row.hash));
-  const rows = visible.filter(row => String(row.name).toLocaleLowerCase().includes(search) && (filter === 'all' || state(row) === filter));
+  const rows = visible.filter(row => String(row.name).toLocaleLowerCase().includes(search) && (filter === 'all' || (filter === 'checking' ? String(row.state).startsWith('checking') : state(row) === filter)));
   const source = document.querySelector('#source-filter').value; const filtered = rows.filter(row => source === 'all' || (row.category === 'MediaSeed-Ratio' ? 'ratio' : String(row.category || '').startsWith('MediaSeed-RSS-') ? 'rss' : 'manual') === source); rows.splice(0, rows.length, ...filtered);
   sortTorrentRows(rows, sort, document.querySelector('#sort-direction').value || (sort === 'name' ? 'asc' : 'desc'));
   const pending = [...pendingRemovals.values()].filter(row => !row.confirmed).length;
@@ -271,9 +271,12 @@ async function refresh() {
     downloadsEnabled = snapshot.runtime.downloadsEnabled === true; renderConnection(snapshot.runtime);
     applyTorrentSnapshot(snapshot.torrents, request);
     const queue = snapshot.queue;
+    globalThis.MediaSeedQueue = queue;
+    globalThis.MediaSeedWorkspace?.render();
     if (request === torrentListRequest) document.querySelector('#queue-status').textContent = queue ? t("Queue: {0}/{1} active · {2} waiting · RSS {3} · Manual {4}{5}", {0: queue.active, 1: queue.limit === -1 ? t('Unlimited') : queue.limit ?? t('Unknown'), 2: queue.waiting, 3: queue.rssActive, 4: queue.manualActive, 5: (queue.ratioActive ? t(" · Build ratio: {0}", {0: queue.ratioActive}) : '') + (queue.boundedView ? t(" · Limited to 500 torrents") : '')}) : t("Queue status unavailable");
   } catch {
     downloadsEnabled = false; renderConnection({unavailable: true}); applyTorrentSnapshot(null, request);
+    globalThis.MediaSeedQueue = null; globalThis.MediaSeedWorkspace?.render();
     document.querySelector('#queue-status').textContent = t("Queue status unavailable");
   } finally { updateAddStart(); refreshing = false; void refreshAuxiliary(); }
 }
@@ -342,6 +345,7 @@ function renderConnection(state) {
   document.querySelector('#connection-checked').textContent = fresh ? t("Checked {0}", {0: new Date(checked * 1000).toLocaleTimeString(locale())}) : t("Waiting for status check");
   vpnFreshUntil = active ? Date.now() + 30000 : 0;
   if (!active) renderTraffic();
+  globalThis.MediaSeedWorkspace?.render();
 }
 function renderTraffic(transfer) {
   const flow = document.querySelector('#connection-flow');
@@ -498,9 +502,10 @@ function trackerCard(row) {
   return card;
 }
 function renderTrackerOverview(rows) {
+  globalThis.MediaSeedTrackerRows = rows; globalThis.MediaSeedWorkspace?.render();
   richTrackerSummary(rows);
   document.querySelector('#tracker-overview').hidden = !rows.length;
-  document.querySelector('#tracker-account-list').replaceChildren(...rows.map(trackerCard));
+
 }
 let trackerOverviewLoading = false;
 async function refreshTrackerOverview() {
@@ -588,7 +593,7 @@ async function loadSources(kind) {
     if (kind === 'feeds') { item.append(element('p', [row.include?.join(', '), row.exclude?.length ? t('Avoid') + ': ' + row.exclude.join(', ') : '', row.max_bytes ? t('Maximum size') + ': ' + trackerBytes(row.max_bytes) : '', row.badges?.join(' ? ')].filter(Boolean).join(' ? ') || t('No additional filters'), 'seed-feed-rules')); actions.append(command(t('History'), () => richFeedHistory(row.id, row.name))); }
     if (appRole === 'administrator') {
       if (kind === 'feeds') actions.append(command(row.paused ? 'Aktivér' : 'Pause', async () => { await api(`feeds/${row.id}/state`, {enabled: row.paused}, 'PUT'); await loadSources('feeds'); showNotification(row.paused ? t("Feed enabled through VPN.") : t("Feed paused. Existing torrents are preserved."), 'success'); }));
-      actions.append(command(t("Edit"), () => { const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); feedEditing = kind === 'feeds'; form.reset(); feedEditing = false; for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } if (kind === 'feeds') { for (const key of ['include','exclude']) form.elements.namedItem(key).value = (row[key] || []).join(', '); for (const option of form.elements.namedItem('badges').options) option.selected = (row.badges || []).includes(option.value); form.elements.namedItem('max_gib').value = row.max_bytes ? row.max_bytes / (1024 ** 3) : ''; form.elements.namedItem('url').placeholder = t('Saved feed address is kept. Fill in only to change it.'); void loadFeedLocations(row.location || 'local', row.folder || '').catch(notify); } form.querySelector('input[name="name"]').focus(); }), command(t("Remove"), async () => { if (!confirm(t("Remove {0}? Files and torrents are preserved.", {0: row.name}))) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); }));
+      actions.append(command(t("Edit"), () => { globalThis.MediaSeedWorkspace?.openEditor(kind);  const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); feedEditing = kind === 'feeds'; form.reset(); feedEditing = false; for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } if (kind === 'feeds') { for (const key of ['include','exclude']) form.elements.namedItem(key).value = (row[key] || []).join(', '); for (const option of form.elements.namedItem('badges').options) option.selected = (row.badges || []).includes(option.value); globalThis.MediaSeedWorkspace?.syncBadges(); form.elements.namedItem('max_gib').value = row.max_bytes ? row.max_bytes / (1024 ** 3) : ''; form.elements.namedItem('url').placeholder = t('Saved feed address is kept. Fill in only to change it.'); void loadFeedLocations(row.location || 'local', row.folder || '').catch(notify); } form.querySelector('input[name="name"]').focus(); }), command(t("Remove"), async () => { if (!confirm(t("Remove {0}? Files and torrents are preserved.", {0: row.name}))) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); }));
     }
     item.append(actions); target.append(item);
   }
@@ -615,7 +620,7 @@ document.querySelector('#tracker-search').onsubmit = async event => {
   finally { button.disabled = document.querySelector('#tracker-account').options.length === 1; }
 };
 for (const [selector, kind] of [['#feed-form', 'feeds'], ['#tracker-form', 'trackers']]) {
-  const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { if (!feedStorageReady) { showNotification(t('Choose an available writable folder')); return; } body.location = feedLocation.value; body.folder = feedFolderPath; body.ratio = Number(body.ratio); for (const key of ['include','exclude']) body[key] = String(body[key] || '').split(',').map(x => x.trim()).filter(Boolean); body.badges = [...form.elements.namedItem('badges').selectedOptions].map(option => option.value); body.max_bytes = body.max_gib ? Math.round(Number(body.max_gib) * (1024 ** 3)) : null; delete body.max_gib; body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { const saved = await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); if (kind === 'feeds' && (saved.start_at ? new Date(saved.start_at).getTime() : null) !== (body.start_at ? new Date(body.start_at).getTime() : null)) throw new Error(t('The saved start date could not be verified. Your form is preserved.')); form.reset(); form.elements.namedItem('id').value = ''; await loadSources(kind); showNotification(t("Saved palette"), 'success'); } catch (error) { notify(error); } };
+  const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { if (!feedStorageReady) { showNotification(t('Choose an available writable folder')); return; } body.location = feedLocation.value; body.folder = feedFolderPath; body.ratio = Number(body.ratio); for (const key of ['include','exclude']) body[key] = String(body[key] || '').split(',').map(x => x.trim()).filter(Boolean); body.badges = [...form.elements.namedItem('badges').selectedOptions].map(option => option.value); body.max_bytes = body.max_gib ? Math.round(Number(body.max_gib) * (1024 ** 3)) : null; delete body.max_gib; body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { const saved = await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); if (kind === 'feeds' && (saved.start_at ? new Date(saved.start_at).getTime() : null) !== (body.start_at ? new Date(body.start_at).getTime() : null)) throw new Error(t('The saved start date could not be verified. Your form is preserved.')); form.reset(); form.elements.namedItem('id').value = ''; globalThis.MediaSeedWorkspace?.closeEditor(kind); await loadSources(kind); showNotification(t("Saved palette"), 'success'); } catch (error) { notify(error); } };
   form.addEventListener('reset', () => { form.elements.namedItem('id').setAttribute('value', ''); });
 }
 for (const button of document.querySelectorAll('[data-view]')) button.onclick = async () => { message.textContent = ''; for (const other of document.querySelectorAll('[data-view]')) other.setAttribute('aria-pressed', String(other === button)); for (const section of document.querySelectorAll('.view')) section.hidden = section.id !== button.dataset.view; document.querySelector('#connection-flow').hidden = button.dataset.view !== 'vpn'; try { if (button.dataset.view === 'feeds' || button.dataset.view === 'trackers') { await loadSources(button.dataset.view); if (button.dataset.view === 'feeds' && appRole === 'administrator') await loadFeedLocations(feedLocations.length ? feedLocation.value : undefined, feedLocations.length ? feedFolderPath : ''); } else if (button.dataset.view === 'vpn') await refreshVpn(); } catch (error) { notify(error); } };

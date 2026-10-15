@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from fastapi import HTTPException
 
 from mediaseed.cleanup import source_hashes
+from mediaseed.activity import Activity
 
 
 def title_matches(title, feed):
@@ -43,11 +44,14 @@ class RssWorker:
         self.reports = {}
         self.benefits_lookup = None
         self.metadata_budget = 6
+        self.activity = Activity(database)
         with database() as connection:
             connection.execute("CREATE TABLE IF NOT EXISTS rss_history (token TEXT PRIMARY KEY, feed TEXT NOT NULL, status TEXT NOT NULL, created REAL NOT NULL, torrent_hash TEXT)")
             connection.execute("CREATE TABLE IF NOT EXISTS rss_observations (feed TEXT NOT NULL, token TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, created REAL NOT NULL, PRIMARY KEY(feed,token))")
 
     def observe(self, feed, token, article, status):
+        if status in {'added', 'import_unconfirmed', 'metadata_unknown', 'badges_unverified', 'too_large', 'size_unknown'}:
+            self.activity.record('rss', token, article.get('title', ''), status, feed=feed['id'])
         with self.database() as connection:
             connection.execute("INSERT INTO rss_observations VALUES (?,?,?,?,?) ON CONFLICT(feed,token) DO UPDATE SET status=excluded.status,created=excluded.created WHERE NOT (rss_observations.status='added' AND excluded.status='already_processed')", (feed['id'], token, str(article.get('title', ''))[:300], status, time.time()))
             connection.execute("DELETE FROM rss_observations WHERE rowid NOT IN (SELECT rowid FROM rss_observations ORDER BY created DESC LIMIT 1000)")
@@ -120,6 +124,7 @@ class RssWorker:
             return
         articles = item.get("articles", [])
         if item.get("hasError") or not isinstance(articles, list):
+            self.activity.record('rss', feed['id'], feed['name'], 'feed_error', feed=feed['id'])
             self.reports[feed["id"]] = "Feed kunne ikke hentes"
             return
         for article in articles[:500]:

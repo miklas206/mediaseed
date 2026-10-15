@@ -1,5 +1,7 @@
 # MediaSeed
 
+MediaSeed 0.1.16 adds an automatically responsive workspace, actionable download status, recent automatic activity, compact RSS/tracker editing and inherited navigation. See [behavior and upgrade notes](docs/responsive-workspace.md).
+
 MediaSeed 0.1.8 adds poster rows, tabbed torrent details, account-ratio preview and optional RSS title/size/badge filters with retained decision history. See [workspace behavior, upgrade and verification](docs/rich-workspace.md).
 
 Browserudvidelsen findes via **Browserudvidelse** i appens topbjælke eller `/static/extensions.html`. Siden genkender browseren og tilbyder Chromium-/Firefox-pakker samt Safari-kilde. Se [installation og tilladelser](browser-extension/README.md). Byg pakker med `python browser-extension/build.py` efter ændringer i udvidelsen.

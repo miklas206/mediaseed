@@ -16,6 +16,7 @@ from mediaseed.cleanup import source_hashes
 from mediaseed.covers import Covers
 from mediaseed.rss_worker import RssWorker
 from mediaseed.ratio_scout import RatioScout, RatioSettings
+from mediaseed.activity import Activity
 
 
 class SeedingPolicy(BaseModel):
@@ -127,6 +128,11 @@ async def add_stopped(qbit, ratio, content=None, magnet=None, start=False, vpn_s
 
 def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=None, cleanup=None, credit=None, storage=None):
     tracker_cache = {}
+    activity = Activity(database)
+
+    @app.get("/api/activity")
+    def automatic_activity(session=Depends(authorized)):
+        return activity.public()
     tracker_lock = asyncio.Lock()
     with database() as connection:
         connection.execute("CREATE TABLE IF NOT EXISTS settings (kind TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(kind,id))")

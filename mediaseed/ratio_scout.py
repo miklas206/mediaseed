@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mediaseed.cleanup import source_hashes
+from mediaseed.activity import Activity
 
 
 class RatioSettings(BaseModel):
@@ -133,6 +134,7 @@ class RatioScout:
             covers,
         )
         self.lock = asyncio.Lock()
+        self.activity = Activity(database)
         self.action_lock = credit.lock if credit else asyncio.Lock()
         self.write_qbit = credit._request if credit else qbit
         self.next_scan = 0
@@ -304,6 +306,7 @@ class RatioScout:
                         except HTTPException as error:
                             self.status = str(error.detail)
                             match["blockedReason"] = self.status
+                            self.activity.record('ratio', match['hash'], match['name'], self.status, torrent_hash=match['hash'])
                             with self.database() as c:
                                 c.execute(
                                     "UPDATE ratio_candidates SET payload=? WHERE id=?",
@@ -326,7 +329,15 @@ class RatioScout:
 
     async def _add(self, identifier, automatic=False):
         async with self.action_lock:
-            return await self._add_locked(identifier, automatic)
+            try:
+                return await self._add_locked(identifier, automatic)
+            except HTTPException as error:
+                with self.database() as db:
+                    stored = db.execute("SELECT payload FROM ratio_candidates WHERE id=?", (identifier,)).fetchone()
+                if stored:
+                    row = json.loads(stored[0])
+                    self.activity.record('ratio', row['hash'], row['name'], str(error.detail), torrent_hash=row['hash'])
+                raise
 
     async def _add_locked(self, identifier, automatic=False):
         settings = self.settings()
@@ -519,6 +530,7 @@ class RatioScout:
         return {"added": True, "startRequested": True, "hash": actual}
 
     def record(self, row, settings, status):
+        self.activity.record('ratio', row['hash'], row['name'], status, torrent_hash=row['hash'])
         with self.database() as c:
             c.execute(
                 "INSERT INTO ratio_imports VALUES (?,?,?,?,?) ON CONFLICT(hash) DO UPDATE SET status=excluded.status",

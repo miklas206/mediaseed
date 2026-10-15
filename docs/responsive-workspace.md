@@ -1,0 +1,13 @@
+# Responsive workspace (0.1.16)
+
+The three transfer/torrent cards and their existing graphs remain. A measured, VPN-gated route animation sits above them. Download status cards link to VPN, tracker accounts and download/file-check filters. The old RSS sidebar becomes recent automatic activity from a bounded local history; it does not fetch feeds more frequently. Client details are collapsed.
+
+Widths, text and spacing adapt automatically from mobile to a 2400 CSS-pixel workspace on large screens. No screen-specific scaling setting is required. App headers are 56 pixels on desktop with the logo aligned left. Both apps inherit the signed-in Hub user's navigation: sidebar, topbar, top dock, bottom dock or launcher. Settings can override it for that app/account; following Hub removes the override. Standalone apps use a local browser preference. Existing theme overrides are preserved.
+
+RSS feeds use a list and modal editor. Required badges use independent checkboxes; every selected badge remains required. Tracker accounts appear once, with a modal editor and existing search/actions. Torrent pause/start uses accessible themed SVG controls.
+
+Other media requires an approved storage location. Core 0.6.37 provisions it on both installation and upgrade and can recover older omitted Other approvals from a matching Plex storage policy. No arbitrary host paths are inferred. The same storage API supplies manual, RSS and ratio selection.
+
+New automatic-activity and per-user navigation tables are additive and idempotent. Existing accounts, feeds, credentials, preferences and torrents are retained. Activity is deduplicated, bounded to 1000 records, and exposes ten recent entries without feed URLs or credentials. Reduced-motion preferences stop the new route animation.
+
+Validation: Python tests cover persistence, authenticated navigation updates, activity retention and older databases. Isolated Chromium with synthetic APIs checks 320, 390, 768, 1440, 1920, 2560 and 3840 pixel viewports, all five navigation modes, retained transfer cards, badge selection and a single tracker account view. This is not live server installation evidence.
