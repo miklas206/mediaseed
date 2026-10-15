@@ -250,7 +250,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
         if request.url.path.startswith("/api"):
             response.headers["Cache-Control"] = "no-store"
         return response
@@ -369,7 +369,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/healthz")
     def health():
-        return {"status": "healthy", "version": "0.1.10"}
+        return {"status": "healthy", "version": "0.1.11"}
 
     @app.get("/api/auth/status")
     async def status(request: Request):

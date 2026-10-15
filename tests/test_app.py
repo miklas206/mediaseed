@@ -59,3 +59,13 @@ def test_client_status_requires_auth_and_reports_real_version(client):
     assert client.get("/api/client").status_code == 401
     sign_in(client)
     assert client.get("/api/client").json() == {"name": "qBittorrent", "version": "v5.1.4", "connected": True, "downloadsEnabled": False}
+
+def test_theme_favicon_loads_without_allowing_external_images_or_inline_scripts(tmp_path):
+    with TestClient(create_app(tmp_path, "http://testserver")) as client:
+        response = client.get("/")
+        policy = dict(part.strip().split(" ", 1) for part in response.headers["Content-Security-Policy"].split(";"))
+        assert policy["img-src"].split() == ["'self'", "data:"]
+        assert policy["script-src"] == "'self'"
+        assert policy["style-src"] == "'self'"
+        assert policy["connect-src"] == "'self'"
+        assert 'data-brand-favicon' in response.text

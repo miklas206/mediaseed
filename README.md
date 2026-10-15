@@ -140,3 +140,7 @@ Add torrent accepts multiple files in the picker or a page drop. Additional pick
 Files are sent sequentially through the existing authenticated, CSRF-protected single-file upload endpoint. Every file keeps its own pending/adding/added/error status. One rejection does not stop the rest. The batch dialog stays open with a completion count; submitting again sends only unsuccessful/new files, never those already confirmed as added. A lost response is shown as unconfirmed and requires checking the torrent list before an explicit retry. No automatic upload retry is performed. Start still requires a verified VPN, and each request revalidates storage and policy on the server. Individual ratio previews remain available for a one-file selection.
 
 The feature works on fresh installs and updates without new dependencies or schema migrations. Updating only MediaSeed activates it; Core and MediaVPN versions remain independent. Validation uses synthetic files/transports, including partial failure and retry, plus isolated Chromium checks of the real dialog at desktop and mobile widths. No real torrent download or live runtime change is part of this validation.
+
+### Theme-colored tab icon (0.1.11)
+
+The image Content Security Policy permits the generated SVG data favicon, so local theme choices and inherited MediaHub appearance update the browser tab icon. Script, style and connection policies remain same-origin only. Applies on fresh installs and ordinary app updates without configuration or database changes.
