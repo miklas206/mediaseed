@@ -184,3 +184,5 @@ MediaSeed 0.1.20 adds tracker-wide upload/download totals and cached account ran
 MediaSeed 0.1.21 makes rank requirements compact and keeps the rank dialog open across automatic tracker refreshes.
 
 MediaSeed 0.1.22 aligns the add-dialog columns and gives the central tracker status card more width while the side cards retain their natural height.
+
+MediaSeed 0.1.23 processes bounded RSS batches independently of cover and tracker background jobs, preserving feed settings, history and the native download queue.

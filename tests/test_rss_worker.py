@@ -75,3 +75,48 @@ def test_recreated_feed_cleans_only_owned_unconfigured_duplicate(tmp_path, old_k
     removed = [payload for path, payload in calls if path.endswith("removeItem")]
     assert removed == ([{"path": old}] if old_kind == "stale" else [])
     assert not any(path.endswith("torrents/add") for path, _ in calls)
+
+
+def test_received_batch_progresses_with_six_request_bound_and_no_repeated_cross_feed_duplicates(tmp_path):
+    @contextmanager
+    def database():
+        with sqlite3.connect(tmp_path / "batch.sqlite") as connection:
+            yield connection
+    feed = {"id": "a"*24, "enabled": True, "url": "https://nordicbytes.org/rss/synthetic", "folder": "", "ratio": 3}
+    articles = [{"id": str(i), "title": "Synthetic release "+str(i), "torrentURL": "https://nordicbytes.org/torrents/download/"+str(i)} for i in range(12)]
+    feeds = [feed]
+    items = {"MediaSeed-RSS-"+feed["id"]: {"url": feed["url"], "articles": articles}}
+    reads, additions, starts = [], [], []
+    async def vpn_status():
+        return {"downloadsEnabled": True}
+    async def qbit(path, method="GET", payload=None, files=None):
+        if path.endswith("/items"):
+            return httpx.Response(200, json=items)
+        if path.endswith("/torrent"):
+            i = int(payload["url"].rsplit("/",1)[1])
+            reads.append(i)
+            return httpx.Response(200, content=("synthetic-metadata-"+str(i)).encode())
+        if path.endswith("/add"):
+            additions.append(files["torrents"][1])
+            assert payload["stopped"] == "true"
+            return httpx.Response(200,json={"success_count":1,"failure_count":0,"added_torrent_ids":[format(len(additions),"040x")]})
+        if path.endswith("/start"):
+            starts.append(payload["hashes"])
+        return httpx.Response(204)
+    async def check():
+        worker = RssWorker(database, lambda kind: feeds, qbit, vpn_status)
+        await worker.tick()
+        assert len(reads) == len(additions) == len(starts) == 6
+        await worker.tick()
+        assert len(reads) == len(additions) == len(starts) == 12
+        other = {**feed, "id": "b"*24}
+        feeds.append(other)
+        items["MediaSeed-RSS-"+other["id"]] = {"url": other["url"], "articles": articles}
+        await worker.tick()
+        assert len(reads) == 18 and len(additions) == 12
+        await worker.tick()
+        assert len(reads) == 24 and len(additions) == 12
+        restarted = RssWorker(database, lambda kind: feeds, qbit, vpn_status)
+        await restarted.tick()
+        assert len(reads) == 24 and len(additions) == 12
+    asyncio.run(check())

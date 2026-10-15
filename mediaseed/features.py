@@ -19,6 +19,7 @@ from mediaseed.ratio_scout import RatioScout, RatioSettings
 from mediaseed.activity import Activity
 from mediaseed import feed_uploads
 from mediaseed.nordic_ranks import rank_progress
+from mediaseed.background import run_background
 
 
 class SeedingPolicy(BaseModel):
@@ -511,19 +512,14 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         return {"removed": True, "filesPreserved": True}
 
     async def background():
-        while True:
-            try:
-                if scout:
-                    await scout.tick()
-                if rss_worker:
-                    await rss_worker.tick()
-                if covers:
-                    await covers.tick()
-                if rows("trackers"):
-                    await accounts(session={})
-            except Exception:
-                pass
-            await asyncio.sleep(15)
+        async def account_tick():
+            if rows("trackers"):
+                await accounts(session={})
+        jobs = [("accounts", account_tick)]
+        for name, worker in (("rss", rss_worker), ("ratio-scout", scout), ("covers", covers)):
+            if worker:
+                jobs.append((name, worker.tick))
+        await run_background(jobs)
 
     def tracker_overview():
         # Overview must not fetch third-party APIs or expose credentials/URLs.

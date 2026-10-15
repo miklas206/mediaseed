@@ -158,6 +158,16 @@ class RssWorker:
             self.metadata_budget -= 1
             response = await self.qbit("/api/v2/rss/torrent", payload={"url": link})
             content = response.content
+            file_token = hashlib.sha256(content).hexdigest()
+            with self.database() as connection:
+                previous = connection.execute("SELECT status,torrent_hash FROM rss_history WHERE token=?", (file_token,)).fetchone()
+                if previous:
+                    # Remember this article too, so another feed's duplicate cannot
+                    # consume the metadata budget on every future cycle.
+                    connection.execute("INSERT OR IGNORE INTO rss_history VALUES (?,?,?,?,?)", (token, feed["id"], "duplicate", time.time(), previous[1]))
+            if previous:
+                self.observe(feed, observation, article, 'already_processed')
+                continue
             if feed.get('max_bytes') or feed.get('badges'):
                 try:
                     metadata = source_hashes(content=content, include_metadata=True)
@@ -183,7 +193,6 @@ class RssWorker:
             if next((row for row in self.rows("feeds") if row["id"] == feed["id"]), None) != feed:
                 self.reports[feed["id"]] = "Feed changed; waiting for the next refresh"
                 return
-            file_token = hashlib.sha256(content).hexdigest()
             with self.database() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 if connection.execute("SELECT 1 FROM rss_history WHERE token IN (?,?)", (token, file_token)).fetchone():
@@ -210,5 +219,7 @@ class RssWorker:
                 self.reports[feed["id"]] = "Torrent tilføjet til VPN-downloadkø"
             else:
                 self.reports[feed["id"]] = "Torrent tilføjet stoppet; feed eller VPN ændret"
-            return
+                return
+            # Continue through the received batch, still bounded by metadata_budget.
+            # Existing client queue limits decide how many actually download.
         self.reports[feed["id"]] = "Afventer nye poster efter startdato"

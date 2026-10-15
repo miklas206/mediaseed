@@ -238,7 +238,7 @@ const messages = {
   "Selected torrent files": "Valgte torrentfiler",
   "For individual ratio previews, select one file at a time.": "V\u00e6lg \u00e9n fil ad gangen for at forh\u00e5ndsvise individuelle ratioer.",
 
-  "MediaSeed 0.1.22": "MediaSeed 0.1.22",
+  "MediaSeed 0.1.23": "MediaSeed 0.1.23",
   "Waiting for the next bounded metadata check": "Afventer næste kontrol af torrentoplysninger",
   "Seeding progress": "Seedingfremdrift",
   "Downloaded": "Downloadet",

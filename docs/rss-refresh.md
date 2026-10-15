@@ -36,3 +36,9 @@ MediaVPN 228 passed/1 skipped. Seed JavaScript suite: 50 passed. Isolated
 Chromium checks at 1440/390/320 verify translated settings, saving, scrolling
 and existing pagination/recheck/storage flows. No production install, actual
 RSS request or torrent action was performed for this change.
+
+## Responsive RSS processing — 0.1.23
+
+RSS now has its own non-overlapping background loop. Slow covers, ratio discovery and account requests no longer delay the next RSS cycle. Each job retains its own cache/deadline checks; the RSS fetch interval remains the user's native client preference.
+
+A cycle can import multiple received articles, within the existing shared six-metadata-request budget. It does not raise the concurrent download limit: imports still use the native queue and verified VPN/storage/start safeguards. Another feed's previously imported file is remembered by article token so duplicate metadata cannot repeatedly consume the processing budget. Existing history, credentials, start dates and filters are retained; no live migration or forced RSS fetch is required. Shutdown cancels all child loops through TaskGroup.
