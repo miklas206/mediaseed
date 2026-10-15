@@ -17,7 +17,7 @@ test('removal choice survives early-seeding confirmation and streams regenerate 
   const requests = [];
   const confirmations = [];
   let refuseOnce = true;
-  const context = vm.createContext({document: {querySelector: find, querySelectorAll: s => s === '.binary-lane' ? lanes : [], createElement: create, body: create(), addEventListener() {}},
+  const context = vm.createContext({window: {addEventListener() {}}, MediaAppTheme: {setOverrideHandler() {}, applyIdentity() {}}, document: {querySelector: find, querySelectorAll: s => s === '.binary-lane' ? lanes : [], createElement: create, body: create(), addEventListener() {}},
     setInterval() {}, setTimeout() {}, clearTimeout() {}, confirm: () => {throw new Error('Browser confirmation must not be used');},
     fetch: async (url, options) => {
       if (url.endsWith('/presence')) return new Promise(resolve => confirmations.push(() => resolve({ok: true, json: async () => ({present: false})})));
@@ -28,7 +28,7 @@ test('removal choice survives early-seeding confirmation and streams regenerate 
       return {ok: true, json: async () => ({needsSetup: true})};
     },
   });
-  vm.runInContext(readFileSync(new URL('../mediaseed/static/i18n.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
+  vm.runInContext(readFileSync(new URL('../mediaseed/static/i18n.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/rich-ui.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
   context.MediaAppI18n.setLanguage('da'); context.refresh = async () => {};
   find('#filter').value = 'all'; find('#source-filter').value = 'all'; find('#sort').value = 'name';
   vm.runInContext('torrents = [{hash: "a".repeat(40), name: "First"}, {hash: "b".repeat(40), name: "Next"}]', context);

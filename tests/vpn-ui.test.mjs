@@ -41,7 +41,7 @@ test('shipped provider markup supports profile choice, polling, explicit connect
     find('#vpn-provider').append(option);
   }
   const state = { provider: null, integrationAvailable: true, profiles: [{ id: 'a'.repeat(24), name: 'Synthetic VPN' }] };
-  const context = vm.createContext({
+  const context = vm.createContext({window: {addEventListener() {}}, MediaAppTheme: {setOverrideHandler() {}, applyIdentity() {}},
     Date: Clock,
     document: { querySelector: find, querySelectorAll: () => [], createElement: () => new Element(), body: new Element(), addEventListener() {} },
     setInterval() {}, setTimeout() {}, clearTimeout() {},
@@ -55,7 +55,7 @@ test('shipped provider markup supports profile choice, polling, explicit connect
       return { ok: true, json: async () => url === '/api/vpn' ? state : url === '/api/auth/status' ? { needsSetup: true } : url === '/api/torrents' ? [] : {} };
     },
   });
-  vm.runInContext(readFileSync(new URL('../mediaseed/static/i18n.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
+  vm.runInContext(readFileSync(new URL('../mediaseed/static/i18n.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/rich-ui.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
   context.MediaAppI18n.setLanguage('da'); await context.refreshVpn();
   assert.equal(find('#vpn-provider').value, '');
   assert.equal(find('#vpn-profile').value, '');

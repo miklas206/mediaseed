@@ -138,27 +138,7 @@ function renderTorrents() {
   const pending = [...pendingRemovals.values()].filter(row => !row.confirmed).length;
   document.querySelector('#count').textContent = t("{0} of {1} torrents{2}", {0: rows.length, 1: visible.length, 2: pending ? ' · ' + pending + ' fjernes' : ''});
   const target = document.querySelector('#torrents'); target.replaceChildren(); if (!rows.length) target.append(element('p', torrents.length ? t("No matching torrents") : torrentSnapshotValid ? t("No torrents") : t("Torrent client unavailable"), 'muted'));
-  for (const [index, row] of rows.entries()) {
-    const item = element('article', undefined, 'torrent'); item.dataset.state = state(row);
-    const name = command(row.name, () => showDetails(row)); name.className = 'torrent-name'; name.title = row.name;
-    const progressCell = element('div', undefined, 'torrent-progress');
-    const progress = element('progress'); progress.max = 1; progress.value = Math.max(0, Math.min(1, Number(row.progress || 0))); progress.setAttribute('aria-label', t("Progress"));
-    progressCell.append(progress, element('small', `${Math.round(progress.value * 100)}%`));
-    const speed = element('span', `${bytes(state(row) === 'seeding' ? row.upspeed : row.dlspeed)}/s`, 'torrent-speed');
-    const status = element('span', torrentStatus(row.state), 'torrent-state');
-    const actions = element('div', undefined, 'actions');
-    if (appRole !== 'viewer') {
-      const stopped = state(row) === 'stopped';
-      const toggle = command(stopped ? '\u25b6' : '\u23f8', () => torrentAction(row, stopped ? 'start' : 'stop'));
-      toggle.setAttribute('aria-label', `${stopped ? t("Start") : t("Stop")}: ${row.name}`); toggle.title = stopped ? t("Start") : t("Stop"); toggle.disabled = stopped && !downloadsEnabled; actions.append(toggle);
-    }
-    const menu = element('details', undefined, 'torrent-menu'); const trigger = element('summary', '\u22ef'); trigger.setAttribute('aria-label', t("Details"));
-    const commands = element('div', undefined, 'torrent-menu-content'); commands.append(command(t("Details"), () => showDetails(row)));
-    if (appRole !== 'viewer') commands.append(command(t("Remove"), () => chooseRemoval(row)));
-    if ('credited_ratio' in row) commands.append(trackerCreditView(row));
-    menu.append(trigger, commands); actions.append(menu);
-    item.append(element('small', String(index+1), 'torrent-index'), name, progressCell, speed, status, actions); target.append(item);
-  }
+  for (const [index, row] of rows.entries()) target.append(seedTorrent(row, index));
 
 }
 function torrentTraffic() {
@@ -397,11 +377,8 @@ function detailTable(title, columns, rows) {
   const table = element('table'); const heading = element('tr'); for (const [, label] of columns) heading.append(element('th', label)); const head = element('thead'); head.append(heading); table.append(head);
   const body = element('tbody'); for (const row of rows) { const line = element('tr'); for (const [key] of columns) line.append(element('td', String(row[key] ?? '—'))); body.append(line); } table.append(body); const wrap = element('div', undefined, 'table-wrap'); wrap.append(table); section.append(wrap); return section;
 }
-async function showDetails(row) {
-  selectedHash = row.hash; document.querySelector('#detail-name').textContent = row.name; document.querySelector('#detail-message').textContent = ''; const target = document.querySelector('#detail-data'); target.replaceChildren(element('p', t("Fetching details…")));
-  document.querySelector('#policy-form input').value = Number(row.ratio_limit) >= 1 ? row.ratio_limit : 1; dialog.showModal();
-  try { const details = await api(`torrents/${row.hash}/details`); target.replaceChildren(element('p', t("Downloaded {0} · Uploaded {1} · Seeding {2} hours", {0: bytes(details.properties.total_downloaded), 1: bytes(details.properties.total_uploaded), 2: (Number(details.properties.seeding_time || 0) / 3600).toFixed(1)}))); target.append(detailTable(t("Files"), [['name', t("Name")], ['size', 'Bytes'], ['progress', t("Progress")]], details.files), detailTable(t("Trackers"), [['host', 'Tracker'], ['status', 'Status'], ['num_peers', 'Peers']], details.trackers), detailTable('Peers', [['ip', 'IP'], ['client', t("Client")], ['progress', t("Progress")]], details.peers)); if (details.credit && 'credited_ratio' in details.credit) target.append(trackerCreditView({...row, ...details.credit, uploaded: details.properties.total_uploaded})); renderCleanupDetails(details.cleanup, row, target); document.querySelector('#policy-form').hidden = appRole === 'viewer' || (details.cleanup?.mode && details.cleanup.mode !== 'never'); try { const benefits = await api(`torrents/${row.hash}/benefits`); if (benefits.status === 'matched' && !details.credit?.tracker_benefits) { const flags = [benefits.freeleech === null ? null : `Freeleech ${benefits.freeleech} %`, benefits.doubleUpload ? t("Double upload") : null, benefits.featured ? 'Featured' : null, benefits.internal ? 'Internal' : null, benefits.refundable ? t("Refundable") : null].filter(Boolean); target.append(element('h3', t("Tracker benefits")), element('p', t("{0} · Exact hash match · {1}", {0: benefits.tracker, 1: flags.join(' · ') || t("No confirmed benefits")}), 'muted')); } } catch {} } catch (error) { target.replaceChildren(element('p', error.message)); }
-}
+async function showDetails(row) { return richDetails(row); }
+
 function renderCleanupDetails(policy = {mode: 'never'}, row, target) {
   target.append(element('h3', t("Automatic cleanup")));
   if (policy.mode === 'never') { target.append(element('p', t("Disabled · torrent and files are preserved."), 'muted')); return; }
@@ -454,6 +431,7 @@ function trackerCard(row) {
   return card;
 }
 function renderTrackerOverview(rows) {
+  richTrackerSummary(rows);
   document.querySelector('#tracker-overview').hidden = !rows.length;
   document.querySelector('#tracker-account-list').replaceChildren(...rows.map(trackerCard));
 }
@@ -540,9 +518,10 @@ async function loadSources(kind) {
     if (kind === 'feeds') item.append(element('h2', row.name), element('p', `${row.location ? t(feedLocations.find(place => place.id === row.location)?.label || (row.location === 'local' ? 'Local downloads' : row.location)) + ' /' + (row.folder || '') : row.folder || '/downloads'} · Ratio ${row.ratio} · ${row.paused ? t("Paused") : t("Active")} · ${t(row.status || '')}`, 'muted'));
     if (kind === 'feeds') item.append(element('p', row.start_at ? t('Only fetch RSS entries from: {0}', {0: new Date(row.start_at).toLocaleString()}) : t('No start date selected'), 'muted'));
     const actions = element('div', undefined, 'actions');
+    if (kind === 'feeds') { item.append(element('p', [row.include?.join(', '), row.exclude?.length ? t('Avoid') + ': ' + row.exclude.join(', ') : '', row.max_bytes ? t('Maximum size') + ': ' + trackerBytes(row.max_bytes) : '', row.badges?.join(' ? ')].filter(Boolean).join(' ? ') || t('No additional filters'), 'seed-feed-rules')); actions.append(command(t('History'), () => richFeedHistory(row.id, row.name))); }
     if (appRole === 'administrator') {
       if (kind === 'feeds') actions.append(command(row.paused ? 'Aktivér' : 'Pause', async () => { await api(`feeds/${row.id}/state`, {enabled: row.paused}, 'PUT'); await loadSources('feeds'); showNotification(row.paused ? t("Feed enabled through VPN.") : t("Feed paused. Existing torrents are preserved."), 'success'); }));
-      actions.append(command(t("Edit"), () => { const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); feedEditing = kind === 'feeds'; form.reset(); feedEditing = false; for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } if (kind === 'feeds') { form.elements.namedItem('url').placeholder = t('Saved feed address is kept. Fill in only to change it.'); void loadFeedLocations(row.location || 'local', row.folder || '').catch(notify); } form.querySelector('input[name="name"]').focus(); }), command(t("Remove"), async () => { if (!confirm(t("Remove {0}? Files and torrents are preserved.", {0: row.name}))) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); }));
+      actions.append(command(t("Edit"), () => { const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); feedEditing = kind === 'feeds'; form.reset(); feedEditing = false; for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } if (kind === 'feeds') { for (const key of ['include','exclude']) form.elements.namedItem(key).value = (row[key] || []).join(', '); for (const option of form.elements.namedItem('badges').options) option.selected = (row.badges || []).includes(option.value); form.elements.namedItem('max_gib').value = row.max_bytes ? row.max_bytes / (1024 ** 3) : ''; form.elements.namedItem('url').placeholder = t('Saved feed address is kept. Fill in only to change it.'); void loadFeedLocations(row.location || 'local', row.folder || '').catch(notify); } form.querySelector('input[name="name"]').focus(); }), command(t("Remove"), async () => { if (!confirm(t("Remove {0}? Files and torrents are preserved.", {0: row.name}))) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); }));
     }
     item.append(actions); target.append(item);
   }
@@ -569,7 +548,7 @@ document.querySelector('#tracker-search').onsubmit = async event => {
   finally { button.disabled = document.querySelector('#tracker-account').options.length === 1; }
 };
 for (const [selector, kind] of [['#feed-form', 'feeds'], ['#tracker-form', 'trackers']]) {
-  const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { if (!feedStorageReady) { showNotification(t('Choose an available writable folder')); return; } body.location = feedLocation.value; body.folder = feedFolderPath; body.ratio = Number(body.ratio); body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { const saved = await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); if (kind === 'feeds' && (saved.start_at ? new Date(saved.start_at).getTime() : null) !== (body.start_at ? new Date(body.start_at).getTime() : null)) throw new Error(t('The saved start date could not be verified. Your form is preserved.')); form.reset(); form.elements.namedItem('id').value = ''; await loadSources(kind); showNotification(t("Saved palette"), 'success'); } catch (error) { notify(error); } };
+  const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { if (!feedStorageReady) { showNotification(t('Choose an available writable folder')); return; } body.location = feedLocation.value; body.folder = feedFolderPath; body.ratio = Number(body.ratio); for (const key of ['include','exclude']) body[key] = String(body[key] || '').split(',').map(x => x.trim()).filter(Boolean); body.badges = [...form.elements.namedItem('badges').selectedOptions].map(option => option.value); body.max_bytes = body.max_gib ? Math.round(Number(body.max_gib) * (1024 ** 3)) : null; delete body.max_gib; body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { const saved = await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); if (kind === 'feeds' && (saved.start_at ? new Date(saved.start_at).getTime() : null) !== (body.start_at ? new Date(body.start_at).getTime() : null)) throw new Error(t('The saved start date could not be verified. Your form is preserved.')); form.reset(); form.elements.namedItem('id').value = ''; await loadSources(kind); showNotification(t("Saved palette"), 'success'); } catch (error) { notify(error); } };
   form.addEventListener('reset', () => { form.elements.namedItem('id').setAttribute('value', ''); });
 }
 for (const button of document.querySelectorAll('[data-view]')) button.onclick = async () => { message.textContent = ''; for (const other of document.querySelectorAll('[data-view]')) other.setAttribute('aria-pressed', String(other === button)); for (const section of document.querySelectorAll('.view')) section.hidden = section.id !== button.dataset.view; document.querySelector('#connection-flow').hidden = button.dataset.view !== 'vpn'; try { if (button.dataset.view === 'feeds' || button.dataset.view === 'trackers') { await loadSources(button.dataset.view); if (button.dataset.view === 'feeds' && appRole === 'administrator') await loadFeedLocations(feedLocations.length ? feedLocation.value : undefined, feedLocations.length ? feedFolderPath : ''); } else if (button.dataset.view === 'vpn') await refreshVpn(); } catch (error) { notify(error); } };
@@ -583,6 +562,7 @@ document.querySelector('#login').onsubmit = async event => { event.preventDefaul
 document.querySelector('#refresh').onclick = refresh;
 const addDialog = document.querySelector('#add-torrent');
 const addForm = document.querySelector('#add-torrent-form');
+document.querySelector('#seed-preview-button').onclick = richPreview;
 const fileInput = document.querySelector('#add-file');
 const fileField = document.querySelector('#file-field');
 let droppedTorrent = null;
@@ -606,6 +586,7 @@ function updateCleanupFields() {
 document.querySelector('#add-cleanup-mode').onchange = updateCleanupFields;
 document.querySelector('#add-cleanup-action').onchange = updateCleanupFields;
 function setAddMode() {
+  richPreview.request++; document.querySelector('#seed-add-preview').replaceChildren();
   const fileMode = addForm.elements.namedItem('mode').value === 'file';
   document.querySelector('#magnet-field').hidden = fileMode; fileField.hidden = !fileMode;
   document.querySelector('#add-magnet').disabled = fileMode; document.querySelector('#add-magnet').required = !fileMode;
@@ -618,7 +599,7 @@ function updateAddStart() {
 for (const radio of addForm.querySelectorAll('[name="mode"]')) radio.onchange = setAddMode;
 function openAdd() {
   if (addDialog.open) return;
-  showNotification(''); addForm.reset(); droppedTorrent = null;
+  showNotification(''); addForm.reset(); droppedTorrent = null; richPreview.request++; document.querySelector('#seed-add-preview').replaceChildren();
   document.querySelector('#file-name').textContent = ''; setAddMode();
   updateAddStart();
   updateCleanupFields();
@@ -658,7 +639,8 @@ addDialog.addEventListener('close', () => { document.body.append(document.queryS
 function closeAdd() { if (!addingTorrent) addDialog.close(); }
 document.querySelector('#close-add').onclick = closeAdd; document.querySelector('#cancel-add').onclick = closeAdd;
 addDialog.addEventListener('cancel', event => { if (addingTorrent) event.preventDefault(); });
-fileInput.onchange = () => { droppedTorrent = null; document.querySelector('#file-name').textContent = fileInput.files[0]?.name || ''; setAddMode(); };
+document.querySelector('#add-magnet').addEventListener('input', () => {richPreview.request++; document.querySelector('#seed-add-preview').replaceChildren();});
+fileInput.onchange = () => { richPreview.request++; document.querySelector('#seed-add-preview').replaceChildren(); droppedTorrent = null; document.querySelector('#file-name').textContent = fileInput.files[0]?.name || ''; setAddMode(); };
 fileField.ondragover = event => { event.preventDefault(); if (!addingTorrent) fileField.classList.add('dragging'); };
 fileField.ondragleave = () => fileField.classList.remove('dragging');
 function canDropTorrent() { return document.body.classList.contains('signed-in') && appRole !== 'viewer' && !addingTorrent; }

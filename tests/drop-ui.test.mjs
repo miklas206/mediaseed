@@ -50,7 +50,7 @@ function setup() {
       return {ok: true, json: async () => ({needsSetup: true})};
     },
   });
-  vm.runInContext(readFileSync(new URL('../mediaseed/static/i18n.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
+  vm.runInContext(readFileSync(new URL('../mediaseed/static/i18n.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/rich-ui.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
   const submit = form.onsubmit;
   form.onsubmit = async event => {if (!vm.runInContext("addStorageReady", context)) await context.loadAddStorage(); return submit(event);};
   const refresh = context.refresh;

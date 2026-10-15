@@ -20,7 +20,7 @@ class CleanupPolicy(BaseModel):
     delete_files: bool = False
 
 
-def source_hashes(magnet=None, content=None):
+def source_hashes(magnet=None, content=None, include_metadata=False):
     if magnet:
         topics = parse_qs(urlsplit(magnet).query).get("xt", [])
         hashes = []
@@ -73,6 +73,30 @@ def source_hashes(magnet=None, content=None):
         parse()
         if index != len(content) or not isinstance(info_value, dict):
             raise ValueError()
+        if include_metadata:
+            size = info_value.get(b"length")
+            if b"files" in info_value:
+                if not isinstance(info_value[b"files"], list) or any(not isinstance(item, dict) for item in info_value[b"files"]):
+                    raise ValueError()
+                lengths = [item.get(b"length") for item in info_value[b"files"] if isinstance(item, dict)]
+                size = sum(lengths) if lengths and all(type(value) is int and value >= 0 for value in lengths) else None
+            if b"file tree" in info_value:
+                def tree_size(tree):
+                    if not isinstance(tree, dict):
+                        raise ValueError()
+                    if b"" in tree:
+                        length = tree[b""].get(b"length")
+                        if type(length) is not int or length < 0:
+                            raise ValueError()
+                        return length
+                    return sum(tree_size(value) for value in tree.values())
+                size = tree_size(info_value[b"file tree"])
+            if size is not None and (type(size) is not int or not 0 <= size <= 2 ** 63 - 1):
+                raise ValueError()
+            name = info_value.get(b"name.utf-8", info_value.get(b"name", b""))
+            return {"size": size if type(size) is int and size >= 0 else None,
+                    "name": name.decode("utf-8", errors="replace")[:300] if isinstance(name, bytes) else None,
+                    "hashes": source_hashes(content=content)}
         if info_value.get(b"meta version") == 2 and b"pieces" not in info_value:
             digest = hashlib.sha256(info_slice).hexdigest()
             return [digest, digest[:40]]

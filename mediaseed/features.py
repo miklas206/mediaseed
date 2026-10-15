@@ -1,18 +1,20 @@
-import json
-import secrets
-import re
-import time
-import math
 import asyncio
+import json
+import math
+import re
+import secrets
+import time
+from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from mediaseed.cleanup import source_hashes
 from mediaseed.covers import Covers
 from mediaseed.rss_worker import RssWorker
-from mediaseed.cleanup import source_hashes
 
 
 class SeedingPolicy(BaseModel):
@@ -33,6 +35,17 @@ class FeedSettings(BaseModel):
     folder: str = Field(default="", max_length=1000)
     ratio: float = Field(default=1, ge=1, le=1000, allow_inf_nan=False)
     start_at: str | None = Field(default=None, max_length=40)
+    include: list[str] = Field(default_factory=list, max_length=50)
+    exclude: list[str] = Field(default_factory=list, max_length=50)
+    max_bytes: int | None = Field(default=None, ge=1, le=100 * 1024 ** 4)
+    badges: list[Literal["freeleech", "double_upload", "featured", "internal", "refundable"]] = Field(default_factory=list, max_length=5)
+
+    @field_validator("include", "exclude")
+    @classmethod
+    def fragments(cls, values):
+        if any(not any(c.isalnum() for c in value) or len(value) > 120 or any(ord(c) < 32 for c in value) for value in values):
+            raise ValueError("Use up to 50 plain title fragments of 120 characters")
+        return list(dict.fromkeys(value.strip() for value in values))
 
     @field_validator("folder")
     @classmethod
@@ -204,6 +217,63 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         return cached["public"].get("username") if cached and account and cached["key"] == account["api_key"] and time.monotonic() - cached["checked"] < 360 and cached["public"].get("status") == "ok" else None
     covers = Covers(data_dir, rows, tracker_read, qbit, username=tracker_username) if data_dir else None
     rss_worker = RssWorker(database, rows, qbit, vpn_status, storage=storage) if vpn_status else None
+
+    async def verify_badges(identifier, title):
+        for account in rows("trackers")[:3]:
+            result = await tracker_read(account, "/api/torrents/filter", {"name": title[:200], "perPage": 50})
+            for row in result.get("data", [])[:50]:
+                attributes = row.get("attributes", {})
+                if str(attributes.get("info_hash", "")).lower() == identifier:
+                    covers.remember(identifier, account, attributes)
+                    return benefits(identifier, session={})
+        return {"status": "unknown"}
+
+    if rss_worker:
+        rss_worker.benefits_lookup = verify_badges
+
+    @app.post("/api/torrent-preview")
+    async def preview(request: Request, session=Depends(authorized)):
+        content = bytearray()
+        async for part in request.stream():
+            content.extend(part)
+            if len(content) > 4 * 1024 * 1024:
+                raise HTTPException(413, "Torrent file exceeds 4 MiB")
+        if request.headers.get("content-type", "").startswith("application/x-bittorrent"):
+            metadata = source_hashes(content=bytes(content), include_metadata=True)
+        else:
+            try:
+                body = json.loads(content)
+                magnet = body["magnet"]
+                if not isinstance(magnet, str) or len(magnet) > 8192 or not magnet.startswith("magnet:?"):
+                    raise ValueError()
+                hashes = source_hashes(magnet=magnet)
+                if not hashes or any(not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", value) for value in hashes):
+                    raise ValueError()
+                metadata = {"name": None, "size": None, "hashes": hashes}
+            except (KeyError, ValueError, TypeError):
+                raise HTTPException(422, "Invalid torrent source") from None
+        evidence = next((benefits(value, session={}) for value in metadata["hashes"] if benefits(value, session={}).get("status") == "matched"), {})
+        size = metadata["size"] if metadata["size"] is not None else evidence.get("size")
+        estimates = []
+        if type(size) is int and size >= 0:
+            for account in tracker_overview():
+                stats = account.get("stats")
+                if account["status"] != "ok" or not stats or not account.get("checkedAt") or time.time() - account["checkedAt"] > 600:
+                    continue
+                uploaded, downloaded = stats.get("uploaded"), stats.get("downloaded")
+                if type(uploaded) not in (int, float) or type(downloaded) not in (int, float) or not all(math.isfinite(value) for value in (uploaded, downloaded)) or min(uploaded, downloaded) < 0:
+                    continue
+                discount = evidence.get("freeleech") if evidence.get("tracker") == account["name"] else None
+                charged = size * (1 - discount / 100) if discount in {0,25,50,75,100} else size
+                estimates.append({"name": account["name"], "current": uploaded / downloaded if downloaded else None,
+                                  "projected": uploaded / (downloaded + charged) if downloaded + charged else None})
+        return {"name": metadata["name"], "size": size, "estimates": estimates}
+
+    @app.get("/api/feeds/{identifier}/history")
+    def feed_history(identifier: str, session=Depends(authorized)):
+        if not any(row["id"] == identifier for row in rows("feeds")):
+            raise HTTPException(404, "Feed not found")
+        return {"entries": rss_worker.history(identifier) if rss_worker else []}
 
     @app.get("/api/covers/{identifier}")
     def cover(identifier: str, session=Depends(authorized)):

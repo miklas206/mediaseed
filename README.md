@@ -1,5 +1,7 @@
 # MediaSeed
 
+MediaSeed 0.1.8 adds poster rows, tabbed torrent details, account-ratio preview and optional RSS title/size/badge filters with retained decision history. See [workspace behavior, upgrade and verification](docs/rich-workspace.md).
+
 Browserudvidelsen findes via **Browserudvidelse** i appens topbjælke eller `/static/extensions.html`. Siden genkender browseren og tilbyder Chromium-/Firefox-pakker samt Safari-kilde. Se [installation og tilladelser](browser-extension/README.md). Byg pakker med `python browser-extension/build.py` efter ændringer i udvidelsen.
 
 The connection panel above the app tabs shows MediaSeed → MediaVPN → Internet,

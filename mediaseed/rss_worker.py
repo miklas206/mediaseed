@@ -1,11 +1,23 @@
 import asyncio
 import hashlib
 import re
+import time
+import unicodedata
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException
+
+from mediaseed.cleanup import source_hashes
+
+
+def title_matches(title, feed):
+    def normalize(value):
+        return ' '.join(re.sub(r'[^\w]+', ' ', unicodedata.normalize('NFKC', value).casefold().replace('_', ' ')).split())
+    title = normalize(title)
+    include, exclude = feed.get('include', []), feed.get('exclude', [])
+    return (not include or any(normalize(value) in title for value in include)) and not any(normalize(value) in title for value in exclude)
 
 
 def date_matches(article, start):
@@ -29,8 +41,21 @@ class RssWorker:
         self.storage = storage
         self.lock = asyncio.Lock()
         self.reports = {}
+        self.benefits_lookup = None
+        self.metadata_budget = 6
         with database() as connection:
             connection.execute("CREATE TABLE IF NOT EXISTS rss_history (token TEXT PRIMARY KEY, feed TEXT NOT NULL, status TEXT NOT NULL, created REAL NOT NULL, torrent_hash TEXT)")
+            connection.execute("CREATE TABLE IF NOT EXISTS rss_observations (feed TEXT NOT NULL, token TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, created REAL NOT NULL, PRIMARY KEY(feed,token))")
+
+    def observe(self, feed, token, article, status):
+        with self.database() as connection:
+            connection.execute("INSERT INTO rss_observations VALUES (?,?,?,?,?) ON CONFLICT(feed,token) DO UPDATE SET status=excluded.status,created=excluded.created WHERE NOT (rss_observations.status='added' AND excluded.status='already_processed')", (feed['id'], token, str(article.get('title', ''))[:300], status, time.time()))
+            connection.execute("DELETE FROM rss_observations WHERE rowid NOT IN (SELECT rowid FROM rss_observations ORDER BY created DESC LIMIT 1000)")
+
+    def history(self, identifier):
+        with self.database() as connection:
+            rows = connection.execute("SELECT title,status,created FROM rss_observations WHERE feed=? ORDER BY created DESC LIMIT 100", (identifier,)).fetchall()
+        return [dict(zip(('title','status','created'), row)) for row in rows]
 
     def destination(self, feed):
         folder = feed.get("folder", "")
@@ -45,6 +70,7 @@ class RssWorker:
 
     async def tick(self):
         async with self.lock:
+            self.metadata_budget = 6
             if not (await self.vpn_status()).get("downloadsEnabled"):
                 return
             feeds = [row for row in self.rows("feeds") if row.get("enabled")][:20]
@@ -97,7 +123,14 @@ class RssWorker:
             self.reports[feed["id"]] = "Feed kunne ikke hentes"
             return
         for article in articles[:500]:
-            if not isinstance(article, dict) or article.get("isRead") or not date_matches(article, feed.get("start_at")):
+            if not isinstance(article, dict) or article.get("isRead"):
+                continue
+            observation = hashlib.sha256((str(article.get('id', '')) + str(article.get('title', ''))).encode()).hexdigest()
+            if not date_matches(article, feed.get('start_at')):
+                self.observe(feed, observation, article, 'before_start_date')
+                continue
+            if not title_matches(str(article.get('title', '')), feed):
+                self.observe(feed, observation, article, 'title_filtered')
                 continue
             link = article.get("torrentURL") or article.get("link")
             if not isinstance(link, str) or len(link) > 4096:
@@ -108,9 +141,35 @@ class RssWorker:
             token = hashlib.sha256((feed["id"] + "\n" + str(article.get("id", "")) + "\n" + link).encode()).hexdigest()
             with self.database() as connection:
                 if connection.execute("SELECT 1 FROM rss_history WHERE token=?", (token,)).fetchone():
+                    self.observe(feed, observation, article, 'already_processed')
                     continue
+            if self.metadata_budget <= 0:
+                self.reports[feed['id']] = 'Waiting for the next bounded metadata check'
+                return
+            self.metadata_budget -= 1
             response = await self.qbit("/api/v2/rss/torrent", payload={"url": link})
             content = response.content
+            if feed.get('max_bytes') or feed.get('badges'):
+                try:
+                    metadata = source_hashes(content=content, include_metadata=True)
+                except HTTPException:
+                    self.observe(feed, observation, article, 'metadata_unknown')
+                    continue
+                if feed.get('max_bytes') and (metadata['size'] is None or metadata['size'] > feed['max_bytes']):
+                    self.observe(feed, observation, article, 'size_unknown' if metadata['size'] is None else 'too_large')
+                    continue
+                if feed.get('badges'):
+                    try:
+                        evidence = await self.benefits_lookup(metadata['hashes'][0], str(article.get('title', ''))) if self.benefits_lookup else {}
+                        flags = {'freeleech': evidence.get('freeleech') == 100, 'double_upload': evidence.get('doubleUpload') is True,
+                                 'featured': evidence.get('featured') is True, 'internal': evidence.get('internal') is True, 'refundable': evidence.get('refundable') is True}
+                        valid = evidence.get('status') == 'matched' and evidence.get('infoHash') in metadata['hashes'] and 0 <= time.time() - evidence.get('checkedAt', 0) < 300
+                        if not valid or not all(flags.get(flag) for flag in feed['badges']):
+                            self.observe(feed, observation, article, 'badges_unverified')
+                            continue
+                    except Exception:
+                        self.observe(feed, observation, article, 'badges_unverified')
+                        continue
             destination = self.destination(feed)
             if next((row for row in self.rows("feeds") if row["id"] == feed["id"]), None) != feed:
                 self.reports[feed["id"]] = "Feed changed; waiting for the next refresh"
@@ -126,9 +185,11 @@ class RssWorker:
             outcome = response.json()
             identifiers = outcome.get("added_torrent_ids", []) if isinstance(outcome, dict) else []
             if outcome.get("success_count") != 1 or outcome.get("failure_count") != 0 or len(identifiers) != 1 or not re.fullmatch(r"[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", str(identifiers[0])):
+                self.observe(feed, observation, article, 'import_unconfirmed')
                 self.reports[feed["id"]] = "Tilføjelse ikke bekræftet; automatisk genforsøg blokeret"
                 return
             identifier = identifiers[0].lower()
+            self.observe(feed, observation, article, 'added')
             with self.database() as connection:
                 connection.execute("UPDATE rss_history SET status='added',torrent_hash=? WHERE token IN (?,?)", (identifier, token, file_token))
             current = next((row for row in self.rows("feeds") if row["id"] == feed["id"]), None)

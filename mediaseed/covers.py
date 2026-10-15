@@ -4,7 +4,7 @@ import json
 import re
 import time
 from pathlib import Path
-from urllib.parse import urlsplit, parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
@@ -58,6 +58,7 @@ class Covers:
             freeleech = None
         username = self.username(account["id"])
         evidence = {"status": "matched", "infoHash": identifier.lower(), "tracker": account["name"][:80],
+                    "size": attributes.get("size") if type(attributes.get("size")) is int and attributes["size"] >= 0 else None,
                     "checkedAt": time.time(), "createdAt": attributes.get("created_at") if isinstance(attributes.get("created_at"), str) and len(attributes["created_at"]) <= 80 else None,
                     "ownUpload": bool(username and attributes.get("uploader") == username),
                     "freeleech": 100 if featured else freeleech if freeleech in {0, 25, 50, 75, 100} else None,
