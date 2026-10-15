@@ -1,6 +1,7 @@
 // Account language; English source keys and Danish translations.
 (() => {
 const messages = {
+  "MediaSeed 0.1.9": "MediaSeed 0.1.9",
   "Waiting for the next bounded metadata check": "Afventer næste kontrol af torrentoplysninger",
   "Seeding progress": "Seedingfremdrift",
   "Downloaded": "Downloadet",
