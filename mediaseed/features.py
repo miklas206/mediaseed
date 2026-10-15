@@ -12,7 +12,7 @@ from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from mediaseed.cleanup import source_hashes
+from mediaseed.cleanup import source_hashes, CleanupPolicy
 from mediaseed.covers import Covers
 from mediaseed.rss_worker import RssWorker
 from mediaseed.ratio_scout import RatioScout, RatioSettings
@@ -39,6 +39,7 @@ class FeedSettings(BaseModel):
     location: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9-]{1,80}$")
     folder: str = Field(default="", max_length=1000)
     ratio: float = Field(default=1, ge=1, le=1000, allow_inf_nan=False)
+    cleanup: CleanupPolicy = Field(default_factory=CleanupPolicy)
     start_at: str | None = Field(default=None, max_length=40)
     include: list[str] = Field(default_factory=list, max_length=50)
     exclude: list[str] = Field(default_factory=list, max_length=50)
@@ -230,6 +231,8 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         return cached["public"].get("username") if cached and account and cached["key"] == account["api_key"] and time.monotonic() - cached["checked"] < 360 and cached["public"].get("status") == "ok" else None
     covers = Covers(data_dir, rows, tracker_read, qbit, username=tracker_username) if data_dir else None
     rss_worker = RssWorker(database, rows, qbit, vpn_status, storage=storage) if vpn_status else None
+    if rss_worker:
+        rss_worker.cleanup = cleanup
     scout = RatioScout(database, rows, tracker_read, qbit, vpn_status, storage, add_stopped, covers, credit) if vpn_status and storage else None
 
     @app.get("/api/ratio-scout")
@@ -285,6 +288,10 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
             except (KeyError, ValueError, TypeError):
                 raise HTTPException(422, "Invalid torrent source") from None
         evidence = next((benefits(value, session={}) for value in metadata["hashes"] if benefits(value, session={}).get("status") == "matched"), {})
+        pending = False
+        if covers and not evidence:
+            for value in metadata['hashes']:
+                pending = covers.enqueue(value, metadata.get('name')) or pending
         size = metadata["size"] if metadata["size"] is not None else evidence.get("size")
         estimates = []
         if type(size) is int and size >= 0:
@@ -299,7 +306,7 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
                 charged = size * (1 - discount / 100) if discount in {0,25,50,75,100} else size
                 estimates.append({"name": account["name"], "current": uploaded / downloaded if downloaded else None,
                                   "projected": uploaded / (downloaded + charged) if downloaded + charged else None, "accountId": account["id"], "uploaded":uploaded, "downloaded":downloaded, "charged":charged})
-        return {"name": metadata["name"], "size": size, "estimates": estimates}
+        return {"name": metadata["name"], "size": size, "estimates": estimates, "benefits": evidence, "metadataPending": pending}
 
     @app.get("/api/feeds/{identifier}/history")
     def feed_history(identifier: str, page: int = Query(default=1,ge=1,le=100000), pageSize: int = Query(default=25,ge=1,le=50), session=Depends(authorized)):
@@ -465,7 +472,7 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         async with tracker_lock:
             for account in rows("trackers")[:10]:
                 cached = tracker_cache.get(account["id"])
-                if not cached or cached["key"] != account["api_key"] or time.monotonic() - cached["checked"] >= 300:
+                if not cached or cached["key"] != account["api_key"] or time.monotonic() - cached["checked"] >= 60:
                     try:
                         data = await tracker_read(account, "/api/user")
                         if not isinstance(data, dict) or not isinstance(data.get("stats"), dict):
@@ -487,7 +494,8 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
                             ranks["automatic"] = data["group"].strip()[:80]
                         public = {"status": "ok", "stats": stats, "ranks": ranks, "rankProgress": rank_progress(ranks, stats), "username": str(data.get("username", ""))[:80], "checkedAt": time.time()}
                     except (HTTPException, ValueError, TypeError):
-                        public = {"status": "error", "stats": None, "error": "Tracker account statistics are unavailable"}
+                        previous = cached["public"] if cached and cached["key"] == account["api_key"] else {}
+                        public = {**previous, "status": "stale" if previous.get("stats") else "error", "error": "Tracker account statistics are unavailable"}
                     cached = {"key": account["api_key"], "checked": time.monotonic(), "public": public}
                     tracker_cache[account["id"]] = cached
                 results.append({key: value for key, value in account.items() if key != "api_key"} | {"configured": True, **cached["public"]})
@@ -526,7 +534,7 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         result = []
         for account in rows("trackers")[:10]:
             cached = tracker_cache.get(account["id"])
-            fresh = cached and cached["key"] == account["api_key"] and time.monotonic() - cached["checked"] < 360
+            fresh = cached and cached["key"] == account["api_key"]
             public = cached["public"] if fresh else {}
             result.append({"id": account["id"], "name": account["name"], "status": public.get("status", "pending"), "stats": public.get("stats"), "ranks": public.get("ranks", {}), "rankProgress": public.get("rankProgress"), "checkedAt": public.get("checkedAt")})
         return result

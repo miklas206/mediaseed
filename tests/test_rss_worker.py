@@ -5,6 +5,53 @@ import sqlite3
 from contextlib import contextmanager
 import httpx
 import pytest
+from mediaseed.cleanup import CleanupManager, source_hashes
+
+
+@pytest.mark.parametrize("pending", [False, True])
+def test_rss_cleanup_is_armed_before_start_and_preserved_on_restart(tmp_path, pending):
+    @contextmanager
+    def database():
+        with sqlite3.connect(tmp_path / "cleanup-feed.sqlite") as db:
+            yield db
+    content = b"d4:infod6:lengthi1e4:name4:test12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaaee"
+    identifier = source_hashes(content=content)[0]
+    feed = {"id": "a"*24, "enabled": True, "url": "https://nordicbytes.org/rss/synthetic", "ratio": 2,
+            "cleanup": {"mode": "ratio", "ratio": 3, "delete_files": True}}
+    items = {"MediaSeed-RSS-"+feed['id']: {"url": feed['url'], "articles": [
+        {"id": "one", "title": "Synthetic release", "torrentURL": "https://nordicbytes.org/torrents/download/1"}]}}
+    calls, torrents = [], []
+    async def vpn():
+        return {"downloadsEnabled": True}
+    async def qbit(path, method="GET", payload=None, files=None):
+        calls.append(path)
+        if path.endswith('/items'):
+            return httpx.Response(200, json=items)
+        if path.endswith('/torrent'):
+            return httpx.Response(200, content=content)
+        if path.endswith('/info'):
+            return httpx.Response(200, json=torrents)
+        if path.endswith('/add'):
+            assert payload['stopped'] == 'true' and payload['tags'].startswith('MediaSeed-Cleanup-')
+            if not pending:
+                torrents.append({'hash': identifier, 'tags': payload['tags'], 'progress': 0, 'state': 'stoppedDL'})
+            return httpx.Response(200, json={'success_count': 1, 'failure_count': 0, 'added_torrent_ids': [identifier]})
+        return httpx.Response(204)
+    async def check():
+        worker = RssWorker(database, lambda kind: [feed], qbit, vpn)
+        worker.cleanup = CleanupManager(database, qbit, vpn)
+        await worker.tick()
+        rule = CleanupManager(database, qbit, vpn).public(identifier)
+        assert rule['mode'] == 'ratio' and rule['ratio'] == 3 and rule['delete_files']
+        assert rule['status'] == ('waiting' if pending else 'active')
+        if pending:
+            assert '/api/v2/torrents/start' not in calls
+        else:
+            assert calls.index('/api/v2/torrents/setShareLimits') < calls.index('/api/v2/torrents/start')
+        await worker.tick()
+        assert calls.count('/api/v2/torrents/add') == 1
+        assert '/api/v2/torrents/delete' not in calls
+    asyncio.run(check())
 
 
 def test_feed_date_gate_rejects_missing_old_and_future_dates():

@@ -70,14 +70,15 @@ $('add').onsubmit = async e => {
   e.preventDefault(); if (adding) return;
   let controls;
   try {
-    let item = selected?.kind === 'file' || selected?.kind === 'link' ? {...selected} : {kind: 'magnet', magnet: MS.magnet($('magnet').value)};
+    let item = ['file','link','rss'].includes(selected?.kind) ? {...selected} : {kind: 'magnet', magnet: MS.magnet($('magnet').value)};
     item = {...item, ...savedDefaults, start: ['start', 'pause'].includes(e.submitter?.value) ? e.submitter.value === 'start' : savedDefaults.start};
+    if(e.submitter?.value==='dialog'||item.kind==='rss')item.mode='dialog';
     adding = true; controls = [...document.querySelectorAll('button')]; controls.forEach(b => {b.disabled = true;});
     // Request only the specific source host, during this explicit user gesture.
     if (item.kind === 'link') await permission(MS.webURL(item.url).origin);
     status(t("Sending to MediaSeed…"));
     const result = await message({type: 'send', item, pending});
-    status(result.cleanupPending ? t("Added paused · cleanup rule is awaiting preparation. Your selected start will follow.") : result.pending ? t("Added · waiting for torrent metadata in MediaSeed.") : result.stopped ? t("Added paused.") : t("Added · start requested. Follow progress in MediaSeed."));
+    status(result.opened ? t("Opened in MediaSeed for review.") : result.cleanupPending ? t("Added paused · cleanup rule is awaiting preparation. Your selected start will follow.") : result.pending ? t("Added · waiting for torrent metadata in MediaSeed.") : result.stopped ? t("Added paused.") : t("Added · start requested. Follow progress in MediaSeed."));
     showItem(null); $('file').value = ''; pending = null;
   } catch (err) { status(err.message, true); }
   finally { adding = false; controls?.forEach(b => {b.disabled = false;}); $('enable').disabled = !currentTab; }

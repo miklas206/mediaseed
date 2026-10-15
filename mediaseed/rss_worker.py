@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 
-from mediaseed.cleanup import source_hashes
+from mediaseed.cleanup import source_hashes, CleanupPolicy
 from mediaseed.activity import Activity
 from mediaseed import feed_uploads
 
@@ -44,6 +44,7 @@ class RssWorker:
         self.lock = asyncio.Lock()
         self.reports = {}
         self.benefits_lookup = None
+        self.cleanup = None
         self.metadata_budget = 6
         self.activity = Activity(database)
         with database() as connection:
@@ -199,8 +200,19 @@ class RssWorker:
                     continue
                 connection.execute("INSERT INTO rss_history VALUES (?,?,?,strftime('%s','now'),NULL)", (token, feed["id"], "intent"))
                 connection.execute("INSERT INTO rss_history VALUES (?,?,?,strftime('%s','now'),NULL)", (file_token, feed["id"], "intent"))
-            response = await self.qbit("/api/v2/torrents/add", "POST", {"stopped": "true", "paused": "true", "savepath": destination, "autoTMM": "false", "ratioLimit": str(feed["ratio"]), "seedingTimeLimit": "2940", "category": item_path}, files={"torrents": ("rss.torrent", content, "application/x-bittorrent")})
-            outcome = response.json()
+            policy = CleanupPolicy(**(feed.get('cleanup') or {}))
+            async def import_stopped(qbit, ratio, **args):
+                payload = {"stopped": "true", "paused": "true", "savepath": destination, "autoTMM": "false", "ratioLimit": str(ratio), "seedingTimeLimit": "2940", "category": item_path}
+                if args.get('tag'):
+                    payload['tags'] = args['tag']
+                response = await qbit("/api/v2/torrents/add", "POST", payload, files={"torrents": ("rss.torrent", content, "application/x-bittorrent")})
+                return response.json()
+            if policy.mode != 'never':
+                if not self.cleanup:
+                    raise HTTPException(409, "Automatic cleanup unavailable; import blocked")
+                outcome = await self.cleanup.add(import_stopped, policy, feed['ratio'], content=content, start=False)
+            else:
+                outcome = await import_stopped(self.qbit, feed['ratio'])
             identifiers = outcome.get("added_torrent_ids", []) if isinstance(outcome, dict) else []
             if outcome.get("success_count") != 1 or outcome.get("failure_count") != 0 or len(identifiers) != 1 or not re.fullmatch(r"[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", str(identifiers[0])):
                 self.observe(feed, observation, article, 'import_unconfirmed')
@@ -212,6 +224,9 @@ class RssWorker:
                 feed_uploads.record(connection, feed["id"], identifier, article.get("title", ""), time.time())
                 connection.execute("UPDATE rss_history SET status='added',torrent_hash=? WHERE token IN (?,?)", (identifier, token, file_token))
             current = next((row for row in self.rows("feeds") if row["id"] == feed["id"]), None)
+            if outcome.get('cleanupPending'):
+                self.reports[feed['id']] = 'Cleanup preparation pending; torrent added paused'
+                continue
             if current == feed and (await self.vpn_status()).get("downloadsEnabled"):
                 self.destination(feed)
                 await self.qbit("/api/v2/torrents/topPrio", "POST", {"hashes": identifier})

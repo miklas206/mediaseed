@@ -59,6 +59,7 @@
       for(const [label,value] of [['Tracker upload',row.stats.uploaded],['Tracker download',row.stats.downloaded]]){const metric=element('div');metric.append(element('dt',t(label)),element('dd',trackerBytes(value)));totals.append(metric);}
       const identity=[row.name,row.ranks?.automatic?t('Rank: {0}',{0:row.ranks.automatic}):t('Rank unavailable from tracker'),t('Warnings')+': '+trackerNumber(row.stats.warnings)].join(' · ');
       account.append(totals,element('small',identity));
+      if(row.status==='stale')account.append(element('small',t('Showing last known tracker statistics')));
       if(row.rankProgress?.target)account.append(element('small',t('Next rank: {0} · View requirements',{0:row.rankProgress.target.title})));
       else account.append(element('small',t('View rank requirements')));
     } else account.append(element('small',t('Manage trackers')));

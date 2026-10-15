@@ -45,6 +45,7 @@ class Covers:
         self.tracker_read = tracker_read
         self.qbit = qbit
         self.checked = {}
+        self.pending = {}
         self.lock = asyncio.Lock()
         self.username = username or (lambda identifier: None)
 
@@ -83,7 +84,9 @@ class Covers:
             if not isinstance(torrents, list):
                 return
             budget = 6
-            for torrent in torrents[:500]:
+            candidates = [*self.pending.values(), *torrents[:500]]
+            self.pending.clear()
+            for torrent in candidates:
                 if not isinstance(torrent, dict):
                     continue
                 identifier = torrent.get("hash", "")
@@ -140,6 +143,16 @@ class Covers:
             self.cleanup()
             if len(self.checked) > 1000:
                 self.checked = {key: value for key, value in self.checked.items() if time.monotonic() - value < 300}
+
+    def enqueue(self, identifier, name):
+        if not self.accounts("trackers") or self.path(identifier) is None or not isinstance(name, str) or not name.strip():
+            return False
+        if time.monotonic() - self.checked.get(identifier, -1000) < 300:
+            return False
+        if len(self.pending) < 100:
+            self.pending[identifier] = {'hash': identifier, 'name': name[:500]}
+            return True
+        return identifier in self.pending
 
     async def download(self, url, path):
         async with httpx.AsyncClient(timeout=8, follow_redirects=False, trust_env=False) as client:

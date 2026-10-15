@@ -1,8 +1,8 @@
-# MediaSeed browserudvidelse 1.2.2
+# MediaSeed browserudvidelse 1.3.0
 
 Send magnetlinks og torrentfiler direkte til din egen MediaSeed med gemte standardvalg. Logoet vises i værktøjslinjen og udvidelseslisten. Udvidelsen genbruger dit normale login i en MediaSeed-fane og gemmer ingen adgangskoder, cookies eller CSRF-nøgler. Ingen analytics eller eksterne tjenester.
 
-Version 1.2.2 fanger også NordicBytes' `/torrents/download/...`-links uden `.torrent` i adressen, når hjemmesiden er aktiveret. Filen hentes med kildesidens normale login og sendes med gemte start-/seedingvalg; en popup på kildesiden bekræfter et accepteret svar fra MediaSeed. Andre NordicBytes-sider og almindelige downloads overtages ikke. Efter manuel opdatering skal NordicBytes-fanen genindlæses, så den nye klikfangst indlæses.
+Version 1.3.0 fanger også NordicBytes' `/torrents/download/...`-links uden `.torrent` i adressen, når hjemmesiden er aktiveret. Filen hentes med kildesidens normale login og sendes med gemte start-/seedingvalg; en popup på kildesiden bekræfter et accepteret svar fra MediaSeed. Andre NordicBytes-sider og almindelige downloads overtages ikke. Efter manuel opdatering skal NordicBytes-fanen genindlæses, så den nye klikfangst indlæses.
 
 ## Installation og opdatering
 

@@ -198,7 +198,7 @@ function renderTorrents() {
   sortTorrentRows(rows, sort, document.querySelector('#sort-direction').value || (sort === 'name' ? 'asc' : 'desc'));
   const pending = [...pendingRemovals.values()].filter(row => !row.confirmed).length;
   document.querySelector('#count').textContent = t("{0} of {1} torrents{2}", {0: rows.length, 1: visible.length, 2: pending ? ' · ' + pending + ' fjernes' : ''});
-  const target = document.querySelector('#torrents'); const restoreInteraction = preserveListInteraction(target, 'hash'); target.replaceChildren(); if (!rows.length) target.append(element('p', torrents.length ? t("No matching torrents") : torrentSnapshotValid ? t("No torrents") : t("Torrent client unavailable"), 'muted'));
+  const target = document.querySelector('#torrents'); const restoreInteraction = preserveListInteraction(target, 'hash'); const previousRows = new Map([...target.children].map(item=>[item.dataset.hash,item])); target.replaceChildren(); if (!rows.length) target.append(element('p', torrents.length ? t("No matching torrents") : torrentSnapshotValid ? t("No torrents") : t("Torrent client unavailable"), 'muted'));
   const pageSize = [10,25,50,100].includes(Number(document.querySelector('#page-size').value)) ? Number(document.querySelector('#page-size').value) : 25;
   const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   torrentPage = Math.max(1, Math.min(torrentPage, pages));
@@ -206,7 +206,11 @@ function renderTorrents() {
   document.querySelector('#previous-page').disabled = torrentPage <= 1;
   document.querySelector('#next-page').disabled = torrentPage >= pages;
   document.querySelector('#page-status').textContent = t('Showing {0}–{1} of {2} · Page {3} of {4}', {0: rows.length ? start + 1 : 0, 1: Math.min(start + pageSize, rows.length), 2: rows.length, 3: torrentPage, 4: pages});
-  for (const [index, row] of rows.slice(start, start + pageSize).entries()) target.append(seedTorrent(row, start + index));
+  for (const [index, row] of rows.slice(start, start + pageSize).entries()) {
+    const signature=JSON.stringify([row,start+index,locale(),appRole,downloadsEnabled]);
+    const previous=previousRows.get(row.hash), item=previous?.seedSignature===signature?previous:seedTorrent(row,start+index);
+    item.seedSignature=signature; target.append(item);
+  }
   restoreInteraction();
 
 }
@@ -218,10 +222,12 @@ function renderTransferSummary() {
   const traffic = torrentTraffic();
   document.querySelector('#transfer').textContent = traffic ? `${clientLabel} · Download ${bytes(traffic.dl_info_speed)}/s · Upload ${bytes(traffic.up_info_speed)}/s · ${downloadsEnabled ? t("VPN verified") : t("Downloads blocked until VPN is verified")}${torrents.length === 500 ? t(" · Traffic for the 500 displayed torrents") : ''}` : t("{0} · waiting for traffic measurement", {0: clientLabel});
 }
+let lastTorrentSample = 0;
 function applyTorrentSnapshot(rows, request) {
   if (request !== torrentListRequest) return;
   torrentSnapshotValid = Array.isArray(rows);
   if (torrentSnapshotValid) {
+    lastTorrentSample = Date.now();
     torrents = rows;
     const sample = torrentTraffic();
     if (sample) transferHistory.push(sample);
@@ -234,10 +240,9 @@ function applyTorrentSnapshot(rows, request) {
     renderTorrents();
     renderTraffic(torrentTraffic()); renderTransferSummary();
   } else {
-    transferHistory = [];
-    for (const id of ["seed-download-chart", "seed-upload-chart"]) document.querySelector("#"+id)?.setAttribute("d", "");
-    torrents = []; renderTorrents(); document.querySelector('#count').textContent = t("Torrent client unavailable");
-    renderTraffic(); document.querySelector('#transfer').textContent = t("Torrent client unavailable · waiting for traffic measurement");
+    renderTraffic();
+    document.querySelector('#count').textContent = lastTorrentSample ? t("Last updated {0} seconds ago \u00b7 reconnecting", {0: Math.floor((Date.now() - lastTorrentSample) / 1000)}) : t("Torrent client unavailable");
+    document.querySelector('#transfer').textContent = lastTorrentSample ? t("Last updated {0} seconds ago · reconnecting", {0: Math.floor((Date.now() - lastTorrentSample) / 1000)}) : t("Torrent client unavailable · waiting for traffic measurement");
   }
 }
 async function refreshTorrents() {
@@ -530,9 +535,10 @@ function trackerCard(row) {
   const head = element('div', undefined, 'tracker-card-heading');
   const identity = element('div');
   identity.append(element('h3', row.name), element('p', `NordicBytes${row.username ? ` · ${row.username}` : ''}`, 'muted'));
-  const available = row.status === 'ok' && row.stats && typeof row.stats === 'object';
-  head.append(identity, element('span', available ? t("Connected") : t("Account data unavailable"), `tracker-state${available ? ' ready' : ''}`));
+  const available = ['ok','stale'].includes(row.status) && row.stats && typeof row.stats === 'object';
+  head.append(identity, element('span', row.status === 'stale' ? t('Showing last known tracker statistics') : available ? t("Connected") : t("Account data unavailable"), `tracker-state${available ? ' ready' : ''}`));
   card.append(head);
+  if(row.status==='stale')card.append(element('p',t('Showing last known tracker statistics') + (row.checkedAt ? ' - ' + new Date(row.checkedAt*1000).toLocaleString(locale()) : ''),'muted'));
   if (available) {
     const stats = element('dl', undefined, 'tracker-stats');
     for (const [label, field, format] of [
@@ -558,7 +564,7 @@ function trackerCard(row) {
     card.append(ranks);
 
     const checked = new Date(row.checkedAt * 1000);
-    card.append(element('p', Number.isFinite(checked.getTime()) ? t("Retrieved {0} · Checked automatically every 5 minutes", {0: checked.toLocaleString(locale(), {dateStyle: 'short', timeStyle: 'short'})}) : t("Account statistics time is unknown"), 'tracker-updated muted'));
+    card.append(element('p', Number.isFinite(checked.getTime()) ? t("Retrieved {0} · Checked automatically every minute", {0: checked.toLocaleString(locale(), {dateStyle: 'short', timeStyle: 'short'})}) : t("Account statistics time is unknown"), 'tracker-updated muted'));
   } else {
     card.append(element('p', t("Account statistics could not be retrieved. Check the API key's access under Trackers. MediaSeed retries automatically."), 'muted'));
   }
@@ -575,7 +581,11 @@ async function refreshTrackerOverview() {
   if (appRole === 'viewer' || trackerOverviewLoading) return;
   trackerOverviewLoading = true;
   try { renderTrackerOverview(await api('trackers')); }
-  catch { document.querySelector('#tracker-account-list').replaceChildren(element('p', t("Tracker statistics could not be retrieved. Retrying automatically."), 'muted')); }
+  catch {
+    const previous = globalThis.MediaSeedTrackerRows || [];
+    if (previous.length) renderTrackerOverview(previous.map(row => ({...row, status: row.stats ? 'stale' : row.status})));
+    else document.querySelector('#tracker-account-list').replaceChildren(element('p', t("Tracker statistics could not be retrieved. Retrying automatically."), 'muted'));
+  }
   finally { trackerOverviewLoading = false; }
 }
 const feedForm = document.querySelector('#feed-form');
@@ -658,7 +668,7 @@ async function loadSources(kind) {
     if (kind === 'feeds') { item.append(element('p',t('Estimated credited upload')+': '+(typeof row.upload?.creditedUploadedBytes==='number'?'≈ '+trackerBytes(row.upload.creditedUploadedBytes):t('Unknown'))+(row.upload?.unknownDownloads?' · '+t('{0} downloads without measurements',{0:row.upload.unknownDownloads}):''),'feed-upload-total'));item.append(element('p', [row.include?.join(', '), row.exclude?.length ? t('Avoid') + ': ' + row.exclude.join(', ') : '', row.max_bytes ? t('Maximum size') + ': ' + trackerBytes(row.max_bytes) : '', row.badges?.join(' · ')].filter(Boolean).join(' · ') || t('No additional filters'), 'seed-feed-rules')); actions.append(command(t('History'), () => richFeedHistory(row.id, row.name))); }
     if (appRole === 'administrator') {
       if (kind === 'feeds') actions.append(command(row.paused ? 'Aktivér' : 'Pause', async () => { await api(`feeds/${row.id}/state`, {enabled: row.paused}, 'PUT'); await loadSources('feeds'); showNotification(row.paused ? t("Feed enabled through VPN.") : t("Feed paused. Existing torrents are preserved."), 'success'); }));
-      actions.append(command(t("Edit"), () => { globalThis.MediaSeedWorkspace?.openEditor(kind);  const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); feedEditing = kind === 'feeds'; form.reset(); feedEditing = false; for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } if (kind === 'feeds') { for (const key of ['include','exclude']) form.elements.namedItem(key).value = (row[key] || []).join(', '); for (const option of form.elements.namedItem('badges').options) option.selected = (row.badges || []).includes(option.value); globalThis.MediaSeedWorkspace?.syncBadges(); form.elements.namedItem('max_gib').value = row.max_bytes ? row.max_bytes / (1024 ** 3) : ''; form.elements.namedItem('url').placeholder = t('Saved feed address is kept. Fill in only to change it.'); void loadFeedLocations(row.location || 'local', row.folder || '').catch(notify); } form.querySelector('input[name="name"]').focus(); }), command(t("Remove"), async () => { if (!confirm(t("Remove {0}? Files and torrents are preserved.", {0: row.name}))) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); }));
+      actions.append(command(t("Edit"), () => { globalThis.MediaSeedWorkspace?.openEditor(kind);  const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); feedEditing = kind === 'feeds'; form.reset(); feedEditing = false; for (const [key, value] of Object.entries(row)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } if (kind === 'feeds') { for (const key of ['include','exclude']) form.elements.namedItem(key).value = (row[key] || []).join(', '); for (const option of form.elements.namedItem('badges').options) option.selected = (row.badges || []).includes(option.value); globalThis.MediaSeedWorkspace?.syncBadges(); globalThis.MediaSeedFeedPolicy?.load(row.cleanup); form.elements.namedItem('max_gib').value = row.max_bytes ? row.max_bytes / (1024 ** 3) : ''; form.elements.namedItem('url').placeholder = t('Saved feed address is kept. Fill in only to change it.'); void loadFeedLocations(row.location || 'local', row.folder || '').catch(notify); } form.querySelector('input[name="name"]').focus(); }), command(t("Remove"), async () => { if (!confirm(t("Remove {0}? Files and torrents are preserved.", {0: row.name}))) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); }));
     }
     item.append(actions); target.append(item);
   }
@@ -692,7 +702,7 @@ document.querySelector('#tracker-search').onsubmit = async event => {
   finally { button.disabled = document.querySelector('#tracker-account').options.length === 1; }
 };
 for (const [selector, kind] of [['#feed-form', 'feeds'], ['#tracker-form', 'trackers']]) {
-  const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { if (!feedStorageReady) { showNotification(t('Choose an available writable folder')); return; } body.location = feedLocation.value; body.folder = feedFolderPath; body.ratio = Number(body.ratio); for (const key of ['include','exclude']) body[key] = String(body[key] || '').split(',').map(x => x.trim()).filter(Boolean); body.badges = [...form.elements.namedItem('badges').selectedOptions].map(option => option.value); body.max_bytes = body.max_gib ? Math.round(Number(body.max_gib) * (1024 ** 3)) : null; delete body.max_gib; body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { const saved = await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); if (kind === 'feeds' && (saved.start_at ? new Date(saved.start_at).getTime() : null) !== (body.start_at ? new Date(body.start_at).getTime() : null)) throw new Error(t('The saved start date could not be verified. Your form is preserved.')); form.reset(); form.elements.namedItem('id').value = ''; globalThis.MediaSeedWorkspace?.closeEditor(kind); await loadSources(kind); showNotification(t("Saved palette"), 'success'); } catch (error) { notify(error); } };
+  const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { if (!feedStorageReady) { showNotification(t('Choose an available writable folder')); return; } body.location = feedLocation.value; body.folder = feedFolderPath; body.ratio = Number(body.ratio); body.cleanup = globalThis.MediaSeedFeedPolicy?.value(); for (const key of ['include','exclude']) body[key] = String(body[key] || '').split(',').map(x => x.trim()).filter(Boolean); body.badges = [...form.elements.namedItem('badges').selectedOptions].map(option => option.value); body.max_bytes = body.max_gib ? Math.round(Number(body.max_gib) * (1024 ** 3)) : null; delete body.max_gib; body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { const saved = await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); if (kind === 'feeds' && (saved.start_at ? new Date(saved.start_at).getTime() : null) !== (body.start_at ? new Date(body.start_at).getTime() : null)) throw new Error(t('The saved start date could not be verified. Your form is preserved.')); form.reset(); form.elements.namedItem('id').value = ''; globalThis.MediaSeedWorkspace?.closeEditor(kind); await loadSources(kind); showNotification(t("Saved palette"), 'success'); } catch (error) { notify(error); } };
   form.addEventListener('reset', () => { form.elements.namedItem('id').setAttribute('value', ''); });
 }
 for (const button of document.querySelectorAll('[data-view]')) button.onclick = async () => { message.textContent = ''; for (const other of document.querySelectorAll('[data-view]')) other.setAttribute('aria-pressed', String(other === button)); for (const section of document.querySelectorAll('.view')) section.hidden = section.id !== button.dataset.view; document.querySelector('#connection-flow').hidden = button.dataset.view !== 'vpn'; try { if (button.dataset.view === 'feeds' || button.dataset.view === 'trackers') { await loadSources(button.dataset.view); if (button.dataset.view === 'feeds' && appRole === 'administrator') await loadFeedLocations(feedLocations.length ? feedLocation.value : undefined, feedLocations.length ? feedFolderPath : ''); } else if (button.dataset.view === 'vpn') await refreshVpn(); } catch (error) { notify(error); } };
@@ -703,7 +713,7 @@ document.querySelector('#previous-page').onclick = () => {torrentPage--; renderT
 document.querySelector('#next-page').onclick = () => {torrentPage++; renderTorrents();};
 document.querySelector('#open-rss')?.addEventListener('click', () => document.querySelector('[data-view="feeds"]').click());
 document.querySelector('#manage-trackers').onclick = () => document.querySelector('[data-view="trackers"]').click();
-function showWorkspace() { if (appRole !== 'viewer') void loadSources('feeds').catch(() => { const preview = document.querySelector('#feed-preview'); if (preview) preview.textContent = t('Feed list unavailable'); }); const rssPanel = document.querySelector('.seed-rss'); if (rssPanel) rssPanel.hidden = appRole === 'viewer'; void refreshTrackerOverview(); document.body.classList.add('signed-in'); document.querySelector('#identity').hidden = true; document.querySelector('#workspace').hidden = false; document.querySelector('#logout').hidden = false; document.querySelector('#new-torrent').hidden = appRole === 'viewer'; document.querySelector('#policy-form').hidden = appRole === 'viewer'; for (const selector of ['#feed-form', '#tracker-form', '#vpn-form']) document.querySelector(selector).hidden = appRole !== 'administrator'; for (const selector of ['[data-view="feeds"]', '[data-view="trackers"]', '[data-view="ratio-scout"]']) document.querySelector(selector).hidden = appRole === 'viewer'; refresh(); }
+function showWorkspace() { if (appRole !== 'viewer') void loadSources('feeds').catch(() => { const preview = document.querySelector('#feed-preview'); if (preview) preview.textContent = t('Feed list unavailable'); }); const rssPanel = document.querySelector('.seed-rss'); if (rssPanel) rssPanel.hidden = appRole === 'viewer'; void refreshTrackerOverview(); document.body.classList.add('signed-in'); document.querySelector('#session-loading').hidden = true; document.querySelector('#identity').hidden = true; document.querySelector('#workspace').hidden = false; document.querySelector('#logout').hidden = false; document.querySelector('#new-torrent').hidden = appRole === 'viewer'; document.querySelector('#policy-form').hidden = appRole === 'viewer'; for (const selector of ['#feed-form', '#tracker-form', '#vpn-form']) document.querySelector(selector).hidden = appRole !== 'administrator'; for (const selector of ['[data-view="feeds"]', '[data-view="trackers"]', '[data-view="ratio-scout"]']) document.querySelector(selector).hidden = appRole === 'viewer'; refresh(); }
 document.querySelector('#login').onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(event.target)); try { if (needsSetup) { await api('auth/setup', body); needsSetup = false; } csrf = (await api('auth/login', body)).csrf; const identity = await api('auth/me'); setLanguage(identity.language || 'en'); globalThis.MediaAppTheme.applyIdentity(identity); event.target.reset(); showWorkspace(); } catch (error) { notify(error); } };
 document.querySelector('#refresh').onclick = refresh;
 const addDialog = document.querySelector('#add-torrent');
@@ -903,6 +913,7 @@ async function initializeLogin() {
       catch (error) { if (error.status === 401) location.replace(status.loginUrl); else notify(error); }
       return;
     }
+    document.querySelector('#session-loading').hidden = true; document.querySelector('#identity').hidden = false;
     document.querySelector('#identity-title').textContent = needsSetup ? t("A fresh start.") : t("Welcome back.");
     document.querySelector('#identity-subtitle').textContent = needsSetup ? t("Create your local MediaSeed administrator.") : t("Sign in to MediaSeed.");
     document.querySelector('#login-submit').textContent = needsSetup ? t("Create administrator") : t("Sign in");

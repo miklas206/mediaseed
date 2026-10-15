@@ -18,11 +18,30 @@
   let timer,last='';
   function changed(){clearTimeout(timer);timer=setTimeout(()=>{if(!modal.open)return;const fileMode=form.elements.namedItem('mode').value==='file',files=torrentFiles.filter(item=>item.state!=='added');const signature=fileMode?files.map(item=>torrentFileKey(item.file)).join('|'):document.querySelector('#add-magnet').value;
     if(!signature){last='';preview.replaceChildren(element('p',t('Choose files or paste a magnet to see the estimated account ratio.'),'muted'));return;}
-    if(signature===last)return;last=signature;void richPreview();
+    if(signature===last)return;last=signature;richPreview.retries=0;void richPreview();
   },250);}
   function labels(){caption.textContent=t('Account ratio after adding');previewButton.textContent=t('Refresh estimate');helpTitle.textContent=t('Folder help');hintsTitle.textContent=t('Seeding and VPN');}
   new MutationObserver(labels).observe(document.documentElement,{attributes:true,attributeFilter:['lang']});labels();
   modal.addEventListener('close',()=>{last='';clearTimeout(timer);});
   new MutationObserver(changed).observe(document.querySelector('#torrent-file-list'),{childList:true,subtree:true});
   globalThis.MediaSeedAdd={changed};
+  MediaWizard({form,dialog:modal,titles:['Torrent and folder','Ratio, seeding and files'],groups:[[source,location],[summary,settings]],onStep:step=>{if(step===1)changed();},validate:step=>{
+    if(step===0 && form.elements.namedItem('mode').value==='file' && !torrentFiles.some(item=>item.state!=='added')) {notify(new Error(t('Choose a torrent file')));return false;}
+    return true;
+  }});
+  const feed=document.querySelector('#feed-form'), feedDialog=document.querySelector('#feeds-editor');
+  const feedRatio=feed.elements.namedItem('ratio').closest('label');
+  const cleanupCopy=cleanup.cloneNode(true);
+  for(const node of cleanupCopy.querySelectorAll('[id]'))node.id=node.id.replace('add-','feed-');
+  const policy=()=>({mode:document.querySelector('#feed-cleanup-mode').value,hours:Number(document.querySelector('#feed-cleanup-hours').value||49),ratio:Number(document.querySelector('#feed-cleanup-ratio').value||1),delete_files:document.querySelector('#feed-cleanup-action').value==='files'});
+  const updatePolicy=()=>{const value=policy(),active=value.mode!=='never';document.querySelector('#feed-cleanup-options').hidden=!active;
+    for(const [key,visible] of [['hours',['time','both','either'].includes(value.mode)],['ratio',['ratio','both','either'].includes(value.mode)]]) {document.querySelector('#feed-cleanup-'+key+'-field').hidden=!visible;document.querySelector('#feed-cleanup-'+key).disabled=!visible;}
+    document.querySelector('#feed-cleanup-action').disabled=!active;document.querySelector('#feed-cleanup-warning').hidden=!active||!value.delete_files;
+  };
+  const feedHelp=element('p',t('Seeding rules apply to new downloads from this feed. Existing torrents keep their settings.'),'muted');
+  const first=[...feed.children].filter(node=>node!==feedRatio&&!node.classList.contains('actions'));
+  MediaWizard({form:feed,dialog:feedDialog,titles:['Feed and filters','Seeding and files'],groups:[first,[feedRatio,cleanupCopy,feedHelp]]});
+  cleanupCopy.onchange=updatePolicy;
+  globalThis.MediaSeedFeedPolicy={value:policy,load:value=>{value=value||{};for(const [key,defaultValue] of [['mode','never'],['hours',49],['ratio',1],['action','torrent']])document.querySelector('#feed-cleanup-'+key).value=key==='action'?(value.delete_files?'files':'torrent'):(value[key]??defaultValue);updatePolicy();}};
+  feed.addEventListener('reset',()=>MediaSeedFeedPolicy.load()); updatePolicy();
 })();

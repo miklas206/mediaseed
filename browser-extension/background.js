@@ -38,9 +38,10 @@ async function send(item) {
   try {
     const config = await settings(), origin = MS.origin(config.origin); setLanguage(config.language);
     if (!await api.permissions.contains({origins: [MS.pattern(origin)]})) throw Error(t("Save the MediaSeed address and grant access first."));
-    if (!['check', 'magnet', 'file', 'link'].includes(item.kind)) throw Error(t("Unknown source."));
+    if (!['check', 'magnet', 'file', 'link', 'rss'].includes(item.kind)) throw Error(t("Unknown source."));
     const options = MS.defaults({...config.defaults, ...Object.fromEntries(['ratio', 'start', 'cleanup'].filter(k => item[k] !== undefined).map(k => [k, item[k]]))});
     item = {...item, ...options};
+    if (item.kind === 'rss') item.url = MS.webURL(item.url).href;
     if (item.kind === 'magnet') item.magnet = MS.magnet(item.magnet);
     if (item.kind === 'link') {
       const u = MS.webURL(item.url);
@@ -61,14 +62,14 @@ async function send(item) {
     const results = await api.scripting.executeScript({target: {tabId: tab.id}, func: mediaSeedBridge, args: [origin, item]});
     const result = results[0]?.result;
     if (!result) throw Error(t("MediaSeed did not respond. Check the list before trying again."));
-    if (result.login) await api.tabs.update(tab.id, {active: true});
+    if (result.login || result.opened) await api.tabs.update(tab.id, {active: true});
     if (result.language) { setLanguage(result.language); await api.storage.local.set({language: result.language}); await api.contextMenus.update?.('mediaseed-add', {title: t('Add to MediaSeed')}); }
     if (result.error) throw Error(t(result.error));
     return result;
   } finally { busy = false; }
 }
 function resultText(result) {
-  return result.cleanupPending ? t("Added paused · preparing cleanup before the selected start.") : result.pending ? t("Added · waiting for metadata in MediaSeed.") : result.stopped ? t("Added paused.") : t("Added · start requested in MediaSeed.");
+  return result.opened ? t("Opened in MediaSeed for review.") : result.cleanupPending ? t("Added paused · preparing cleanup before the selected start.") : result.pending ? t("Added · waiting for metadata in MediaSeed.") : result.stopped ? t("Added paused.") : t("Added · start requested in MediaSeed.");
 }
 async function report(text, error = false) {
   text = t(String(text)).replace(/(?:https?:\/\/|magnet:\?)[^\s"'<>]+/gi, '[adresse]');
@@ -104,12 +105,16 @@ api.tabs.onUpdated.addListener((id, info, tab) => { if (info.status === 'complet
 api.runtime.onInstalled.addListener(async () => {
   const config = await settings(); setLanguage(config.language || 'da');
   await api.contextMenus.removeAll();
+  api.contextMenus.create({id: 'mediaseed-review', title: t('Open in MediaSeed'), contexts: ['link']});
+  api.contextMenus.create({id: 'mediaseed-rss', title: t('Open RSS feed in MediaSeed'), contexts: ['link']});
   api.contextMenus.create({id: 'mediaseed-add', title: t("Add to MediaSeed"), contexts: ['link']});
 });
 api.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId !== 'mediaseed-add') return;
+  if (!['mediaseed-add','mediaseed-review','mediaseed-rss'].includes(info.menuItemId)) return;
   try {
     const item = info.linkUrl?.startsWith('magnet:') ? {kind: 'magnet', magnet: MS.magnet(info.linkUrl)} : {kind: 'link', url: MS.webURL(info.linkUrl).href, sourceTab: tab?.id};
+    if(info.menuItemId==='mediaseed-review')item.mode='dialog';
+    if(info.menuItemId==='mediaseed-rss'){item.kind='rss';item.url=MS.webURL(info.linkUrl).href;item.mode='dialog';}
     direct(item, tab).catch(() => {});
   } catch { review({kind: 'invalid'}).catch(() => {}); }
 });

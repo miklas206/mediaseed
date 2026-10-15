@@ -90,15 +90,16 @@ def test_failed_disconnect_blocks_locally_and_retries_after_restart(tmp_path, mo
     with TestClient(create_app(data, "http://testserver")) as client:
         sign_in(client)
         assert client.put("/api/vpn", json={"provider": "mediavpn", "enabled": True, "profileId": "a" * 24}).status_code == 200
-        original = httpx.AsyncClient
+        from mediaseed.http_pool import HttpPool
+        original = HttpPool.request
         offline = True
 
-        def offline_client(**kwargs):
+        async def offline_client(self, *args, **kwargs):
             if offline:
                 raise httpx.ConnectError("Synthetic offline controller")
-            return original(**kwargs)
+            return await original(self, *args, **kwargs)
 
-        monkeypatch.setattr(module.httpx, "AsyncClient", offline_client)
+        monkeypatch.setattr(HttpPool, "request", offline_client)
         assert client.put("/api/vpn", json={"enabled": False}).status_code == 503
         assert client.post("/api/torrents/start", json={"torrent_hash": "a" * 40}).status_code == 409
         assert client.get("/api/vpn").json()["disconnectPending"]

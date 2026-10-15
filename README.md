@@ -1,5 +1,15 @@
 # MediaSeed
 
+## 0.1.26 — guided workflows and responsive observations
+
+Torrent imports and RSS editing use two steps with retained drafts, a fixed footer and one scroll area. Multiple torrent files, approved storage destinations, existing cleanup rules and account themes are preserved. RSS accepts the same optional cleanup policy as manual imports; missing policies in older saved feeds mean no automatic removal. Existing downloads are not changed. A feed import whose cleanup cannot yet be armed remains paused and reports that state.
+
+Internal HTTP connections are pooled. Concurrent read-only identity checks share an in-flight request, with no authorization TTL; writes check identity independently. Torrent rows remain visible during connection failures with an age notice, while current traffic and VPN readiness become unavailable. Tracker totals retain their last successful sample and a stale label. Previews enqueue bounded hash-verified metadata work and show the counted download alongside the projected ratio.
+
+Extension 1.3.0 adds **Open in MediaSeed** and **Open RSS feed in MediaSeed** alongside direct addition. Draft handoff uses memory/events, never private parameters in the app URL. An open app dialog rejects another import. Login failures preserve the extension draft for a deliberate retry. Reload the installed extension after replacing its files.
+
+No new host packages or container permissions are required. These source changes apply to fresh installs and upgrades without changing VPN assignments, credentials or media. Tests use synthetic clients and an isolated Chromium; live VPN/tracker timing is not measured.
+
 mediaseed 0.1.24 preserves keyboard focus and open row menus during automatic refresh. RSS background reads no longer overlap, and late responses cannot replace newer feed/account state.
 
 MediaSeed 0.1.19 adds a compact add dialog with automatic batch ratio preview, lazy torrent details, estimated credited upload per torrent/feed, downloaded-only RSS history in a paginated popup, zero-seeder rules and stable tracker names. See [behavior and upgrade notes](docs/torrent-and-feed-ux.md).

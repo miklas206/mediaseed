@@ -121,14 +121,17 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
     hub_ca = os.environ.get("MEDIASEED_HUB_CA_FILE")
     hub_tls = ssl.create_default_context(cafile=hub_ca) if hub_ca else True
 
-    async def hub_request(path, method="GET", payload=None, token=None):
+    from mediaseed.http_pool import HttpPool
+    hub_pool = HttpPool(base_url=hub_url or base, verify=hub_tls, timeout=5, follow_redirects=False, trust_env=False, transport=hub_transport)
+    vpn_pool = HttpPool(base_url=vpn_url or base, timeout=45, follow_redirects=False, trust_env=False)
+
+    async def hub_request(path, method="GET", payload=None, token=None, coalesce=False):
         try:
-            async with httpx.AsyncClient(base_url=hub_url, verify=hub_tls, timeout=5, follow_redirects=False, trust_env=False, transport=hub_transport) as client:
-                response = await client.request(method, "/api/v1/sso/" + path, json=payload, headers={"Authorization": "Bearer " + token} if token else {})
-                if response.status_code in {401, 403}:
-                    raise HTTPException(response.status_code, "MediaHub access denied")
-                response.raise_for_status()
-                return response.json()["data"]
+            response = await hub_pool.request(method, "/api/v1/sso/" + path, coalesce=coalesce, json=payload, headers={"Authorization": "Bearer " + token} if token else {})
+            if response.status_code in {401, 403}:
+                raise HTTPException(response.status_code, "MediaHub access denied")
+            response.raise_for_status()
+            return response.json()["data"]
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
             raise HTTPException(503, "MediaHub authentication unavailable") from None
 
@@ -146,11 +149,10 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             raise HTTPException(409, "MediaVPN integration is not configured")
         try:
             token = Path(vpn_token_file).read_text().strip()
-            async with httpx.AsyncClient(base_url=vpn_url, timeout=45, follow_redirects=False, trust_env=False, headers={"X-MediaSeed-Key": token}) as client:
-                response = await client.request(method, "/api/integration/" + path, json=payload if content is None else None, content=content)
-                if response.status_code >= 400:
-                    raise HTTPException(response.status_code if response.status_code in {409, 413, 422} else 503, "MediaVPN could not verify the operation")
-                return response.json()
+            response = await vpn_pool.request(method, "/api/integration/" + path, json=payload if content is None else None, content=content, headers={"X-MediaSeed-Key": token})
+            if response.status_code >= 400:
+                raise HTTPException(response.status_code if response.status_code in {409, 413, 422} else 503, "MediaVPN could not verify the operation")
+            return response.json()
         except (httpx.HTTPError, OSError, ValueError):
             raise HTTPException(503, "MediaVPN is unavailable; downloads are blocked") from None
 
@@ -239,6 +241,8 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         for worker in workers:
             with suppress(asyncio.CancelledError):
                 await worker
+        await hub_pool.close()
+        await vpn_pool.close()
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     if not hub_url:
@@ -280,7 +284,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         if hub_url:
             if not managed:
                 raise HTTPException(401, "Sign in through MediaHub")
-            public = await hub_request("session?packageId=org.mediahub.mediaseed", token=managed["token"])
+            public = await hub_request("session?packageId=org.mediahub.mediaseed", token=managed["token"], coalesce=request.method in {"GET", "HEAD"})
             if public.get("id") != managed["user_id"] or public.get("role") not in {"administrator", "user", "viewer"}:
                 raise HTTPException(403, "MediaHub access denied")
             if request.method not in {"GET", "HEAD", "OPTIONS"} and request.url.path not in {"/api/auth/logout", "/api/auth/preferences", "/api/auth/navigation"}:
@@ -380,7 +384,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/healthz")
     def health():
-        return {"status": "healthy", "version": "0.1.25"}
+        return {"status": "healthy", "version": "0.1.26"}
 
     @app.get("/api/auth/status")
     async def status(request: Request):

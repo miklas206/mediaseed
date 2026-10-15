@@ -131,8 +131,10 @@ async function richPreview() {
       const projected=known&&typeof estimate.downloaded==='number'?(denominator?estimate.uploaded/denominator:null):results.length===1?results[0].estimates.find(e=>e.name===estimate.name)?.projected:undefined;
       const card=element('article',undefined,'ratio-estimate-card'),numbers=element('div',undefined,'ratio-estimate-numbers');card.append(element('span',estimate.name));
       const format=value=>value===null?'∞':typeof value==='number'?Number(value).toLocaleString(locale(),{minimumFractionDigits:2,maximumFractionDigits:4}):t('Unknown');
-      numbers.append(element('span',format(estimate.current)),element('span','→'),element('strong',format(projected)));card.append(numbers,element('small',t('Current ratio → Estimated ratio'),'muted'));if(typeof projected==='number'&&projected<=.5)card.classList.add('seed-ratio-warning');target.append(card);
+      numbers.append(element('span',format(estimate.current)),element('span','→'),element('strong',format(projected)));card.append(numbers,element('small',t('Current ratio → Estimated ratio'),'muted'));card.append(element('p',t('Counts as tracker download: {0}',{0:trackerBytes(estimate.charged)}),'muted'));if(typeof projected==='number'&&projected<=.5)card.classList.add('seed-ratio-warning');target.append(card);
     }
+    for(const result of results){if(result.benefits?.status==='matched')target.append(seedBadges({tracker_benefits:result.benefits}));}
+    if(results.some(result=>result.metadataPending)){target.append(element('p',t('Tracker benefits are being checked in the background.'),'muted'));if((richPreview.retries||0)<8){richPreview.retries=(richPreview.retries||0)+1;setTimeout(()=>{if(generation===richPreview.request&&addDialog.open)void richPreview();},3000);}}else richPreview.retries=0;
     if(!accounts.size)target.append(element('p',t('Ratio estimate needs a known torrent size and fresh tracker account data.'),'muted'));
     const total=results.every(r=>typeof r.size==='number')?results.reduce((sum,r)=>sum+r.size,0):null;
     target.append(element('p',`${sources.length} · ${t('Size')}: ${total===null?t('Unknown'):trackerBytes(total)}`,'muted'),element('small',t('Estimate excludes future uploads and other downloads. Unknown freeleech counts as a normal download.'),'muted'));

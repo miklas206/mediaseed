@@ -9,6 +9,20 @@ async function mediaSeedBridge(expectedOrigin, item) {
     const user = await me.json();
     if (item.kind === 'check') return {connected: true, role: user.role, language: user.language || 'en'};
     if (user.role === 'viewer' || !user.csrf) return {error: 'Din bruger har ikke adgang til at tilføje torrents.'};
+    if (item.mode === 'dialog' || item.kind === 'rss') {
+      return await new Promise(resolve => {
+        const id = crypto.randomUUID();
+        const timeout = setTimeout(() => {document.removeEventListener('mediaseed-import-result',done);resolve({error:'Open MediaSeed and try again.'});},10000);
+        function done(event) {
+          let result;try{result=JSON.parse(event.detail);}catch{return;}
+          if(result.id!==id)return;
+          clearTimeout(timeout);document.removeEventListener('mediaseed-import-result',done);
+          resolve({...result,language:user.language||'en'});
+        }
+        document.addEventListener('mediaseed-import-result',done);
+        document.dispatchEvent(new CustomEvent('mediaseed-import',{detail:JSON.stringify({id,item})}));
+      });
+    }
     let url = '/api/torrents', body = JSON.stringify({url: item.magnet, ratio: item.ratio, start: item.start});
     let contentType = 'application/json';
     if (item.cleanup?.mode && item.cleanup.mode !== 'never') body = JSON.stringify({url: item.magnet, ratio: item.ratio, start: item.start, cleanup: item.cleanup});
