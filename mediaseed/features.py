@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from mediaseed.cleanup import source_hashes
 from mediaseed.covers import Covers
 from mediaseed.rss_worker import RssWorker
+from mediaseed.ratio_scout import RatioScout, RatioSettings
 
 
 class SeedingPolicy(BaseModel):
@@ -86,16 +87,19 @@ def queue_summary(torrents, limit=None):
     active = [row for row in torrents if isinstance(row, dict) and row.get("state") in {"downloading", "stalledDL", "metaDL", "forcedDL"}]
     waiting = sum(isinstance(row, dict) and row.get("state") == "queuedDL" for row in torrents)
     rss = sum(str(row.get("category", "")).startswith("MediaSeed-RSS-") for row in active)
-    return {"limit": limit, "active": len(active), "waiting": waiting, "rssActive": rss, "manualActive": len(active) - rss, "boundedView": len(torrents) >= 500}
+    ratio = sum(row.get("category") == "MediaSeed-Ratio" for row in active)
+    return {"limit": limit, "active": len(active), "waiting": waiting, "rssActive": rss, "manualActive": len(active) - rss - ratio, "boundedView": len(torrents) >= 500, **({"ratioActive": ratio} if ratio else {})}
 
 
-async def add_stopped(qbit, ratio, content=None, magnet=None, start=False, vpn_status=None, tag=None, savepath="/downloads"):
+async def add_stopped(qbit, ratio, content=None, magnet=None, start=False, vpn_status=None, tag=None, savepath="/downloads", category=None):
     if start and (vpn_status is None or not (await vpn_status()).get("downloadsEnabled")):
         raise HTTPException(409, "Starting requires a verified VPN. Choose add on pause instead.")
     paused = "false" if start else "true"
     payload = {"stopped": paused, "paused": paused, "savepath": savepath, "ratioLimit": str(ratio), "seedingTimeLimit": "2940", "shareLimitAction": "Stop"}
     if tag:
         payload["tags"] = tag
+    if category:
+        payload["category"] = category
     files = None
     if magnet is not None:
         payload["urls"] = magnet
@@ -217,6 +221,25 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         return cached["public"].get("username") if cached and account and cached["key"] == account["api_key"] and time.monotonic() - cached["checked"] < 360 and cached["public"].get("status") == "ok" else None
     covers = Covers(data_dir, rows, tracker_read, qbit, username=tracker_username) if data_dir else None
     rss_worker = RssWorker(database, rows, qbit, vpn_status, storage=storage) if vpn_status else None
+    scout = RatioScout(database, rows, tracker_read, qbit, vpn_status, storage, add_stopped, covers, credit) if vpn_status and storage else None
+
+    @app.get("/api/ratio-scout")
+    def ratio_candidates(session=Depends(authorized)):
+        if scout is None:
+            raise HTTPException(409, "Ratio discovery requires configured storage and VPN")
+        return scout.public()
+
+    @app.put("/api/ratio-scout/settings")
+    async def ratio_settings(body: RatioSettings, session=Depends(authorized)):
+        if scout is None:
+            raise HTTPException(409, "Ratio discovery requires configured storage and VPN")
+        return await scout.save(body)
+
+    @app.post("/api/ratio-scout/{identifier}/add")
+    async def ratio_add(identifier: str, session=Depends(authorized)):
+        if scout is None or not re.fullmatch(r"[a-f0-9]{32}", identifier):
+            raise HTTPException(404, "Candidate not found; wait for the next scan")
+        return await scout.add(identifier)
 
     async def verify_badges(identifier, title):
         for account in rows("trackers")[:3]:
@@ -455,6 +478,8 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
     async def background():
         while True:
             try:
+                if scout:
+                    await scout.tick()
                 if rss_worker:
                     await rss_worker.tick()
                 if covers:

@@ -45,10 +45,14 @@ def test_managed_login_and_live_permissions(tmp_path, monkeypatch):
         assert client.put("/api/vpn", json={"enabled": False}).status_code == 403
         assert client.put("/api/download-settings", json={"maxActiveDownloads": 3}).status_code == 403
         assert client.put("/api/rss-settings", json={"rssRefreshMinutes": 5}).status_code == 403
+        assert client.put("/api/ratio-scout/settings", json={}).status_code == 403
+        assert client.post("/api/ratio-scout/" + "a" * 32 + "/add", json={}).status_code == 403
         role[0] = "user"
         assert client.put("/api/vpn", json={"enabled": False}).status_code == 403
         assert client.put("/api/download-settings", json={"maxActiveDownloads": 3}).status_code == 403
         assert client.put("/api/rss-settings", json={"rssRefreshMinutes": 5}).status_code == 403
+        assert client.put("/api/ratio-scout/settings", json={}).status_code == 403
+        assert client.post("/api/ratio-scout/" + "a" * 32 + "/add", json={}).status_code == 403
         assert client.get("/api/auth/me").json()["role"] == "user"
         allowed[0] = False
         assert client.get("/api/storage").status_code == 403

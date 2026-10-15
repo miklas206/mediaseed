@@ -229,6 +229,19 @@ footer { position: static; flex-shrink: 0; }
 #rss-settings-form { display: grid; gap: 12px; }
 #rss-settings-form label { display: grid; gap: 8px; }
 #rss-settings-form p { margin: 0; }
+.ratio-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+#ratio-form { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+#ratio-form > button { justify-self: start; }
+.ratio-workspace > .workspace-card { align-self: start; }
+#workspace > nav button[data-view="ratio-scout"]::before { content: "↗"; }
+.ratio-check { display: flex !important; align-items: center; gap: 10px; }
+.ratio-check input { width: auto; }
+.ratio-candidate { padding: 18px 0; border-bottom: 1px solid var(--line); }
+.ratio-candidate h3 { overflow-wrap: anywhere; }
+.ratio-candidate-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.ratio-candidate-metrics small, .ratio-candidate-metrics strong { display: block; }
+.ratio-candidate-metrics small { color: var(--muted); margin-bottom: 6px; }
+@media (max-width: 600px) { .ratio-field-grid { grid-template-columns: 1fr; } #ratio-scout > .heading { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 540px) { .torrent-pagination { flex-wrap: wrap; } .torrent-pagination span { order: 3; flex-basis: 100%; } .download-filters .toolbar > label { flex: 1 1 130px; min-width: 0; } }
 
 :root[data-look]:not([data-look="classic"]) #message[data-tone="info"]::before { content: "i"; background: var(--accent); color: var(--accent-contrast); }

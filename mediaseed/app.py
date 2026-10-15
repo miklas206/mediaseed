@@ -287,7 +287,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
                 if public["role"] == "viewer":
                     raise HTTPException(403, "Read-only app access")
                 tracker_admin = request.url.path == "/api/trackers" or (request.url.path.startswith("/api/trackers/") and request.method == "PUT")
-                if public["role"] != "administrator" and (tracker_admin or request.url.path in {"/api/vpn", "/api/download-settings", "/api/rss-settings"} or request.url.path.startswith(("/api/accounts", "/api/feeds", "/api/settings", "/api/runtime"))):
+                if public["role"] != "administrator" and (tracker_admin or request.url.path in {"/api/vpn", "/api/download-settings", "/api/rss-settings"} or request.url.path.startswith(("/api/accounts", "/api/feeds", "/api/settings", "/api/runtime", "/api/ratio-scout"))):
                     raise HTTPException(403, "App administrator access required")
         if request.method not in {"GET", "HEAD", "OPTIONS"} and not secrets.compare_digest(request.headers.get("X-MediaSeed-CSRF", ""), session["csrf"]):
             raise HTTPException(403, "Session verification failed")
@@ -380,7 +380,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/healthz")
     def health():
-        return {"status": "healthy", "version": "0.1.14"}
+        return {"status": "healthy", "version": "0.1.15"}
 
     @app.get("/api/auth/status")
     async def status(request: Request):

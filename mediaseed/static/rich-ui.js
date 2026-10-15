@@ -20,6 +20,7 @@ function seedBadges(row) {
   return wrap;
 }
 function seedSource(row) {
+  if (row.category === 'MediaSeed-Ratio') return t('Build ratio');
   return String(row.category || '').startsWith('MediaSeed-RSS-') ? t('RSS') : t('Manual torrent');
 }
 function seedEta(value) {
