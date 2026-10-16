@@ -436,6 +436,15 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
     def feeds(session=Depends(authorized)):
         return [{key: value for key, value in row.items() if key != "url"} | {"configured": True, "upload":feed_summary(row["id"]), "paused": not row.get("enabled", False), "status": rss_worker.reports.get(row["id"], "Afventer VPN/feedposter") if rss_worker and row.get("enabled") else "Pauset"} for row in rows("feeds")]
 
+    @app.get("/api/feeds/{identifier}")
+    def feed_details(identifier: str, session=Depends(authorized)):
+        if session.get("role") != "administrator":
+            raise HTTPException(403, "App administrator access required")
+        feed = next((row for row in rows("feeds") if row["id"] == identifier), None)
+        if feed is None:
+            raise HTTPException(404, "Feed not found")
+        return feed
+
     @app.put("/api/feeds/{identifier}/state")
     async def feed_state(identifier: str, body: FeedState, session=Depends(authorized)):
         feed = next((row for row in rows("feeds") if row["id"] == identifier), None)

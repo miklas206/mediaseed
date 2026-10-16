@@ -1,5 +1,9 @@
 # MediaSeed
 
+## 0.1.27 - saved RSS address in the editor
+
+Administrators see the saved feed URL when editing a feed and can change it directly. The private URL is fetched only for the editor, with administrator access and no-store caching; feed lists still omit it. Existing stored feeds work without migration or new requirements. Blank URL updates continue to preserve the saved address. Synthetic API/UI tests cover fresh and older stored feeds, replacement, blank edits and access control.
+
 ## 0.1.26 — guided workflows and responsive observations
 
 Torrent imports and RSS editing use two steps with retained drafts, a fixed footer and one scroll area. Multiple torrent files, approved storage destinations, existing cleanup rules and account themes are preserved. RSS accepts the same optional cleanup policy as manual imports; missing policies in older saved feeds mean no automatic removal. Existing downloads are not changed. A feed import whose cleanup cannot yet be armed remains paused and reports that state.

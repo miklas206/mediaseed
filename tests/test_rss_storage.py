@@ -4,12 +4,41 @@ import sqlite3
 from contextlib import contextmanager
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from mediaseed.app import create_app
 from mediaseed.rss_worker import RssWorker
 from mediaseed.storage import Storage
 from test_app import sign_in
+
+
+@pytest.mark.parametrize("older", [False, True])
+def test_saved_feed_address_is_available_only_in_editor_and_survives_update(tmp_path, older):
+    from test_app import PASSWORD
+
+    source = {"name": "Synthetic feed", "url": "https://nordicbytes.org/rss/synthetic?passkey=private"}
+    with TestClient(create_app(tmp_path, "http://testserver")) as client:
+        assert client.get("/api/feeds/missing").status_code == 401
+        sign_in(client)
+        identifier = client.post("/api/feeds", json=source).json()["id"]
+        if older:
+            with sqlite3.connect(tmp_path / "mediaseed.sqlite") as db:
+                db.execute("UPDATE settings SET payload=? WHERE id=?", (json.dumps(source), identifier))
+    with TestClient(create_app(tmp_path, "http://testserver")) as client:
+        login = client.post("/api/auth/login", json={"username": "tester", "password": PASSWORD})
+        client.headers["X-MediaSeed-CSRF"] = login.json()["csrf"]
+        assert "url" not in client.get("/api/feeds").json()[0]
+        detail = client.get(f"/api/feeds/{identifier}")
+        assert detail.status_code == 200
+        assert detail.headers["Cache-Control"] == "no-store"
+        assert detail.json()["url"] == source["url"]
+        assert client.get("/api/feeds/missing").status_code == 404
+        replacement = source | {"url": "https://nordicbytes.org/rss/synthetic-replacement"}
+        assert client.put(f"/api/feeds/{identifier}", json=replacement).status_code == 200
+        assert client.get(f"/api/feeds/{identifier}").json()["url"] == replacement["url"]
+        assert client.put(f"/api/feeds/{identifier}", json=source | {"url": ""}).status_code == 200
+        assert client.get(f"/api/feeds/{identifier}").json()["url"] == replacement["url"]
 
 
 def storage(tmp_path, monkeypatch):
