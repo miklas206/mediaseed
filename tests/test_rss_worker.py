@@ -99,6 +99,7 @@ def test_rss_history_prevents_duplicate_import_and_vpn_loss_blocks_start(tmp_pat
         restarted = RssWorker(database, lambda kind: [feed], qbit, vpn_status)
         await restarted.tick()
         assert sum(path.endswith("/add") for path, payload in calls) == 1
+        assert sum(path.endswith("/start") for path, payload in calls) == 1
     asyncio.run(check())
 
 
@@ -166,4 +167,46 @@ def test_received_batch_progresses_with_six_request_bound_and_no_repeated_cross_
         restarted = RssWorker(database, lambda kind: feeds, qbit, vpn_status)
         await restarted.tick()
         assert len(reads) == 24 and len(additions) == 12
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("change", ["none", "disabled", "edited", "removed"])
+def test_pending_rss_start_survives_restart_and_respects_feed_changes(tmp_path, change):
+    import json
+    @contextmanager
+    def database():
+        with sqlite3.connect(tmp_path / "pending.sqlite") as db:
+            yield db
+    feed = {"id": "a" * 24, "enabled": True, "url": "https://nordicbytes.org/rss/synthetic"}
+    feeds = [feed]
+    calls = []
+    async def vpn():
+        return {"downloadsEnabled": True}
+    async def qbit(path, method="GET", payload=None, **kwargs):
+        calls.append(path)
+        return httpx.Response(200, json={})
+    async def check():
+        worker = RssWorker(database, lambda kind: feeds, qbit, vpn)
+        with database() as db:
+            db.execute("INSERT INTO rss_pending_starts VALUES (?,?,?)", ("b" * 40, feed["id"], worker.revision(feed)))
+        if change == "disabled":
+            feeds[0] = {**feed, "enabled": False}
+        elif change == "edited":
+            feeds[0] = {**feed, "folder": "other"}
+        elif change == "removed":
+            feeds.clear()
+        restarted = RssWorker(database, lambda kind: feeds, qbit, vpn)
+        ready = False
+        class Cleanup:
+            def public(self, identifier):
+                return {"status": "active" if ready else "waiting"}
+        restarted.cleanup = Cleanup()
+        await restarted.start_pending()
+        assert not calls
+        ready = True
+        await restarted.start_pending()
+        assert calls == (["/api/v2/torrents/topPrio", "/api/v2/torrents/start"] if change == "none" else [])
+        calls.clear()
+        await restarted.start_pending()
+        assert not calls  # A later manual pause is never undone.
     asyncio.run(check())

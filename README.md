@@ -230,3 +230,15 @@ invalidate old cached shell assets on upgrade; no settings migration is needed.
 Local isolated-browser verification compares computed dock/topbar styles with
 MediaHub's actual frontend CSS for five looks, and checks all five navigation
 layouts at 320, 1440 and 3840 pixels. No live deployment is implied.
+
+
+RSS imports retain a durable pending start until cleanup preparation and VPN
+verification succeed. Restarts resume pending starts without reimporting the
+file. Editing, disabling or deleting a feed cancels its pending starts; a later
+manual torrent pause is preserved after the automatic start has completed.
+The pending-start table is created idempotently on fresh installs and upgrades.
+Existing completed import history and user settings remain unchanged.
+
+The file/magnet and RSS forms no longer ask for a separate stop ratio. Retained
+torrents seed without an automatic ratio or time stop; ratio inputs appear only
+for cleanup modes that actually use a ratio target.

@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import re
 import time
 import unicodedata
@@ -52,6 +53,7 @@ class RssWorker:
             connection.execute("CREATE TABLE IF NOT EXISTS rss_observations (feed TEXT NOT NULL, token TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, created REAL NOT NULL, PRIMARY KEY(feed,token))")
 
         with database() as connection:
+            connection.execute("CREATE TABLE IF NOT EXISTS rss_pending_starts (torrent_hash TEXT PRIMARY KEY, feed TEXT NOT NULL, revision TEXT NOT NULL)")
             feed_uploads.migrate(connection)
 
     def observe(self, feed, token, article, status):
@@ -77,11 +79,39 @@ class RssWorker:
             raise HTTPException(422, "Choose an approved download folder")
         return "/downloads" + ("/" + folder if folder else "")
 
+    @staticmethod
+    def revision(feed):
+        return hashlib.sha256(json.dumps(feed, sort_keys=True).encode()).hexdigest()
+
+    async def start_pending(self):
+        with self.database() as connection:
+            pending = connection.execute("SELECT torrent_hash,feed,revision FROM rss_pending_starts").fetchall()
+        for identifier, feed_id, revision in pending:
+            feed = next((row for row in self.rows("feeds") if row["id"] == feed_id), None)
+            if not feed or not feed.get("enabled") or self.revision(feed) != revision:
+                with self.database() as connection:
+                    connection.execute("DELETE FROM rss_pending_starts WHERE torrent_hash=?", (identifier,))
+                continue
+            if self.cleanup:
+                policy = self.cleanup.public(identifier)
+                if policy.get("status") not in {"active", "disabled"}:
+                    self.reports[feed_id] = "Cleanup preparation pending; torrent added paused"
+                    continue
+            if not (await self.vpn_status()).get("downloadsEnabled"):
+                return
+            self.destination(feed)
+            await self.qbit("/api/v2/torrents/topPrio", "POST", {"hashes": identifier})
+            await self.qbit("/api/v2/torrents/start", "POST", {"hashes": identifier})
+            with self.database() as connection:
+                connection.execute("DELETE FROM rss_pending_starts WHERE torrent_hash=?", (identifier,))
+            self.reports[feed_id] = "Torrent tilføjet til VPN-downloadkø"
+
     async def tick(self):
         async with self.lock:
             self.metadata_budget = 6
             if not (await self.vpn_status()).get("downloadsEnabled"):
                 return
+            await self.start_pending()
             feeds = [row for row in self.rows("feeds") if row.get("enabled")][:20]
             if not feeds:
                 return
@@ -210,9 +240,9 @@ class RssWorker:
             if policy.mode != 'never':
                 if not self.cleanup:
                     raise HTTPException(409, "Automatic cleanup unavailable; import blocked")
-                outcome = await self.cleanup.add(import_stopped, policy, feed['ratio'], content=content, start=False)
+                outcome = await self.cleanup.add(import_stopped, policy, feed.get('ratio', 1), content=content, start=False)
             else:
-                outcome = await import_stopped(self.qbit, feed['ratio'])
+                outcome = await import_stopped(self.qbit, feed.get('ratio', 1))
             identifiers = outcome.get("added_torrent_ids", []) if isinstance(outcome, dict) else []
             if outcome.get("success_count") != 1 or outcome.get("failure_count") != 0 or len(identifiers) != 1 or not re.fullmatch(r"[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", str(identifiers[0])):
                 self.observe(feed, observation, article, 'import_unconfirmed')
@@ -223,18 +253,8 @@ class RssWorker:
             with self.database() as connection:
                 feed_uploads.record(connection, feed["id"], identifier, article.get("title", ""), time.time())
                 connection.execute("UPDATE rss_history SET status='added',torrent_hash=? WHERE token IN (?,?)", (identifier, token, file_token))
-            current = next((row for row in self.rows("feeds") if row["id"] == feed["id"]), None)
-            if outcome.get('cleanupPending'):
-                self.reports[feed['id']] = 'Cleanup preparation pending; torrent added paused'
-                continue
-            if current == feed and (await self.vpn_status()).get("downloadsEnabled"):
-                self.destination(feed)
-                await self.qbit("/api/v2/torrents/topPrio", "POST", {"hashes": identifier})
-                await self.qbit("/api/v2/torrents/start", "POST", {"hashes": identifier})
-                self.reports[feed["id"]] = "Torrent tilføjet til VPN-downloadkø"
-            else:
-                self.reports[feed["id"]] = "Torrent tilføjet stoppet; feed eller VPN ændret"
-                return
+                connection.execute("INSERT OR REPLACE INTO rss_pending_starts VALUES (?,?,?)", (identifier, feed["id"], self.revision(feed)))
+            await self.start_pending()
             # Continue through the received batch, still bounded by metadata_budget.
             # Existing client queue limits decide how many actually download.
         self.reports[feed["id"]] = "Afventer nye poster efter startdato"
