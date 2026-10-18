@@ -235,7 +235,7 @@ const messages = {
   "Choose or drop multiple torrent files. You can add more files to this selection. Shared settings below apply to every file.": "Vælg eller slip flere torrentfiler. Du kan føje flere filer til valget. Indstillingerne nedenfor gælder for alle filerne.",
   "Selected torrent files": "Valgte torrentfiler",
   "For individual ratio previews, select one file at a time.": "Vælg én fil ad gangen for at forhåndsvise individuelle ratioer.",
-  "MediaSeed 0.1.28": "MediaSeed 0.1.28",
+  "MediaSeed 0.1.29": "MediaSeed 0.1.29",
   "Waiting for the next bounded metadata check": "Afventer næste kontrol af torrentoplysninger",
   "Seeding progress": "Seedingfremdrift",
   "Downloaded": "Downloadet",

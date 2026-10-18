@@ -702,7 +702,7 @@ document.querySelector('#tracker-search').onsubmit = async event => {
   finally { button.disabled = document.querySelector('#tracker-account').options.length === 1; }
 };
 for (const [selector, kind] of [['#feed-form', 'feeds'], ['#tracker-form', 'trackers']]) {
-  const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { if (!feedStorageReady) { showNotification(t('Choose an available writable folder')); return; } body.location = feedLocation.value; body.folder = feedFolderPath; body.ratio = Number(body.ratio); body.cleanup = globalThis.MediaSeedFeedPolicy?.value(); for (const key of ['include','exclude']) body[key] = String(body[key] || '').split(',').map(x => x.trim()).filter(Boolean); body.badges = [...form.elements.namedItem('badges').selectedOptions].map(option => option.value); body.max_bytes = body.max_gib ? Math.round(Number(body.max_gib) * (1024 ** 3)) : null; delete body.max_gib; body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { const saved = await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); if (kind === 'feeds' && (saved.start_at ? new Date(saved.start_at).getTime() : null) !== (body.start_at ? new Date(body.start_at).getTime() : null)) throw new Error(t('The saved start date could not be verified. Your form is preserved.')); form.reset(); form.elements.namedItem('id').value = ''; globalThis.MediaSeedWorkspace?.closeEditor(kind); await loadSources(kind); showNotification(t("Saved palette"), 'success'); } catch (error) { notify(error); } };
+  const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { if (!feedStorageReady) { showNotification(t('Choose an available writable folder')); return; } body.location = feedLocation.value; body.folder = feedFolderPath; body.ratio = 1; body.cleanup = globalThis.MediaSeedFeedPolicy?.value(); for (const key of ['include','exclude']) body[key] = String(body[key] || '').split(',').map(x => x.trim()).filter(Boolean); body.badges = [...form.elements.namedItem('badges').selectedOptions].map(option => option.value); body.max_bytes = body.max_gib ? Math.round(Number(body.max_gib) * (1024 ** 3)) : null; delete body.max_gib; body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { const saved = await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); if (kind === 'feeds' && (saved.start_at ? new Date(saved.start_at).getTime() : null) !== (body.start_at ? new Date(body.start_at).getTime() : null)) throw new Error(t('The saved start date could not be verified. Your form is preserved.')); form.reset(); form.elements.namedItem('id').value = ''; globalThis.MediaSeedWorkspace?.closeEditor(kind); await loadSources(kind); showNotification(t("Saved palette"), 'success'); } catch (error) { notify(error); } };
   form.addEventListener('reset', () => { form.elements.namedItem('id').setAttribute('value', ''); });
 }
 for (const button of document.querySelectorAll('[data-view]')) button.onclick = async () => { message.textContent = ''; for (const other of document.querySelectorAll('[data-view]')) other.setAttribute('aria-pressed', String(other === button)); for (const section of document.querySelectorAll('.view')) section.hidden = section.id !== button.dataset.view; document.querySelector('#connection-flow').hidden = button.dataset.view !== 'vpn'; try { if (button.dataset.view === 'feeds' || button.dataset.view === 'trackers') { await loadSources(button.dataset.view); if (button.dataset.view === 'feeds' && appRole === 'administrator') await loadFeedLocations(feedLocations.length ? feedLocation.value : undefined, feedLocations.length ? feedFolderPath : ''); } else if (button.dataset.view === 'vpn') await refreshVpn(); } catch (error) { notify(error); } };
@@ -768,8 +768,8 @@ function updateCleanupFields() {
   document.querySelector('#add-cleanup-action').disabled = !active;
   document.querySelector('#add-cleanup-warning').hidden = !active || !files;
   document.querySelector('#add-seeding-help').textContent = active ? t("The selected cleanup rule controls the seeding goal. Choose start now or add paused. Starting requires a verified VPN.") : t("Choose start now or add paused. Starting requires a verified VPN. Without cleanup, seeding continues until you stop or remove the torrent.");
-  const stop = addForm.elements.namedItem('ratio'); stop.disabled = active;
-  const label = stop.closest?.('label'); if (label) label.hidden = active;
+  const stop = addForm.elements.namedItem('ratio'); stop.disabled = true;
+  const label = stop.closest?.('label'); if (label) label.hidden = true;
 }
 document.querySelector('#add-cleanup-mode').onchange = updateCleanupFields;
 document.querySelector('#add-cleanup-action').onchange = updateCleanupFields;
@@ -867,7 +867,7 @@ document.addEventListener('drop', event => {
 });
 addForm.onsubmit = async event => {
   event.preventDefault(); if (addingTorrent) return;
-  const fileMode = addForm.elements.namedItem('mode').value === 'file'; const ratio = Number(addForm.elements.namedItem('ratio').value);
+  const fileMode = addForm.elements.namedItem('mode').value === 'file'; const ratio = 1;
   const start = event.submitter?.value === 'start';
   if (!addStorageReady) { showNotification(t('Choose an available writable folder')); return; }
   const location = addLocation.value, folder = addFolderPath;

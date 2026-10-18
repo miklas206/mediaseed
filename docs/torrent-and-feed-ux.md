@@ -2,7 +2,7 @@
 
 Minimum and maximum seeders accept zero. Ranking uses leechers divided by max(1, seeders), so zero-seeder candidates remain reviewable without division errors. Existing rules and discovery scheduling are retained.
 
-The add dialog uses two aligned desktop rows: source/files beside the prominent automatic account-ratio estimate and ratio goal, then the destination beside the visible cleanup selector and seeding guidance. Actions stay pinned below both columns. It supports one or multiple torrent files; batch estimates sum each file's estimated download charge against the same cached account totals. Unknown size or unavailable account data stays unknown. Preview requests parse local metadata and cached evidence only; they do not add torrents or query the tracker. Mobile uses one column. Folder explanations and VPN guidance are collapsed; additional cleanup fields appear only when their mode is selected.
+The add dialog uses two aligned desktop rows: source/files beside the prominent automatic account-ratio estimate with no separate stop goal, then the destination beside the visible cleanup selector and seeding guidance. Actions stay pinned below both columns. It supports one or multiple torrent files; batch estimates sum each file's estimated download charge against the same cached account totals. Unknown size or unavailable account data stays unknown. Preview requests parse local metadata and cached evidence only; they do not add torrents or query the tracker. Mobile uses one column. Folder explanations and VPN guidance are collapsed; additional cleanup fields appear only when their mode is selected.
 
 Details open immediately from the list snapshot. Overview requests properties only; Files and Connections are fetched when selected. Connection reads run concurrently. A session-scoped in-memory cache coalesces requests for 15 seconds, with explicit refresh, accurate timestamps, mutation invalidation and protection against late responses. All server-side start/check/remove safeguards are unchanged. The legacy all-details API remains supported.
 
@@ -15,3 +15,11 @@ Previously confirmed tracker names survive expiration of the five-minute benefit
 App dock geometry follows the supplied MediaHub reference: thin accent frame, accent top edge, icon above label, icon accent rail, muted inactive labels and a bordered selected button. MediaSeed and MediaVPN keep their own destinations and inherited navigation preference.
 
 Local verification uses synthetic client/tracker responses and isolated Chromium; no production installation or real torrent operations are required. Tests cover zero-seeder discovery, individual and aggregate credit, removal/reimport, old-database backfill, history pagination, section-specific reads, metadata expiry, modal batch estimates and cache behavior.
+
+
+In 0.1.29 the storage and subfolder selectors align side by side on desktop, with
+parent navigation and the current path below them. Mobile keeps a single column.
+The hidden legacy ratio input remains disabled and outside the estimate card;
+retained torrents and RSS feeds do not ask for it. Ratio cleanup goals remain
+available only when a ratio-based cleanup mode is selected. Static asset URLs
+are versioned so an update replaces cached older forms.

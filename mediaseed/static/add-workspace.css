@@ -76,3 +76,15 @@
  #add-torrent-form .input-mode legend { line-height:20px; }
  #add-torrent-form > .add-ratio-summary { margin-block-start:42px; }
 }
+
+/* Keep the storage and subfolder choices together in the folder panel. */
+@media(min-width:761px) {
+ #add-torrent-form .download-location {grid-template-columns:repeat(2,minmax(0,1fr));grid-template-areas:"storage subfolder" "capacity capacity" "up path" "help help";align-items:end;}
+ #add-torrent-form .download-location > label:first-of-type {grid-area:storage;}
+ #add-torrent-form .download-location > label:last-of-type {grid-area:subfolder;}
+ #add-torrent-form .download-location > p {grid-area:capacity;}
+ #add-torrent-form .download-location > .actions {display:contents;}
+ #add-torrent-form #add-folder-up {grid-area:up;justify-self:start;min-height:40px;}
+ #add-torrent-form #add-folder-path {grid-area:path;align-self:center;}
+ #add-torrent-form .download-location > details {grid-area:help;}
+}

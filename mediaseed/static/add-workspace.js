@@ -6,7 +6,7 @@
   const preview=document.querySelector('#seed-add-preview'),previewButton=document.querySelector('#seed-preview-button');
   for(const selector of ['.input-mode','#magnet-field','#file-field','#torrent-file-selection'])source.append(form.querySelector(selector));
   const location=form.querySelector('.download-location'),cleanup=form.querySelector('.cleanup-settings'),ratio=form.querySelector('[name="ratio"]').closest('label');
-  const summary=document.createElement('aside');summary.className='add-ratio-summary';const caption=document.createElement('h3');caption.textContent=t('Account ratio after adding');summary.append(caption,preview,previewButton);summary.append(ratio);
+  const summary=document.createElement('aside');summary.className='add-ratio-summary';const caption=document.createElement('h3');caption.textContent=t('Account ratio after adding');summary.append(caption,preview,previewButton);ratio.hidden=true;ratio.querySelector("input").disabled=true;form.append(ratio);
   settings.append(cleanup);
   const help=document.createElement('details'),helpTitle=document.createElement('summary');helpTitle.textContent=t('Folder help');help.className='add-folder-help';for(const p of [...location.querySelectorAll('p')].slice(1))help.append(p);help.prepend(helpTitle);location.append(help);
   const actions=form.querySelector(':scope > .actions');actions.classList.add('add-submit-actions');
@@ -30,7 +30,8 @@
     return true;
   }});
   const feed=document.querySelector('#feed-form'), feedDialog=document.querySelector('#feeds-editor');
-  const feedRatio=feed.elements.namedItem('ratio').closest('label');
+  const feedRatioInput=feed.elements.namedItem('ratio');feedRatioInput.disabled=true;
+  const feedRatio=feedRatioInput.closest('label');feedRatio.hidden=true;
   const cleanupCopy=cleanup.cloneNode(true);
   for(const node of cleanupCopy.querySelectorAll('[id]'))node.id=node.id.replace('add-','feed-');
   const policy=()=>({mode:document.querySelector('#feed-cleanup-mode').value,hours:Number(document.querySelector('#feed-cleanup-hours').value||49),ratio:Number(document.querySelector('#feed-cleanup-ratio').value||1),delete_files:document.querySelector('#feed-cleanup-action').value==='files'});
@@ -40,7 +41,7 @@
   };
   const feedHelp=element('p',t('Seeding rules apply to new downloads from this feed. Existing torrents keep their settings.'),'muted');
   const first=[...feed.children].filter(node=>node!==feedRatio&&!node.classList.contains('actions'));
-  MediaWizard({form:feed,dialog:feedDialog,titles:['Feed and filters','Seeding and files'],groups:[first,[feedRatio,cleanupCopy,feedHelp]]});
+  MediaWizard({form:feed,dialog:feedDialog,titles:['Feed and filters','Seeding and files'],groups:[first,[cleanupCopy,feedHelp]]});
   cleanupCopy.onchange=updatePolicy;
   globalThis.MediaSeedFeedPolicy={value:policy,load:value=>{value=value||{};for(const [key,defaultValue] of [['mode','never'],['hours',49],['ratio',1],['action','torrent']])document.querySelector('#feed-cleanup-'+key).value=key==='action'?(value.delete_files?'files':'torrent'):(value[key]??defaultValue);updatePolicy();}};
   feed.addEventListener('reset',()=>MediaSeedFeedPolicy.load()); updatePolicy();

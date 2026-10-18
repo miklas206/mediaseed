@@ -18,6 +18,10 @@ test('cleanup choices expose the correct goals and send file-removal intent expl
   assert.equal(params.get('cleanup_ratio'), '3'); assert.equal(params.get('cleanup_delete_files'), 'true');
   find('#add-cleanup-mode').value = 'never'; find('#add-cleanup-mode').onchange();
   assert.equal(find('#add-cleanup-options').hidden, true);
+  assert.equal(form.elements.namedItem('ratio').disabled, true);
+  form.elements.namedItem('ratio').value = '';
+  await form.onsubmit({preventDefault() {}, submitter: {value: 'pause'}});
+  assert.equal(new URL(uploads.at(-1).url, 'https://synthetic.example').searchParams.get('ratio'), '1');
 });
 
 function setup() {
@@ -115,7 +119,7 @@ test('page drop opens a populated dialog, preserves its draft, and uploads only 
   assert.equal(ratio.value, '3'); assert.equal(find('#add-torrent').openCount, 1);
   await form.onsubmit({preventDefault() {}});
   assert.equal(uploads.length, 2); assert.equal(uploads[1].body, replacement);
-  assert.match(uploads[1].url, /filename=Other.TORRENT&ratio=3&start=false&location=local&folder=$/);
+  assert.match(uploads[1].url, /filename=Other.TORRENT&ratio=1&start=false&location=local&folder=$/);
   assert.equal(find('#add-torrent').open, true);
 });
 
