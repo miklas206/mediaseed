@@ -19,14 +19,14 @@ expiry counts normally. Historic upload that cannot be timed is explicitly
 marked as estimated. Counter resets never create negative or invented credit.
 Confirmed publication evidence survives expiry/pruning of the cover cache.
 
-For a normal stop policy, MediaSeed raises qBittorrent's native raw-ratio limit
-while Green/pending, then accounts for the historical credit deficit after
-expiry. The selected credit target remains separate from the native raw limit.
-Limits are corrected before resuming a known torrent and in a bounded worker.
-Goals that need a native ratio above the existing RPC limit use persisted worker
-enforcement and native unlimited settings; automatic stop preserves files.
-Imports above a selected goal of 500 are armed while paused before a requested
-start. The VPN adapter still independently verifies VPN readiness.
+Without automatic cleanup, seeding has no native time or ratio limit. The
+selected ratio remains an informational target for manual early-stop/removal
+confirmation and tracker accounting. Green credit never stops a retained torrent.
+The worker idempotently clears legacy native limits, including installations
+without tracker accounts, without resuming paused torrents. A requested start
+clears all native limits first. Newly started imports are configured while
+paused; pending metadata keeps the selected start durable until preparation
+succeeds. The existing MediaVPN gate verifies every mutation independently.
 
 Manual torrent files, magnets, browser-extension imports, tracker imports and
 RSS share the same adapter. Automatic cleanup uses credited ratio and does not

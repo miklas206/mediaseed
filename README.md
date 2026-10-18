@@ -1,5 +1,19 @@
 # MediaSeed
 
+## 0.1.28 - beholdte filer seeder uden stopgrænse
+
+Når automatisk oprydning er **Aldrig**, stopper seeding ikke længere ved ratio
+eller efter 49 timer. Filerne kan seede, indtil du selv stopper eller fjerner
+torrenten. Valgte oprydningsregler beholder deres egne tids-/ratiomål.
+
+Nye starter klargøres med ubegrænsede native stopmål før aktivering. Opdateringen
+fjerner også gamle stopmål automatisk og idempotent, inklusive installationer
+uden tracker-konto og lister over 500 torrents. Brugerstoppede torrents genoptages
+ikke automatisk ved opdatering; Start genoptager dem med ubegrænsede stopmål.
+Ingen nye dependencies, MediaVPN-opdateringer, mounts eller credentials kræves.
+Browserudvidelse 1.3.1 og appens hjælpetekster forklarer den ændrede adfærd.
+
+
 ## 0.1.27 - saved RSS address in the editor
 
 Administrators see the saved feed URL when editing a feed and can change it directly. The private URL is fetched only for the editor, with administrator access and no-store caching; feed lists still omit it. Existing stored feeds work without migration or new requirements. Blank URL updates continue to preserve the saved address. Synthetic API/UI tests cover fresh and older stored feeds, replacement, blank edits and access control.

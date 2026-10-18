@@ -17,6 +17,7 @@ def integration(tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIASEED_VPN_TOKEN_FILE", str(token))
     state = {"enabled": True, "profileId": "a" * 24, "ready": True, "downloadsEnabled": True, "country": "Sweden", "checkedAt": time.time(), "profiles": [{"id": "a" * 24, "name": "Test VPN"}]}
     calls = []
+    torrents = []
     original = httpx.AsyncClient
 
     def handler(request):
@@ -27,6 +28,18 @@ def integration(tmp_path, monkeypatch):
             return httpx.Response(200, json=state)
         if request.url.path.endswith("/status"):
             return httpx.Response(200, json=state)
+        if request.url.path.endswith("/rpc"):
+            body = json.loads(request.content)
+            payload = body.get("payload", {})
+            if body["path"] == "torrents/info":
+                rows = [r for r in torrents if not payload.get("hashes") or r["hash"] in payload["hashes"].split("|")]
+                return httpx.Response(200, json={"status": 200, "body": base64.b64encode(json.dumps(rows).encode()).decode()})
+            if body["path"] == "torrents/add":
+                from mediaseed.cleanup import source_hashes
+                torrents.append({"hash":source_hashes(magnet=payload["urls"])[0],"tags":payload.get("tags", ""),"progress":0,"state":"stoppedDL"})
+        if request.url.path.endswith("/upload"):
+            from mediaseed.cleanup import source_hashes
+            torrents.append({"hash":source_hashes(content=request.content)[0],"tags":request.url.params.get("tags", ""),"progress":0,"state":"stoppedDL"})
         return httpx.Response(200, json={"status": 204, "body": base64.b64encode(b"").decode()})
 
     monkeypatch.setattr(module.httpx, "AsyncClient", lambda **kwargs: original(**kwargs, transport=httpx.MockTransport(handler)))

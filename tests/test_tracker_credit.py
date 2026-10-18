@@ -38,7 +38,7 @@ def setup(tmp_path, known=True, created=CREATED, own=False):
 
 def row(uploaded=1000, **values):
     return {'hash':HASH, 'uploaded':uploaded, 'downloaded':1000, 'ratio':uploaded/1000,
-            'ratio_limit':1, 'added_on':CREATED+60, 'seeding_time':60,
+            'ratio_limit':1, 'seeding_time_limit':2940, 'inactive_seeding_time_limit':-1, 'added_on':CREATED+60, 'seeding_time':60,
             'state':'stalledUP', 'progress':1, 'num_leechs':0, 'upspeed':0, **values}
 
 
@@ -108,13 +108,13 @@ def test_changed_goal_and_native_limits_keep_selected_credit_target(tmp_path):
         assert calls[-1][2]['ratioLimit']=='6.0'
         assert ledger.load(HASH)['target']==3
         await ledger.request('/api/v2/torrents/setShareLimits','POST', {'hashes':HASH,'ratioLimit':'5','seedingTimeLimit':'2940'})
-        assert calls[-1][2]['ratioLimit']=='10.0'
+        assert calls[-1][2]['ratioLimit']=='-1'
         ledger.observe(row(), CREATED+120)
         rows.append(row(1100))
         # Use expired publication evidence in real clock time.
         await ledger.tick()
         assert calls[-1][0].endswith('/setShareLimits')
-        assert float(calls[-1][2]['ratioLimit']) > 5
+        assert calls[-1][2]['ratioLimit'] == calls[-1][2]['seedingTimeLimit'] == '-1'
         assert ledger.load(HASH)['target']==5
     asyncio.run(scenario())
 
@@ -176,7 +176,7 @@ def test_large_goals_are_armed_while_paused_and_worker_preserves_files(tmp_path)
         assert calls[2][0].endswith('/start')
         rows.append(row(1_500_000,ratio_limit=-1))
         await ledger.tick()
-        assert any(path.endswith('/stop') for path,_,_ in calls)
+        assert not any(path.endswith('/stop') for path,_,_ in calls)
         assert not any(path.endswith('/delete') for path,_,_ in calls)
     asyncio.run(scenario())
 
@@ -222,3 +222,39 @@ def test_tracker_identity_survives_expired_benefits_without_extending_bonus_evid
     assert later['account_credited_uploaded']==100
     stale=ledger.observe(row(90,added_on=now-10),now+302)
     assert stale['credit_observation_stale'] and stale['tracker_name']=='Test'
+
+
+def test_upgrade_without_tracker_removes_old_time_and_ratio_limits_idempotently(tmp_path):
+    ledger, calls, rows, _ = setup(tmp_path)
+    with ledger.database() as db:
+        db.execute('DELETE FROM settings')
+    rows.append(row(5000, state='stoppedUP', seeding_time=200*3600))
+    async def scenario():
+        await ledger.tick()
+        limits=calls[-1][2]
+        assert limits['ratioLimit'] == limits['seedingTimeLimit'] == limits['inactiveSeedingTimeLimit'] == '-1'
+        assert not any(path.endswith(('/start','/stop','/delete')) for path,_,_ in calls)
+        rows[0].update(ratio_limit=-1,seeding_time_limit=-1,inactive_seeding_time_limit=-1)
+        calls.clear()
+        await TrackerCredit(ledger.database,tmp_path,ledger.raw_qbit).tick()
+        assert all(method=='GET' for _,method,_ in calls)
+    asyncio.run(scenario())
+
+
+def test_upgrade_scans_beyond_first_500_torrents(tmp_path):
+    ledger,calls,_,_=setup(tmp_path)
+    existing=[row(hash=format(i,'040x'),ratio_limit=-1,seeding_time_limit=-1) for i in range(501)]
+    existing[-1]['seeding_time_limit']=2940
+    async def raw(path,method='GET',payload=None,files=None):
+        calls.append((path,method,payload))
+        if method=='GET':
+            start=payload['offset'];return httpx.Response(200,json=existing[start:start+payload['limit']])
+        return httpx.Response(204)
+    ledger.raw_qbit=raw
+    async def scenario():
+        await ledger.tick()
+        assert ledger.scan_offset==500
+        await ledger.tick()
+        assert calls[-1][2]['hashes']==existing[-1]['hash']
+        assert calls[-1][2]['seedingTimeLimit']=='-1'
+    asyncio.run(scenario())

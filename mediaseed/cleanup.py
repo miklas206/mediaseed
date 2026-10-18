@@ -157,7 +157,9 @@ class CleanupManager:
                     db.execute("DELETE FROM torrent_cleanup WHERE id=?", (row["id"],))
 
     async def add(self, add_fn, policy, ratio, **args):
-        if policy.mode == "never":
+        if policy.mode == "never" and not args.get("start"):
+            # Paused imports cannot reach a stop limit. The start adapter clears
+            # all native limits before activation, including pending magnets.
             return await add_fn(self.qbit, ratio, **args)
         if args.get("start") and not (await self.vpn_status()).get("downloadsEnabled"):
             raise HTTPException(409, "Starting requires a verified VPN; choose add on pause")
@@ -165,9 +167,14 @@ class CleanupManager:
         if not hashes:
             raise HTTPException(422, "Cannot identify this torrent for automatic cleanup")
         async with self.lock:
-            if len(self.records()) >= 50:
+            if policy.mode != "never" and sum(r["mode"] != "never" for r in self.records()) >= 50:
                 raise HTTPException(409, "Automatic cleanup supports 50 active imports; cancel an existing rule first")
             rows = (await self.qbit("/api/v2/torrents/info", payload={"hashes": "|".join(hashes)})).json()
+            if policy.mode == "never" and isinstance(rows, list) and rows and all(isinstance(row, dict) and str(row.get("hash", "")).lower() in hashes for row in rows):
+                # A duplicate import must not acquire a new rule or identity tag.
+                if args.get("start"):
+                    await self.qbit("/api/v2/torrents/start", "POST", {"hashes": rows[0]["hash"]})
+                return {"added": True, "stopped": not args.get("start", False), "existing": True}
             if not isinstance(rows, list) or rows or any(set(r["hashes"]) & set(hashes) for r in self.records()):
                 raise HTTPException(409, "Torrent already exists; its cleanup settings were not changed")
             identifier = secrets.token_hex(12)
@@ -185,7 +192,7 @@ class CleanupManager:
             except Exception:
                 pass  # Durable waiting state; no unconfigured automatic start.
             current = self.public(hashes[0])
-            configured = current.get("status") == "active"
+            configured = current.get("status") == "active" or (policy.mode == "never" and current.get("status") == "disabled")
             return {**result, "cleanup": policy.model_dump(), "startRequested": record["start"],
                     "stopped": not (configured and record["start"]), "cleanupPending": not configured}
 
@@ -230,6 +237,11 @@ class CleanupManager:
                         continue
                     await self.qbit("/api/v2/torrents/start", "POST", {"hashes": identifier})
                 rule["status"] = "active"; self.save(rule)
+            if rule["mode"] == "never":
+                # Retention needs durable preparation, not a permanent cleanup
+                # record. The seeding worker repairs any later native drift.
+                self.forget(identifier)
+                continue
             observed = {**row, **self.credit.observe(row)} if self.credit else row
             if reached(rule, observed):
                 await self.qbit("/api/v2/torrents/delete", "POST", {"hashes": identifier, "deleteFiles": "true" if rule["delete_files"] else "false"})
@@ -246,7 +258,7 @@ class CleanupManager:
                 try:
                     rows = (await self.qbit("/api/v2/torrents/info", payload={"hashes": identifier})).json()
                     if isinstance(rows, list) and any(r.get("hash", "").lower() == identifier and rule["tag"] in [x.strip() for x in str(r.get("tags", "")).split(",")] for r in rows):
-                        await self.qbit("/api/v2/torrents/setShareLimits", "POST", {"hashes": identifier, "ratioLimit": str(rule["stop_ratio"]), "seedingTimeLimit": "2940", "inactiveSeedingTimeLimit": "-1", "shareLimitAction": "Stop"})
+                        await self.qbit("/api/v2/torrents/setShareLimits", "POST", {"hashes": identifier, "ratioLimit": "-1", "seedingTimeLimit": "-1", "inactiveSeedingTimeLimit": "-1", "shareLimitAction": "Stop"})
                 except (HTTPException, ValueError):
                     return {"saved": True, "mode": "never", "stopLimitsRestored": False}
             return {"saved": True, "mode": "never"}

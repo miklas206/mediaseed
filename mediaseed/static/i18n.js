@@ -1,6 +1,11 @@
 // Account language; English source keys and Danish translations.
 (() => {
 const messages = {
+  "Seeding continues until you stop or remove the torrent. No automatic time or ratio limit.": "Seeding fortsætter, indtil du selv stopper eller fjerner torrenten. Ingen automatisk tids- eller ratiogrænse.",
+  "Keep files · seed without a time or ratio limit": "Behold filer · seed uden tids- eller ratiogrænse",
+  "Cleanup disabled. Removing old stop limits is waiting for the client; starting the torrent clears them.": "Oprydning slået fra. Fjernelse af gamle stopgrænser afventer klienten; de fjernes, når torrenten startes.",
+  "Upload ratio reminder": "Påmindelse om uploadratio",
+  "Choose start now or add paused. Starting requires a verified VPN. Without cleanup, seeding continues until you stop or remove the torrent.": "Vælg start nu eller tilføj på pause. Start kræver verificeret VPN. Uden oprydning fortsætter seeding, indtil du selv stopper eller fjerner torrenten.",
   "{0} seeding · {1} stopped": "{0} seeder · {1} stoppede",
   "Rank requirements": "Rangkrav",
   "Choose rank": "Vælg rang",
@@ -230,7 +235,7 @@ const messages = {
   "Choose or drop multiple torrent files. You can add more files to this selection. Shared settings below apply to every file.": "Vælg eller slip flere torrentfiler. Du kan føje flere filer til valget. Indstillingerne nedenfor gælder for alle filerne.",
   "Selected torrent files": "Valgte torrentfiler",
   "For individual ratio previews, select one file at a time.": "Vælg én fil ad gangen for at forhåndsvise individuelle ratioer.",
-  "MediaSeed 0.1.27": "MediaSeed 0.1.27",
+  "MediaSeed 0.1.28": "MediaSeed 0.1.28",
   "Waiting for the next bounded metadata check": "Afventer næste kontrol af torrentoplysninger",
   "Seeding progress": "Seedingfremdrift",
   "Downloaded": "Downloadet",

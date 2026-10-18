@@ -384,7 +384,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/healthz")
     def health():
-        return {"status": "healthy", "version": "0.1.27"}
+        return {"status": "healthy", "version": "0.1.28"}
 
     @app.get("/api/auth/status")
     async def status(request: Request):
@@ -707,7 +707,11 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         except (ValueError, TypeError):
             raise HTTPException(503, "Cannot verify torrent removal") from None
 
-    credit = TrackerCredit(database, data, raw_qbit)
+    def seeding_configured():
+        with database() as db:
+            return bool(hub_url) or bool(db.execute("SELECT 1 FROM accounts LIMIT 1").fetchone())
+
+    credit = TrackerCredit(database, data, raw_qbit, configured=seeding_configured)
     cleanup = CleanupManager(database, qbit, vpn_status, credit=credit)
     credit.cleanup = cleanup.public
 

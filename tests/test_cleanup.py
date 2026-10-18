@@ -91,10 +91,11 @@ def test_new_import_is_tagged_paused_then_armed_and_only_exact_torrent_is_remove
     asyncio.run(scenario())
 
 
-def test_pending_metadata_and_vpn_loss_do_not_start_or_delete_unconfigured_import(tmp_path):
+@pytest.mark.parametrize("mode", ["ratio", "never"])
+def test_pending_metadata_and_vpn_loss_do_not_start_or_delete_unconfigured_import(tmp_path, mode):
     async def scenario():
         m, state, calls = manager(tmp_path); state["pending"] = True
-        await m.add(add_stopped, CleanupPolicy(mode="ratio", ratio=2), 1, magnet=MAGNET, start=True)
+        await m.add(add_stopped, CleanupPolicy(mode=mode, ratio=2), 1, magnet=MAGNET, start=True)
         assert m.public(HASH)["status"] == "waiting"
         assert not any(c[0].endswith(("/start", "/delete")) for c in calls)
         state["rows"] = [state["row"]]; state["ready"] = False
@@ -175,3 +176,18 @@ def test_add_api_accepts_cleanup_for_files_and_magnets_and_requires_auth(tmp_pat
         assert response.status_code == 200 and response.json()["cleanup"]["delete_files"] is False
         assert client.post("/api/torrents", json={"url": MAGNET, "cleanup": {"mode": "typo"}}).status_code == 422
         assert client.post(f"/api/torrents/{HASH}/cleanup/cancel", json={}).status_code == 200
+
+
+def test_keep_forever_is_unlimited_before_start_and_after_restart(tmp_path):
+    async def scenario():
+        m, state, calls = manager(tmp_path)
+        result = await m.add(add_stopped, CleanupPolicy(), 2, magnet=MAGNET, start=True)
+        assert not result['stopped'] and m.public(HASH)['mode'] == 'never'
+        paths = [path for path, *_ in calls]
+        assert paths.index('/api/v2/torrents/setShareLimits') < paths.index('/api/v2/torrents/start')
+        state['rows'][0].update(seeding_time=200 * 3600, ratio=100)
+        restarted = CleanupManager(m.database, m.qbit, m.vpn_status)
+        await restarted.tick()
+        assert not any(path.endswith(('/stop', '/delete')) for path, *_ in calls)
+        assert not restarted.records(), 'Retained torrents do not consume cleanup capacity'
+    asyncio.run(scenario())

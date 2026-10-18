@@ -3,7 +3,7 @@ const $ = id => document.getElementById(id);
 let selected = null, pending = new URL(location.href).searchParams.get('pending'), currentTab = null, adding = false, savedDefaults = MS.defaults();
 function renderDefaults() {
   const {start, ratio, cleanup: c} = savedDefaults;
-  const goals = {never: t("Keep files · stop at ratio {0} / 49 hours", {0: ratio}), time: t("{0} hours of seeding", {0: c.hours}), ratio: `ratio ${c.ratio}`, both: t("{0} hours AND ratio {1}", {0: c.hours, 1: c.ratio}), either: t("{0} hours OR ratio {1}", {0: c.hours, 1: c.ratio})};
+  const goals = {never: t("Keep files · seed without a time or ratio limit"), time: t("{0} hours of seeding", {0: c.hours}), ratio: `ratio ${c.ratio}`, both: t("{0} hours AND ratio {1}", {0: c.hours, 1: c.ratio}), either: t("{0} hours OR ratio {1}", {0: c.hours, 1: c.ratio})};
   $('settings-summary').textContent = `${start ? t("Start immediately") : t("Add on pause")} · ${goals[c.mode]}${c.mode === 'never' ? '' : ' · ' + (c.delete_files ? t("remove torrent and files") : t("remove torrent only"))}`;
   $('add-default').textContent = start ? t("Add and start") : t("Add on pause");
   $('add-other').textContent = start ? t("Add on pause") : t("Add and start"); $('add-other').value = start ? 'pause' : 'start';

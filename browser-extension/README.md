@@ -22,7 +22,7 @@ Hent pakken fra **Browserudvidelse** øverst i MediaSeed. Downloadsiden vælger 
 
 Åbn **Indstillinger**, vælg start med det samme eller pause, ratio, automatisk oprydning, seedtimer og om filer skal bevares, og tryk **Gem standardindstillinger**. Oversigten viser de gemte valg. Ikke-gemte ændringer markeres tydeligt og bruges først efter gem. Indstillingerne bevares, når popupen lukkes, browseren genstartes, eller en torrent tilføjes.
 
-Oprydning kan være aldrig, tid, ratio, BÅDE eller ENTEN. **Aldrig** og filbevaring er standard. Automatisk filsletning kræver eksplicit valg og gem; det fremgår af oversigten. Regler gemmes i MediaSeed pr. ny import og kan slås fra under Detaljer. Browseren behøver ikke være åben; MediaSeed skal køre. Uden oprydning bruges de eksisterende stopmål ratio / 49 timer.
+Oprydning kan være aldrig, tid, ratio, BÅDE eller ENTEN. **Aldrig** og filbevaring er standard. Automatisk filsletning kræver eksplicit valg og gem; det fremgår af oversigten. Regler gemmes i MediaSeed pr. ny import og kan slås fra under Detaljer. Browseren behøver ikke være åben; MediaSeed skal køre. Uden oprydning fortsætter seeding uden tids- eller ratiogrænse, indtil du selv stopper eller fjerner torrenten. Udvidelse 1.3.1 viser dette tydeligt; serverrettelsen gælder også allerede installerede udvidelser.
 
 ## Direkte tilføjelse
 

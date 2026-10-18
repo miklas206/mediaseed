@@ -335,7 +335,7 @@ def test_real_credit_controller_keeps_seeding_protection_without_deadlock(
         limits = [
             p for path, method, p in state.calls if path.endswith("/setShareLimits")
         ]
-        assert limits and limits[-1]["seedingTimeLimit"] == "2940"
+        assert limits and limits[-1]["seedingTimeLimit"] == "-1"
         assert limits[-1]["shareLimitAction"] == "Stop"
 
     asyncio.run(check())

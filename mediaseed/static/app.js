@@ -477,13 +477,13 @@ async function showDetails(row) { return richDetails(row); }
 
 function renderCleanupDetails(policy = {mode: 'never'}, row, target) {
   target.append(element('h3', t("Automatic cleanup")));
-  if (policy.mode === 'never') { target.append(element('p', t("Disabled · torrent and files are preserved."), 'muted')); return; }
+  if (policy.mode === 'never') { target.append(element('p', t("Seeding continues until you stop or remove the torrent. No automatic time or ratio limit."), 'muted')); return; }
   const goals = {time: t("{0} hours of active seeding", {0: policy.hours}), ratio: t("credited upload ratio {0}", {0: policy.ratio}), both: t("{0} hours of active seeding AND credited ratio {1}", {0: policy.hours, 1: policy.ratio}), either: t("{0} hours of active seeding OR credited ratio {1}", {0: policy.hours, 1: policy.ratio})};
   const state = {waiting: t("Waiting for preparation; torrent is kept paused"), preparing: t("Preparation was interrupted; check the torrent or disable the rule"), active: t("Monitoring · waiting for the goal and connected downloaders"), identity_mismatch: t("Cleanup blocked: torrent identity could not be confirmed")};
   target.append(element('p', t("{0} after {1}.", {0: policy.delete_files ? t("Remove torrent and files") : t("Remove torrent only · keep files"), 1: goals[policy.mode]})), element('p', policy.observationFailed ? t("Status check failed · cleanup is waiting for a new valid measurement.") : state[policy.status] || t("Waiting for check"), 'muted'));
   if (appRole !== 'viewer') {
     const cancel = element('button', t("Disable automatic cleanup"));
-    cancel.onclick = async () => { cancel.disabled = true; try { const result = await api(`torrents/${row.hash}/cleanup/cancel`, {}); showNotification(result.stopLimitsRestored === false ? t("Cleanup disabled. The stop goal could not be restored; set it under Details when the client is ready.") : t("Automatic cleanup disabled. Torrent and files are preserved."), 'success'); await showDetails(row); } catch (error) {notify(error); cancel.disabled = false;} };
+    cancel.onclick = async () => { cancel.disabled = true; try { const result = await api(`torrents/${row.hash}/cleanup/cancel`, {}); showNotification(result.stopLimitsRestored === false ? t("Cleanup disabled. Removing old stop limits is waiting for the client; starting the torrent clears them.") : t("Automatic cleanup disabled. Torrent and files are preserved."), 'success'); await showDetails(row); } catch (error) {notify(error); cancel.disabled = false;} };
     target.append(cancel);
   }
 }
@@ -767,7 +767,7 @@ function updateCleanupFields() {
   }
   document.querySelector('#add-cleanup-action').disabled = !active;
   document.querySelector('#add-cleanup-warning').hidden = !active || !files;
-  document.querySelector('#add-seeding-help').textContent = active ? t("The selected cleanup rule controls the seeding goal. Choose start now or add paused. Starting requires a verified VPN.") : t("Choose start now or add paused. Starting requires a verified VPN. Stop goal: selected credited ratio or 49 hours of seeding; torrent and files are preserved.");
+  document.querySelector('#add-seeding-help').textContent = active ? t("The selected cleanup rule controls the seeding goal. Choose start now or add paused. Starting requires a verified VPN.") : t("Choose start now or add paused. Starting requires a verified VPN. Without cleanup, seeding continues until you stop or remove the torrent.");
   const stop = addForm.elements.namedItem('ratio'); stop.disabled = active;
   const label = stop.closest?.('label'); if (label) label.hidden = active;
 }

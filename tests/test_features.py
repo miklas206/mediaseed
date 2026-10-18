@@ -121,7 +121,7 @@ def test_torrent_details_policy_and_early_stop(tmp_path):
         assert parse_qs(calls[-1].content.decode())["deleteFiles"] == ["false"]
         assert client.post(f"/api/torrents/{identifier}/policy", json={"ratio": 0.5}).status_code == 422
         assert client.post(f"/api/torrents/{identifier}/policy", json={"ratio": 2}).status_code == 200
-        assert parse_qs(calls[-1].content.decode())["seedingTimeLimit"] == ["2940"]
+        assert parse_qs(calls[-1].content.decode())["seedingTimeLimit"] == ["-1"]
 
 
 def test_saved_sources_mask_secrets_and_preserve_credentials(tmp_path):
@@ -324,7 +324,7 @@ def test_mediavpn_proxy_requires_fresh_readiness_for_start(tmp_path, monkeypatch
         assert mutations[-1]["path"] == "torrents/start"
         ready = False
         assert client.post("/api/torrents/start", json={"torrent_hash": "a" * 40}).status_code == 409
-        assert len(mutations) == 1
+        assert [row["path"] for row in mutations] == ["torrents/setShareLimits", "torrents/start"]
 
 
 def test_local_storage_rejects_symlink(tmp_path):

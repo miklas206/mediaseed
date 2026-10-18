@@ -31,10 +31,12 @@ def publication(value):
 
 
 class TrackerCredit:
-    def __init__(self, database, root, raw_qbit):
+    def __init__(self, database, root, raw_qbit, configured=lambda: True):
         self.database, self.root, self.raw_qbit = database, Path(root), raw_qbit
+        self.configured = configured
         self.lock = asyncio.Lock()
         self._connection = None
+        self.scan_offset = 0
         self.cleanup = lambda identifier: {"mode": "never"}
         with database() as db:
             feed_uploads.initialize(db)
@@ -217,23 +219,14 @@ class TrackerCredit:
                 return result
         elif method == "POST" and path.endswith("/torrents/start"):
             identifier = str(payload.get("hashes", "")).lower()
-            record = self.load(identifier)
-            if (record or self.enabled()) and self.cleanup(identifier).get("mode") == "never":
-                current = (await self.raw_qbit("/api/v2/torrents/info", payload={"hashes": identifier})).json()
-                if not isinstance(current, list):
-                    raise HTTPException(503, "Cannot verify tracker credit before start")
-                credit = next((self.observe(r) for r in current if isinstance(r, dict) and str(r.get("hash", "")).lower() == identifier), {})
-                native = credit.get("native_ratio_limit", record["target"] * 2 if record else 2)
-                limits = self.unlimited(identifier) if native > 1000 else {"hashes": identifier, "ratioLimit": str(native), "seedingTimeLimit": "2940", "inactiveSeedingTimeLimit": "-1", "shareLimitAction": "Stop"}
-                await self.raw_qbit("/api/v2/torrents/setShareLimits", "POST", limits)
+            if self.cleanup(identifier).get("mode") == "never":
+                await self.raw_qbit("/api/v2/torrents/setShareLimits", "POST", self.unlimited(identifier))
         elif method == "POST" and path.endswith("/torrents/setShareLimits") and float(payload.get("ratioLimit", -1)) >= 1:
             identifier = str(payload.get("hashes", "")).lower()
             if self.enabled() or self.load(identifier):
                 target = float(payload["ratioLimit"])
                 self.register(identifier, target)
-                payload["ratioLimit"] = str(target * 2)
-                if target * 2 > 1000:
-                    payload = self.unlimited(identifier)
+            payload = self.unlimited(identifier)
         result = await self.raw_qbit(path, method, payload, files=files)
         if method == "POST" and path.endswith("/torrents/delete"):
             self.forget(str(payload.get("hashes", "")))
@@ -244,12 +237,10 @@ class TrackerCredit:
         return {"hashes": identifier, "ratioLimit": "-1", "seedingTimeLimit": "-1", "inactiveSeedingTimeLimit": "-1", "shareLimitAction": "Stop"}
 
     async def tick(self):
-        if not self.enabled():
-            with self.database() as db:
-                if not db.execute("SELECT 1 FROM torrent_credit LIMIT 1").fetchone():
-                    return
+        if not self.configured():
+            return
         async with self.lock:
-            rows = (await self.raw_qbit("/api/v2/torrents/info", payload={"limit": 500})).json()
+            rows = (await self.raw_qbit("/api/v2/torrents/info", payload={"limit": 500, "offset": self.scan_offset})).json()
             if not isinstance(rows, list):
                 return
             writes = 0
@@ -257,27 +248,27 @@ class TrackerCredit:
             for row, credit in zip(rows[:500], credits):
                 if not isinstance(row, dict):
                     continue
-                identifier = row.get("hash", "")
-                if not credit or self.cleanup(identifier).get("mode") != "never":
+                identifier = str(row.get("hash", "")).lower()
+                if not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", identifier) or self.cleanup(identifier).get("mode") != "never":
                     continue
-                if credit.get("credit_observation_stale"):
+                if not all(type(row.get(key)) in (int, float) for key in ("ratio_limit", "seeding_time_limit", "inactive_seeding_time_limit")):
+                    continue
+                if row.get("state") in {"moving", "checkingDL", "checkingUP", "checkingResumeData", "metaDL", "forcedMetaDL"}:
                     continue
                 if writes >= 8:
-                    continue
-                native = credit["native_ratio_limit"]
-                limits = self.unlimited(identifier) if native > 1000 else {"hashes": identifier, "ratioLimit": str(native), "seedingTimeLimit": "2940", "inactiveSeedingTimeLimit": "-1", "shareLimitAction": "Stop"}
-                desired = -1 if native > 1000 else native
-                if type(row.get("ratio_limit")) in (int, float) and abs(row["ratio_limit"] - desired) > 0.000001:
-                    await self.raw_qbit("/api/v2/torrents/setShareLimits", "POST", limits)
+                    break
+                # Also migrates torrents from releases that installed native stop
+                # goals. Never resume a user-paused torrent during this repair.
+                if any(row.get(key) != -1 for key in ("ratio_limit", "seeding_time_limit", "inactive_seeding_time_limit")):
+                    await self.raw_qbit("/api/v2/torrents/setShareLimits", "POST", self.unlimited(identifier))
                     writes += 1
-                if native > 1000 and number(row.get("progress")) >= 1 and row.get("state") in {"uploading", "stalledUP", "forcedUP"} and (credit["credited_ratio"] >= credit["ratio_limit"] or number(credit.get("seeding_time", row.get("seeding_time"))) >= 49 * 3600):
-                    await self.raw_qbit("/api/v2/torrents/stop", "POST", {"hashes": identifier})
-                    writes += 1
+            if writes < 8:
+                self.scan_offset = self.scan_offset + 500 if len(rows) >= 500 else 0
 
     async def run(self):
         while True:
             try:
                 await self.tick()
             except Exception:
-                pass  # Native conservative stop limits survive API outages.
+                pass  # Do not mutate torrents without a fresh client observation.
             await asyncio.sleep(15)

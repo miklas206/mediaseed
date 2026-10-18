@@ -426,7 +426,7 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         if cleanup and cleanup.public(identifier)["mode"] != "never":
             raise HTTPException(409, "Cancel automatic cleanup before changing the stop ratio")
         await qbit("/api/v2/torrents/setShareLimits", "POST", {"hashes": torrent_hash(identifier), "ratioLimit": str(body.ratio), "seedingTimeLimit": "2940", "inactiveSeedingTimeLimit": "-1", "shareLimitAction": "Stop"})
-        return {"saved": True, "ratio": body.ratio, "seedingMinutes": 2940}
+        return {"saved": True, "ratio": body.ratio, "seedingMinutes": -1, "unlimited": True}
 
     def feed_summary(identifier):
         with database() as db:

@@ -49,7 +49,7 @@ def test_start_api_choice_is_checked_server_side(tmp_path, monkeypatch, source):
 
         def submit(start):
             if source == "file":
-                return client.post(f"/api/torrents/upload?filename=test.torrent&start={str(start).lower()}", content=b"dee", headers={"Content-Type": "application/x-bittorrent"})
+                return client.post(f"/api/torrents/upload?filename=test.torrent&start={str(start).lower()}", content=b"d4:infod4:name4:testee", headers={"Content-Type": "application/x-bittorrent"})
             return client.post("/api/torrents", json={"url": "magnet:?xt=urn:btih:" + "a" * 40, "start": start})
 
         assert submit(True).json()["startRequested"] is True
