@@ -23,3 +23,13 @@ The hidden legacy ratio input remains disabled and outside the estimate card;
 retained torrents and RSS feeds do not ask for it. Ratio cleanup goals remain
 available only when a ratio-based cleanup mode is selected. Static asset URLs
 are versioned so an update replaces cached older forms.
+
+
+In 0.1.30 measured upload and download rates control independent, bounded packet
+populations on a single end-to-end route. Packet sizes have distinct speeds
+(large faster than medium, medium faster than small). Existing packets finish
+their journey when the rate decreases; blocked VPN or invalid/stale measurements
+clear the decorative traffic immediately. Resize observation keeps the track
+aligned with icon centres, and opaque icons render above the packets. Reduced
+motion shows static markers. These are throughput illustrations, not captured
+network packets. No network or storage permissions change.
