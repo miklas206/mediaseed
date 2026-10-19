@@ -8,6 +8,7 @@
 /* A single overlay travels through every hop; opaque icons cover the packets. */
 .download-route { position:relative; isolation:isolate; align-items:flex-start; }
 .download-route-node { position:relative; z-index:1; }
+.download-route-node > strong { font-size:inherit; min-width:0; max-width:100%; overflow-wrap:anywhere; text-align:center; }
 .download-route-node .route-icon { background:var(--surface); }
 .download-route-link { flex:1; min-width:0; height:20px; }
 .route-packets { position:absolute; z-index:0; height:20px; transform:translateY(-50%); overflow:hidden; pointer-events:none; border-block:1px solid var(--line); }
