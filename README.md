@@ -1,5 +1,19 @@
 # MediaSeed
 
+## 0.1.31 - NAS og lokal disk samtidig
+
+NAS-placeringer fra MediaHub accepterer nu den afgrænsede `files`-undermappe.
+Den lokale disk, eksisterende lagerplaceringer og standardplaceringen bevares;
+NAS'en bliver et ekstra valg til torrents og RSS. Eksisterende torrents flyttes
+ikke. Både nye installationer og opdateringer bruger samme validering uden
+ændring af gemt konfiguration, credentials eller mediefiler.
+
+Opdatér også Core til 0.6.64 for at aktivere NAS-skrivecache uden at fjerne
+eksisterende app- eller Windows-tilknytninger. Apps, som bruger NAS'en, skal være
+stoppet under den første cacheændring; Windows-delinger genoprettes automatisk.
+Automatiske tests kontrollerer begge diskvalg og afviser skrivning, når NAS'en
+forsvinder. Produktions-NAS'en er ikke ændret eller fysisk verificeret her.
+
 ## 0.1.28 - beholdte filer seeder uden stopgrænse
 
 Når automatisk oprydning er **Aldrig**, stopper seeding ikke længere ved ratio

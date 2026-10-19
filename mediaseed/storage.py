@@ -27,7 +27,13 @@ class Storage:
                 or not identifier.replace("-", "").isalnum()
                 or identifier == "local"
                 or any(r["id"] == identifier for r in self.locations)
-                or path != "/downloads/media/" + identifier
+                or (
+                    path != "/downloads/media/" + identifier
+                    and (
+                        not identifier.startswith("nas-")
+                        or path != "/downloads/media/" + identifier + "/files"
+                    )
+                )
                 or not isinstance(row["label"], str)
             ):
                 raise ValueError("Invalid approved storage location")

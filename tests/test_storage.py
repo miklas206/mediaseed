@@ -103,3 +103,42 @@ def test_unavailable_and_readonly_media_remain_visible(tmp_path, monkeypatch):
     assert not rows[2]["available"]
     with pytest.raises(Exception, match="read-only"):
         catalog.destination("movies", "")
+
+
+def test_hub_nas_attachment_keeps_local_and_existing_media_locations(tmp_path):
+    identifier = "nas-" + "a" * 24
+    (tmp_path / "media" / identifier / "files" / "Films").mkdir(parents=True)
+    (tmp_path / "media/downloads").mkdir()
+    roots = [
+        {"id": "downloads", "label": "Disk", "path": "/downloads/media/downloads"},
+        {"id": identifier, "label": "NAS", "path": f"/downloads/media/{identifier}/files"},
+    ]
+    catalog = Storage(tmp_path, json.dumps(roots))
+    snapshot = catalog.snapshot()
+    assert [row["id"] for row in snapshot["locations"]] == ["local", "downloads", identifier]
+    assert all(row["available"] for row in snapshot["locations"])
+    assert snapshot["defaultLocation"] == "downloads"
+    assert catalog.destination(identifier, "Films") == roots[1]["path"] + "/Films"
+    assert catalog.describe(roots[1]["path"] + "/Films")["location"] == identifier
+    assert catalog.destination("downloads", "") == roots[0]["path"]
+    (tmp_path / "media" / identifier / "files" / "Films").rmdir()
+    (tmp_path / "media" / identifier / "files").rmdir()
+    assert not catalog.snapshot()["locations"][2]["available"]
+    with pytest.raises(Exception, match="unavailable"):
+        catalog.destination(identifier, "")
+
+
+@pytest.mark.parametrize("suffix", ["", "/files"])
+def test_nas_roots_preserve_older_configuration(tmp_path, suffix):
+    identifier = "nas-" + "a" * 24
+    root = {"id": identifier, "label": "NAS", "path": f"/downloads/media/{identifier}{suffix}"}
+    assert Storage(tmp_path, json.dumps([root])).locations[1] == root
+
+
+@pytest.mark.parametrize("suffix", ["/files/..", "/files/other", "/../outside", "/"])
+def test_nas_root_rejects_unapproved_paths(tmp_path, suffix):
+    identifier = "nas-" + "a" * 24
+    with pytest.raises(ValueError, match="Invalid approved"):
+        Storage(tmp_path, json.dumps([
+            {"id": identifier, "label": "NAS", "path": f"/downloads/media/{identifier}{suffix}"}
+        ]))
