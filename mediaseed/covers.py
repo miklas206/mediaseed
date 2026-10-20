@@ -1,18 +1,24 @@
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import time
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 import httpx
+
+from mediaseed.enrichment import Enrichment
 
 
 def poster_url(value):
     if not isinstance(value, str) or len(value) > 500:
         return None
-    address = urlsplit(value)
+    try:
+        address = urlsplit(value)
+    except ValueError:
+        return None
     prefix = r"/tmdb/t/p/" if address.netloc == "tmdbc.org" else r"/t/p/"
     if address.scheme != "https" or address.netloc not in {"tmdbc.org", "image.tmdb.org"} or address.query or address.fragment:
         return None
@@ -47,11 +53,19 @@ class Covers:
         self.checked = {}
         self.pending = {}
         self.lock = asyncio.Lock()
+        self.metadata_sink = None
+        self.metadata_source = None
+        self.enrichment = Enrichment(self)
         self.username = username or (lambda identifier: None)
 
     def remember(self, identifier, account, attributes):
         if str(attributes.get("info_hash", "")).lower() != identifier.lower():
             return
+        if self.metadata_sink:
+            try:
+                self.metadata_sink(identifier.lower(), account, attributes)
+            except Exception as error:
+                logging.getLogger(__name__).warning("Metadata observation failed (%s)", type(error).__name__)
         featured = attributes.get("featured") is True
         try:
             freeleech = float(str(attributes.get("freeleech")).rstrip("%"))
@@ -76,73 +90,22 @@ class Covers:
 
     async def tick(self):
         async with self.lock:
-            accounts = self.accounts("trackers")[:3]
+            accounts = self.accounts("trackers")[:10]
             if not accounts:
                 return
             response = await self.qbit("/api/v2/torrents/info", payload={"limit": 500})
             torrents = response.json()
             if not isinstance(torrents, list):
                 return
-            budget = 6
-            candidates = [*self.pending.values(), *torrents[:500]]
-            self.pending.clear()
-            for torrent in candidates:
-                if not isinstance(torrent, dict):
-                    continue
-                identifier = torrent.get("hash", "")
-                path = self.path(identifier)
-                if path is None or time.monotonic() - self.checked.get(identifier, -1000) < 300:
-                    continue
-                if budget == 0:
-                    break
-                self.checked[identifier] = time.monotonic()
-                try:
-                    for account in accounts:
-                        name = str(torrent.get("name", ""))[:200]
-                        release = re.sub(r"\.(?:mkv|mp4|m4v|avi|mov|wmv|webm|m2ts|ts|iso|flac|mp3|m4a|ogg|wav)$", "", name, flags=re.I)
-                        variants = list(dict.fromkeys([release, name, re.sub(r"[._]+", " ", release).strip(), re.sub(r"[._]+", " ", name).strip()]))
-                        matched = False
-                        for variant in variants:
-                            cursor = None
-                            for page in range(3):
-                                if budget == 0:
-                                    break
-                                budget -= 1
-                                params = {"name": variant, "perPage": 50}
-                                if cursor:
-                                    params["cursor"] = cursor
-                                data = await self.tracker_read(account, "/api/torrents/filter", params)
-                                attributes = matching_attributes(data, identifier)
-                                if attributes:
-                                    self.remember(identifier, account, attributes)
-                                    meta = attributes.get("meta")
-                                    poster = poster_url(meta.get("poster")) if isinstance(meta, dict) else None
-                                    if poster and (not path.exists() or time.time() - path.stat().st_mtime >= 86400):
-                                        await self.download(poster, path)
-                                    matched = True
-                                    break
-                                links = data.get("links", {}) if isinstance(data, dict) else {}
-                                next_link = links.get("next") if isinstance(links, dict) else None
-                                meta = data.get("meta", {}) if isinstance(data, dict) else {}
-                                next_cursor = meta.get("next_cursor") if isinstance(meta, dict) else None
-                                if isinstance(next_cursor, str) and 0 < len(next_cursor) <= 2048:
-                                    cursor = next_cursor
-                                    continue
-                                if not isinstance(next_link, str) or len(next_link) > 4096:
-                                    break
-                                next_address = urlsplit(next_link)
-                                cursor = parse_qs(next_address.query).get("cursor", [None])[0]
-                                if not cursor or len(cursor) > 2048:
-                                    break
-                            if matched or budget == 0:
-                                break
-                        if matched or budget == 0:
-                            break
-                except Exception:
-                    continue
+            observed = {row.get("hash"): row for row in torrents[:500] if isinstance(row, dict)}
+            candidates = [*({**pending, **observed.get(pending.get("hash"), {})} for pending in self.pending.values()), *torrents[:500]]
+            def priority(torrent):
+                path = self.path(str(torrent.get("hash", ""))) if isinstance(torrent, dict) else None
+                return 0 if path is not None and not path.is_file() else 1
+            candidates.sort(key=priority)
+            await self.enrichment.run(candidates, accounts)
+            self.pending = {key: value for key, value in self.pending.items() if key not in observed}
             self.cleanup()
-            if len(self.checked) > 1000:
-                self.checked = {key: value for key, value in self.checked.items() if time.monotonic() - value < 300}
 
     def enqueue(self, identifier, name):
         if not self.accounts("trackers") or self.path(identifier) is None or not isinstance(name, str) or not name.strip():

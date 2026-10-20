@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mediaseed.cleanup import source_hashes, CleanupPolicy
 from mediaseed.covers import Covers
+from mediaseed.intelligence import Intelligence
 from mediaseed.rss_worker import RssWorker
 from mediaseed.ratio_scout import RatioScout, RatioSettings
 from mediaseed.activity import Activity
@@ -132,6 +133,7 @@ async def add_stopped(qbit, ratio, content=None, magnet=None, start=False, vpn_s
 
 def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=None, cleanup=None, credit=None, storage=None):
     tracker_cache = {}
+    intelligence = Intelligence(database)
     activity = Activity(database)
 
     @app.get("/api/activity")
@@ -230,6 +232,14 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         account = next((a for a in rows("trackers") if a["id"] == identifier), None)
         return cached["public"].get("username") if cached and account and cached["key"] == account["api_key"] and time.monotonic() - cached["checked"] < 360 and cached["public"].get("status") == "ok" else None
     covers = Covers(data_dir, rows, tracker_read, qbit, username=tracker_username) if data_dir else None
+    if covers:
+        covers.metadata_sink = intelligence.remember
+        covers.metadata_source = intelligence.media
+
+    @app.get("/api/torrents/{identifier}/media")
+    def torrent_media(identifier: str, session=Depends(authorized)):
+        return {"metadata": intelligence.media(torrent_hash(identifier))}
+
     rss_worker = RssWorker(database, rows, qbit, vpn_status, storage=storage) if vpn_status else None
     if rss_worker:
         rss_worker.cleanup = cleanup
