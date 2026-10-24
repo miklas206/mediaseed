@@ -484,17 +484,21 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     async def read_torrents():
         response = await qbit("/api/v2/torrents/info", payload={"limit": 500})
-        allowed = {"hash", "name", "progress", "state", "dlspeed", "upspeed", "ratio", "eta", "size", "seeding_time", "ratio_limit", "category", "num_seeds", "num_leechs", "downloaded", "uploaded", "added_on", "completion_on"}
+        allowed = {"hash", "name", "progress", "state", "dlspeed", "upspeed", "ratio", "eta", "size", "seeding_time", "ratio_limit", "category", "num_seeds", "num_leechs", "num_complete", "num_incomplete", "downloaded", "uploaded", "added_on", "completion_on"}
         try:
             rows = response.json()
             if not isinstance(rows, list):
                 raise ValueError()
             result = []
+            swarm_samples = app.state.swarm.snapshot(rows[:500])
             credits = credit.observe_many(rows[:500])
             cleanup_rules = {identifier: rule for rule in cleanup.records() for identifier in rule["hashes"]}
             for row, credited in zip(rows[:500], credits):
                 public = {key: value for key, value in row.items() if key in allowed}
                 identifier = str(row.get("hash", ""))
+                sample = swarm_samples.get(identifier.lower())
+                if sample is not None:
+                    public["swarm"] = sample
                 rule = cleanup_rules.get(identifier.lower())
                 public["cleanup"] = ({key: rule[key] for key in ("mode", "hours", "ratio", "delete_files", "status")}
                                      if rule and cleanup_identity(rule, row) else {"mode": "never", "status": "disabled"})

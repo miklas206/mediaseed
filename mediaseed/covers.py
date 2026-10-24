@@ -53,6 +53,7 @@ class Covers:
         self.checked = {}
         self.pending = {}
         self.lock = asyncio.Lock()
+        self.swarm_sink = None
         self.metadata_sink = None
         self.metadata_source = None
         self.enrichment = Enrichment(self)
@@ -61,6 +62,8 @@ class Covers:
     def remember(self, identifier, account, attributes):
         if str(attributes.get("info_hash", "")).lower() != identifier.lower():
             return
+        if self.swarm_sink:
+            self.swarm_sink(identifier.lower(), account, attributes)
         if self.metadata_sink:
             try:
                 self.metadata_sink(identifier.lower(), account, attributes)

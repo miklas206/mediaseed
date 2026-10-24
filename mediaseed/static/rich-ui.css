@@ -24,3 +24,16 @@
 .seed-progress-cell progress[data-tone=checking]{--progress-color:#ac83e8}
 .seed-progress-cell progress[data-tone=error]{--progress-color:#ef6565}
 .seed-goal-caption{overflow-wrap:anywhere}
+
+/* Keep swarm totals, actual connections and tracker API observations distinct. */
+.seed-swarm{display:grid;gap:5px;min-width:0}
+.seed-peer-line{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:10px;row-gap:4px;line-height:1.5}
+.seed-peer-source{flex-basis:100%;color:var(--muted)}
+.seed-peer-line strong{font-variant-numeric:tabular-nums;font-weight:600}
+.seed-peer-line .seeders strong{color:#76d8b6}.seed-peer-line .leechers strong{color:#e2bd72}
+.seed-peer-note{flex-basis:100%;font-size:inherit}
+
+#torrents>.torrent>.seed-swarm{grid-column:2/-1!important;grid-row:2!important;display:flex;flex-wrap:wrap;gap:10px 24px;padding-top:10px;border-top:1px solid var(--line)}
+#torrents .seed-swarm .seed-peer-line{font-size:12px;max-width:100%}
+@media(max-width:1100px){#torrents>.torrent>.seed-swarm{grid-row:3!important}}
+@media(max-width:650px){#torrents>.torrent>.seed-swarm{grid-row:4!important;gap:10px 18px}}

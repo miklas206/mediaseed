@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mediaseed.cleanup import source_hashes, CleanupPolicy
 from mediaseed.covers import Covers
+from mediaseed.swarm import SwarmMonitor
 from mediaseed.intelligence import Intelligence
 from mediaseed.rss_worker import RssWorker
 from mediaseed.ratio_scout import RatioScout, RatioSettings
@@ -538,11 +539,17 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
                 raise HTTPException(404, "Settings not found")
         return {"removed": True, "filesPreserved": True}
 
+    swarm = SwarmMonitor(database, rows, qbit, covers.tracker_read if covers else tracker_read,
+                         lambda identifier, account: covers.enrichment.load(identifier, account).get('record_id') if covers else None)
+    app.state.swarm = swarm
+    if covers:
+        covers.swarm_sink = swarm.observe
+
     async def background():
         async def account_tick():
             if rows("trackers"):
                 await accounts(session={})
-        jobs = [("accounts", account_tick)]
+        jobs = [("accounts", account_tick), ("swarm", swarm.tick)]
         for name, worker in (("rss", rss_worker), ("ratio-scout", scout), ("covers", covers)):
             if worker:
                 jobs.append((name, worker.tick))

@@ -65,6 +65,32 @@ function seedProgressTone(row) {
   if (/queued|stalled|meta/i.test(row.state)) return 'waiting';
   return Number(row.progress) >= 1 ? 'seeding' : 'downloading';
 }
+function seedPeerCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? trackerNumber(value) : '?';
+}
+function seedSwarmView(row) {
+  const view = element('div', undefined, 'seed-swarm');
+  view.title = t('Connected peers refresh every 5 seconds. Swarm totals follow tracker and DHT announcements. Tracker API samples refresh about once a minute, subject to tracker limits.');
+  function counts(label, seeders, leechers, className = '') {
+    const line = element('small', undefined, 'seed-peer-line ' + className);
+    line.append(element('span', label, 'seed-peer-source'));
+    for (const [name, value, tone] of [['Seeders', seeders, 'seeders'], ['Leechers', leechers, 'leechers']]) {
+      const part = element('span', t(name) + ' ', tone);
+      part.append(element('strong', seedPeerCount(value))); line.append(part);
+    }
+    return line;
+  }
+  view.append(counts(t('Swarm'), row.num_complete, row.num_incomplete), counts(t('Connected peers'), row.num_seeds, row.num_leechs));
+  const api = row.swarm;
+  if (api) {
+    const current = api.status === 'ok' && Number.isFinite(api.checkedAt) && Date.now() / 1000 - api.checkedAt >= -5 && Date.now() / 1000 - api.checkedAt <= 180;
+    const line = counts(t('Tracker API'), current ? api.seeders : undefined, current ? api.leechers : undefined, 'seed-peer-api');
+    if (!current) line.append(element('span', t(api.status === 'pending' ? 'Waiting for API data' : 'API data unavailable or stale'), 'seed-peer-note'));
+    line.title = api.tracker + (api.checkedAt ? ' · ' + t('Updated {0}', {0: new Date(api.checkedAt * 1000).toLocaleString(locale())}) : '');
+    view.append(line);
+  }
+  return view;
+}
 function seedTorrent(row, index) {
   const item = element('article', undefined, 'torrent seed-rich-row'); item.dataset.state = state(row); item.dataset.hash = row.hash;
   const identity = element('div', undefined, 'seed-identity');
@@ -105,7 +131,7 @@ function seedTorrent(row, index) {
   const commands = element('div', undefined, 'torrent-menu-content'); commands.append(command(t('Details'), () => showDetails(row)));
   if (appRole !== 'viewer') commands.append(command(t('Check files'), () => chooseRecheck(row)), command(t('Remove'), () => chooseRemoval(row)));
   menu.append(trigger, commands); actions.append(menu);
-  item.append(seedPoster(row), identity, transfer, activity, actions); return item;
+  item.append(seedPoster(row), identity, transfer, activity, actions, seedSwarmView(row)); return item;
 }
 const seedDetailCache = new Map();
 let seedDetailRequest = 0;
