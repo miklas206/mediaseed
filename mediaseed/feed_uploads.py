@@ -1,6 +1,7 @@
 """Durable feed attribution; never infer credit from the feed's current badges."""
 
 import re
+from mediaseed import feed_series
 
 
 def initialize(db):
@@ -12,6 +13,8 @@ def initialize(db):
         "CREATE INDEX IF NOT EXISTS rss_downloads_page ON rss_downloads(feed,added DESC,hash)"
     )
 
+    feed_series.initialize(db)
+
 
 def migrate(db):
     initialize(db)
@@ -19,12 +22,16 @@ def migrate(db):
         "INSERT OR IGNORE INTO rss_downloads(feed,hash,title,added) SELECT feed,lower(torrent_hash),'',MIN(created) FROM rss_history WHERE status='added' AND torrent_hash IS NOT NULL GROUP BY feed,lower(torrent_hash)"
     )
 
+    feed_series.backfill(db)
+
 
 def record(db, feed, identifier, title, added):
     db.execute(
         "INSERT INTO rss_downloads(feed,hash,title,added) VALUES (?,?,?,?) ON CONFLICT(feed,hash) DO UPDATE SET title=excluded.title",
         (feed, identifier, str(title)[:300], added),
     )
+
+    feed_series.remember(db, feed, identifier, str(title)[:300])
 
 
 def observe(db, row, value):
@@ -62,6 +69,9 @@ def observe(db, row, value):
                 identifier,
             ),
         )
+
+        if row.get('name'):
+            feed_series.remember(db, feed, identifier, str(row['name'])[:300])
 
 
 def summary(db, feed):

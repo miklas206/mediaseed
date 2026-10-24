@@ -231,16 +231,6 @@ async function richPreview() {
   }catch(error){if(generation===richPreview.request)target.replaceChildren(element('strong',t('Account ratio after adding')),element('p',t(error.message),'muted'));}
 }
 richPreview.request=0;
-async function richFeedHistory(id,name,page=1){
-  const request=++richFeedHistory.request;
-  let popup=document.querySelector('#feed-history-dialog');if(!popup){popup=element('dialog');popup.id='feed-history-dialog';popup.setAttribute('aria-labelledby','feed-history-title');document.body.append(popup);}
-  const heading=element('div',undefined,'heading'),title=element('h2',name);title.id='feed-history-title';const close=command(t('Close'),()=>popup.close());close.type='button';heading.append(title,close);const box=element('div');popup.replaceChildren(heading,box);box.append(element('p',t('Loading…'),'muted'));if(!popup.open)popup.showModal();
-  try{const result=await api(`feeds/${id}/history?page=${page}&pageSize=25`);if(request!==richFeedHistory.request||!popup.open)return;box.replaceChildren();
-    const sum=result.upload;box.append(element('p',t('Estimated credited upload')+': '+(typeof sum?.creditedUploadedBytes==='number'?'≈ '+trackerBytes(sum.creditedUploadedBytes):t('Unknown')),'feed-upload-total'));
-    if(sum?.unknownDownloads)box.append(element('p',t('{0} downloads without measurements',{0:sum.unknownDownloads}),'muted'));
-    if(!result.entries.length)box.append(element('p',t('No downloaded torrents in this feed yet.'),'muted'));
-    for(const row of result.entries){const line=element('article',undefined,'seed-history-row');line.append(element('strong',row.title||t('RSS entry')),element('span',t('Estimated credited upload')+': '+(typeof row.creditedUploadedBytes==='number'?'≈ '+trackerBytes(row.creditedUploadedBytes):t('Unknown'))),element('small',new Date(row.created*1000).toLocaleString(locale()),'muted'));box.append(line);}
-    const nav=element('div',undefined,'actions'),previous=command(t('Previous page'),()=>richFeedHistory(id,name,page-1)),next=command(t('Next page'),()=>richFeedHistory(id,name,page+1));previous.disabled=page<=1;next.disabled=page*25>=result.total;nav.append(previous,element('span',`${page} / ${Math.max(1,Math.ceil(result.total/25))}`),next);box.append(nav);
-  }catch(error){if(request===richFeedHistory.request)box.replaceChildren(element('p',t(error.message),'muted'));}
+async function richFeedHistory(id, name, page = 1) {
+  return globalThis.MediaSeedFeedHistory.open(id, name, page);
 }
-richFeedHistory.request=0;

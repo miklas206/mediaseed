@@ -19,7 +19,7 @@ from mediaseed.intelligence import Intelligence
 from mediaseed.rss_worker import RssWorker
 from mediaseed.ratio_scout import RatioScout, RatioSettings
 from mediaseed.activity import Activity
-from mediaseed import feed_uploads
+from mediaseed import feed_uploads, feed_series
 from mediaseed.nordic_ranks import rank_progress
 from mediaseed.background import run_background
 
@@ -320,11 +320,17 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         return {"name": metadata["name"], "size": size, "estimates": estimates, "benefits": evidence, "metadataPending": pending}
 
     @app.get("/api/feeds/{identifier}/history")
-    def feed_history(identifier: str, page: int = Query(default=1,ge=1,le=100000), pageSize: int = Query(default=25,ge=1,le=50), session=Depends(authorized)):
+    def feed_history(identifier: str, page: int = Query(default=1,ge=1,le=100000), pageSize: int = Query(default=25,ge=1,le=50),
+                     search: str = Query(default='',max_length=120), view: Literal['downloads', 'series'] = 'downloads', sort: Literal['upload', 'average', 'recent'] = 'upload',
+                     series: str | None = Query(default=None,pattern=r'^[a-f0-9]{64}$'), session=Depends(authorized)):
         if not any(row["id"] == identifier for row in rows("feeds")):
             raise HTTPException(404, "Feed not found")
         with database() as db:
             stats = feed_uploads.summary(db,identifier)
+            if series is not None:
+                return {**feed_series.members(db,identifier,series,page,pageSize), 'upload': stats}
+            if view == 'series':
+                return {**feed_series.groups(db,identifier,page,pageSize,sort,search), 'upload': stats}
             count = stats['downloads']
             values = db.execute("SELECT hash,title,added,credited FROM rss_downloads WHERE feed=? ORDER BY added DESC,hash LIMIT ? OFFSET ?", (identifier,pageSize,(page-1)*pageSize)).fetchall()
         return {"entries":[{"hash":h,"title":title or h,"created":at,"status":"added","creditedUploadedBytes":uploaded} for h,title,at,uploaded in values],"page":page,"pageSize":pageSize,"total":count,"upload":stats}
