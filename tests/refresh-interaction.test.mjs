@@ -6,11 +6,11 @@ const source = readFileSync(new URL('../mediaseed/static/app.js', import.meta.ur
 test('refresh preserves an open menu and keyboard focus by row identity after reordering', () => {
   const document = {activeElement: null};
   function row(id, open=false) {
-    const menu = {open};
+    const menu = {open}, peers = {open:false};
     const controls = [{focus(){document.activeElement=this;}}, {focus(){document.activeElement=this;}}];
-    return {dataset:{key:id},menu,controls,contains:node=>controls.includes(node),
+    return {dataset:{key:id},menu,peers,controls,contains:node=>controls.includes(node),
       querySelector:selector=>selector==='details' || (selector==='details[open]' && menu.open) ? menu : null,
-      querySelectorAll:()=>controls};
+      querySelectorAll:selector=>selector==='details'?[peers,menu]:controls};
   }
   const first=row('one',true), second=row('two');
   const target={children:[first,second]};document.activeElement=first.controls[1];
@@ -19,7 +19,7 @@ test('refresh preserves an open menu and keyboard focus by row identity after re
   vm.runInContext(source.slice(begin,source.indexOf('\nasync function refreshProfiles',begin)>0?source.indexOf('\nasync function refreshProfiles',begin):source.indexOf('\nfunction renderTorrents',begin)),context);
   const restore=context.preserveListInteraction(target,'key');
   const fresh=row('one');target.children=[row('two'),fresh];restore();
-  assert.equal(fresh.menu.open,true);assert.equal(document.activeElement,fresh.controls[1]);
+  assert.equal(fresh.peers.open,false);assert.equal(fresh.menu.open,true);assert.equal(document.activeElement,fresh.controls[1]);
   document.activeElement={outside:true};const outside=document.activeElement;
   const noSteal=context.preserveListInteraction(target,'key');target.children=[row('one')];noSteal();
   assert.equal(document.activeElement,outside);

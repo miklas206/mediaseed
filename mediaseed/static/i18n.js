@@ -248,6 +248,8 @@ const messages = {
   "Waiting for API data": "Afventer API-data",
   "API data unavailable or stale": "API-data mangler eller er forældede",
   "Connected peers refresh every 5 seconds. Swarm totals follow tracker and DHT announcements. Tracker API samples refresh about once a minute, subject to tracker limits.": "Tilsluttede peers opdateres hvert 5. sekund. Sværmens totaler følger tracker- og DHT-meldinger. Tracker-API kontrolleres cirka hvert minut, afhængigt af trackerens begrænsninger.",
+  "Connected peers. Open for swarm and tracker API details.": "Tilsluttede peers. Åbn for sværm- og tracker-API-tal.",
+  "The visible counts are connected peers. Swarm totals are estimates from tracker/DHT announcements and may lag behind current connections. Tracker API counts are a separate observation.": "De viste tal er tilsluttede peers. Sværmens totaler er estimater fra tracker-/DHT-meldinger og kan være ældre end de aktuelle forbindelser. Tracker-API-tal er en separat observation.",
   "Seeding progress": "Seedingfremdrift",
   "Downloaded": "Downloadet",
   "Uploaded": "Uploadet",

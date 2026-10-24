@@ -25,15 +25,19 @@
 .seed-progress-cell progress[data-tone=error]{--progress-color:#ef6565}
 .seed-goal-caption{overflow-wrap:anywhere}
 
-/* Keep swarm totals, actual connections and tracker API observations distinct. */
-.seed-swarm{display:grid;gap:5px;min-width:0}
-.seed-peer-line{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:10px;row-gap:4px;line-height:1.5}
-.seed-peer-source{flex-basis:100%;color:var(--muted)}
-.seed-peer-line strong{font-variant-numeric:tabular-nums;font-weight:600}
-.seed-peer-line .seeders strong{color:#76d8b6}.seed-peer-line .leechers strong{color:#e2bd72}
-.seed-peer-note{flex-basis:100%;font-size:inherit}
-
-#torrents>.torrent>.seed-swarm{grid-column:2/-1!important;grid-row:2!important;display:flex;flex-wrap:wrap;gap:10px 24px;padding-top:10px;border-top:1px solid var(--line)}
-#torrents .seed-swarm .seed-peer-line{font-size:12px;max-width:100%}
-@media(max-width:1100px){#torrents>.torrent>.seed-swarm{grid-row:3!important}}
-@media(max-width:650px){#torrents>.torrent>.seed-swarm{grid-row:4!important;gap:10px 18px}}
+/* Connected counts stay inside the status cell; secondary sources open as an overlay. */
+.seed-swarm{position:relative;min-width:0;max-width:100%;align-self:start}
+.seed-peer-summary{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;list-style:none;cursor:pointer;font-size:12px;line-height:1.6;color:var(--muted);border-radius:4px;width:fit-content;max-width:100%}
+.seed-peer-summary::-webkit-details-marker{display:none}
+.seed-peer-summary>span{white-space:nowrap}
+.seed-peer-summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.seed-peer-summary:hover{color:var(--text)}
+.seed-swarm strong{font-variant-numeric:tabular-nums;font-weight:600}
+.seed-swarm .seeders strong{color:#76d8b6}.seed-swarm .leechers strong{color:#e2bd72}
+.seed-peer-info{display:inline-grid;place-items:center;width:13px;height:13px;box-sizing:border-box;border:1px solid currentColor;border-radius:50%;font-size:10px;font-weight:600;line-height:1;color:var(--muted)}
+.seed-swarm[open]{z-index:60}
+.seed-peer-popover{position:absolute;top:calc(100% + 8px);right:0;width:min(300px,calc(100vw - 32px));box-sizing:border-box;display:grid;gap:12px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--surface);box-shadow:0 10px 28px #0005;color:var(--text)}
+.seed-peer-explanation{font-size:12px;line-height:1.6;margin:0;color:var(--muted)}
+.seed-peer-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;line-height:1.5;font-size:12px;overflow-wrap:anywhere}
+.seed-peer-source,.seed-peer-note{flex-basis:100%;color:var(--muted)}
+#torrents .seed-activity>.seed-swarm{flex-basis:100%}

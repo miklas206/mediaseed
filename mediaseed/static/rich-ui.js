@@ -69,8 +69,17 @@ function seedPeerCount(value) {
   return Number.isSafeInteger(value) && value >= 0 ? trackerNumber(value) : '?';
 }
 function seedSwarmView(row) {
-  const view = element('div', undefined, 'seed-swarm');
-  view.title = t('Connected peers refresh every 5 seconds. Swarm totals follow tracker and DHT announcements. Tracker API samples refresh about once a minute, subject to tracker limits.');
+  const view = element('details', undefined, 'seed-swarm');
+  const summary = element('summary', undefined, 'seed-peer-summary');
+  summary.title = t('Connected peers. Open for swarm and tracker API details.');
+  summary.setAttribute('aria-label', `${t('Connected peers')}: ${t('Seeders')} ${seedPeerCount(row.num_seeds)}, ${t('Leechers')} ${seedPeerCount(row.num_leechs)}`);
+  for (const [name, value, tone] of [['Seeders', row.num_seeds, 'seeders'], ['Leechers', row.num_leechs, 'leechers']]) {
+    const part = element('span', t(name) + ' ', tone);
+    part.append(element('strong', seedPeerCount(value))); summary.append(part);
+  }
+  const icon = element('span', 'i', 'seed-peer-info'); icon.setAttribute('aria-hidden', 'true'); summary.append(icon);
+  const panel = element('div', undefined, 'seed-peer-popover');
+  panel.append(element('p', t('The visible counts are connected peers. Swarm totals are estimates from tracker/DHT announcements and may lag behind current connections. Tracker API counts are a separate observation.'), 'seed-peer-explanation'));
   function counts(label, seeders, leechers, className = '') {
     const line = element('small', undefined, 'seed-peer-line ' + className);
     line.append(element('span', label, 'seed-peer-source'));
@@ -80,15 +89,18 @@ function seedSwarmView(row) {
     }
     return line;
   }
-  view.append(counts(t('Swarm'), row.num_complete, row.num_incomplete), counts(t('Connected peers'), row.num_seeds, row.num_leechs));
+  panel.append(counts(t('Connected peers'), row.num_seeds, row.num_leechs), counts(t('Swarm'), row.num_complete, row.num_incomplete));
   const api = row.swarm;
   if (api) {
     const current = api.status === 'ok' && Number.isFinite(api.checkedAt) && Date.now() / 1000 - api.checkedAt >= -5 && Date.now() / 1000 - api.checkedAt <= 180;
     const line = counts(t('Tracker API'), current ? api.seeders : undefined, current ? api.leechers : undefined, 'seed-peer-api');
     if (!current) line.append(element('span', t(api.status === 'pending' ? 'Waiting for API data' : 'API data unavailable or stale'), 'seed-peer-note'));
-    line.title = api.tracker + (api.checkedAt ? ' · ' + t('Updated {0}', {0: new Date(api.checkedAt * 1000).toLocaleString(locale())}) : '');
-    view.append(line);
+    const updated = api.checkedAt ? t('Updated {0}', {0: new Date(api.checkedAt * 1000).toLocaleString(locale())}) : '';
+    line.title = api.tracker + (updated ? ' · ' + updated : '');
+    if (updated) line.append(element('span', updated, 'seed-peer-note'));
+    panel.append(line);
   }
+  view.append(summary, panel);
   return view;
 }
 function seedTorrent(row, index) {
@@ -125,14 +137,21 @@ function seedTorrent(row, index) {
   } else transfer.append(element('small', `${trackerBytes(row.completed ?? Number(row.size || 0) * progress.value)} / ${trackerBytes(row.size)}`));
   const activity = element('div', undefined, 'seed-activity');
   activity.append(element('span', torrentStatus(row.state), 'torrent-state'), element('small', `↓ ${bytes(row.dlspeed || 0)}/s · ↑ ${bytes(row.upspeed || 0)}/s`));
+  activity.append(seedSwarmView(row));
   const actions = element('div', undefined, 'actions');
   if (appRole !== 'viewer') { const stopped = state(row) === 'stopped'; const toggle = command('', () => torrentAction(row, stopped ? 'start' : 'stop')); toggle.className = 'torrent-toggle'; toggle.innerHTML = stopped ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg>' : '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>'; toggle.title = stopped ? t('Start') : t('Stop'); toggle.setAttribute('aria-label', toggle.title + ': ' + row.name); toggle.disabled = stopped && !downloadsEnabled; actions.append(toggle); }
   const menu = element('details', undefined, 'torrent-menu'), trigger = element('summary', '⋯'); trigger.setAttribute('aria-label', t('Actions'));
   const commands = element('div', undefined, 'torrent-menu-content'); commands.append(command(t('Details'), () => showDetails(row)));
   if (appRole !== 'viewer') commands.append(command(t('Check files'), () => chooseRecheck(row)), command(t('Remove'), () => chooseRemoval(row)));
   menu.append(trigger, commands); actions.append(menu);
-  item.append(seedPoster(row), identity, transfer, activity, actions, seedSwarmView(row)); return item;
+  item.append(seedPoster(row), identity, transfer, activity, actions); return item;
 }
+document.addEventListener('click', event => {
+  for (const view of document.querySelectorAll('.seed-swarm[open]')) if (!view.contains(event.target)) view.open = false;
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') for (const view of document.querySelectorAll('.seed-swarm[open]')) view.open = false;
+});
 const seedDetailCache = new Map();
 let seedDetailRequest = 0;
 function cachedDetail(hash, section, force=false) {

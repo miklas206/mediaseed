@@ -177,10 +177,11 @@ function preserveListInteraction(target, key) {
   const focusedRow = rows.find(row => row.contains(active));
   const focusedKey = focusedRow?.dataset[key];
   const focusIndex = focusedRow ? [...focusedRow.querySelectorAll(controls)].indexOf(active) : -1;
-  const opened = new Set(rows.filter(row => row.querySelector('details[open]')).map(row => row.dataset[key]));
+  const opened = new Map(rows.map(row => [row.dataset[key], [...row.querySelectorAll('details')].map((node, index) => node.open ? index : -1).filter(index => index >= 0)]));
   return () => {
     for (const row of target.children) {
-      if (opened.has(row.dataset[key])) { const details = row.querySelector('details'); if (details) details.open = true; }
+      const details = row.querySelectorAll('details');
+      for (const index of opened.get(row.dataset[key]) || []) if (details[index]) details[index].open = true;
       if (focusIndex >= 0 && row.dataset[key] === focusedKey) row.querySelectorAll(controls)[focusIndex]?.focus({preventScroll: true});
     }
   };
