@@ -33,3 +33,9 @@ clear the decorative traffic immediately. Resize observation keeps the track
 aligned with icon centres, and opaque icons render above the packets. Reduced
 motion shows static markers. These are throughput illustrations, not captured
 network packets. No network or storage permissions change.
+
+### Seeding progress follows cleanup
+
+Torrent list and dashboard snapshots include the saved, identity-matched cleanup policy. The list displays `Ratio 1,3 / 3` for a ratio-3 cleanup rule, and its 16px progress bar shows 43%, even after 72 hours. Ratio and time modes use their respective goals; BOTH uses the lower progress and EITHER the higher. Completed torrents retain this goal display when paused or in an error state. Without cleanup there is no assumed ratio-1 or 48/49-hour finish line. Account credited upload remains visible, while the ratio uses the same conservative credit as the existing cleanup worker. Cleanup enforcement is unchanged.
+
+Bars use blue for download, green for active seeding, amber for waiting, grey for pause, purple for checking/moving, and red for errors. Status text remains available. Seeding details also show the cleanup goal. Existing policies need no migration or new dependencies; the normal packaged static assets include the changes, with cache versions updated. Synthetic tests cover persistence, identity replacement, ratio/time/AND/OR progress, stale measurements, desktop/mobile layout and all bar colours.

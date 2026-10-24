@@ -27,9 +27,43 @@ function seedEta(value) {
   const seconds = Number(value); if (!Number.isFinite(seconds) || seconds < 0 || seconds >= 8640000) return t('Waiting for estimate');
   return seconds < 60 ? t('Less than a minute') : seconds < 3600 ? `${Math.ceil(seconds / 60)} min` : `${Math.floor(seconds / 3600)} h ${Math.ceil(seconds % 3600 / 60)} min`;
 }
+function seedCreditRatio(row) {
+  // Cached credit is for display only. Backend goal checks keep rejecting stale reads.
+  const value = row.credit_observation_stale ? row.last_credited_ratio : (row.credited_ratio ?? row.ratio);
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+function seedCleanupGoal(policy) {
+  const goals = {
+    time: t('{0} hours of active seeding', {0: policy.hours}),
+    ratio: t('credited upload ratio {0}', {0: policy.ratio}),
+    both: t('{0} hours of active seeding AND credited ratio {1}', {0: policy.hours, 1: policy.ratio}),
+    either: t('{0} hours of active seeding OR credited ratio {1}', {0: policy.hours, 1: policy.ratio})
+  };
+  return goals[policy.mode] || '';
+}
+
+function seedCleanupProgress(row) {
+  const policy = row.cleanup || {mode: 'never'}, ratio = seedCreditRatio(row);
+  const ratioGoal = ['ratio', 'both', 'either'].includes(policy.mode) && Number(policy.ratio) >= 1 ? Number(policy.ratio) : undefined;
+  const hoursGoal = ['time', 'both', 'either'].includes(policy.mode) && Number(policy.hours) > 0 ? Number(policy.hours) : undefined;
+  const hours = Math.max(0, Number(row.seeding_time) || 0) / 3600;
+  const fractions = [];
+  if (ratioGoal) fractions.push(Number.isFinite(ratio) ? ratio / ratioGoal : 0);
+  if (hoursGoal) fractions.push(hours / hoursGoal);
+  const fraction = fractions.length ? Math.max(0, Math.min(1, policy.mode === 'both' ? Math.min(...fractions) : Math.max(...fractions))) : undefined;
+  return {ratio, ratioGoal, hours, hoursGoal, fraction};
+}
 function seedSeeding(row) {
-  const ratio = Number(row.credited_ratio ?? row.ratio), goal = Number(row.ratio_limit);
-  return Number.isFinite(ratio) ? `${t('Credited ratio')} ${trackerNumber(ratio)}${goal >= 1 ? ' / ' + trackerNumber(goal) : ''}` : t('Ratio unknown');
+  const goal = seedCleanupProgress(row);
+  const ratio = Number.isFinite(goal.ratio) ? trackerNumber(goal.ratio) : t('Unknown');
+  return `${t('Ratio')} ${ratio}${goal.ratioGoal ? ' / ' + trackerNumber(goal.ratioGoal) : ''}`;
+}
+function seedProgressTone(row) {
+  if (/error|missing/i.test(row.state)) return 'error';
+  if (/stopped|paused/i.test(row.state)) return 'paused';
+  if (/checking|moving/i.test(row.state)) return 'checking';
+  if (/queued|stalled|meta/i.test(row.state)) return 'waiting';
+  return Number(row.progress) >= 1 ? 'seeding' : 'downloading';
 }
 function seedTorrent(row, index) {
   const item = element('article', undefined, 'torrent seed-rich-row'); item.dataset.state = state(row); item.dataset.hash = row.hash;
@@ -44,14 +78,25 @@ function seedTorrent(row, index) {
     completion_on: ['Completed', row.completion_on > 0 ? new Date(row.completion_on * 1000).toLocaleString(locale()) : '—'],
     uploaded: ['Uploaded', trackerBytes(row.uploaded)],
     num_seeds: ['Seeders', row.num_seeds ?? '—'],
-    ratio: ['Credited ratio', trackerNumber(row.credited_ratio ?? row.ratio)],
+    ratio: ['Ratio', trackerNumber(seedCreditRatio(row))],
   };
   if (hints[sortKey]) identity.append(element('small', `${t(hints[sortKey][0])}: ${hints[sortKey][1]}`, 'seed-subline'));
   const transfer = element('div', undefined, 'seed-progress-cell');
-  const progress = element('progress'); progress.max = 1; progress.value = Math.max(0, Math.min(1, Number(row.progress || 0))); progress.setAttribute('aria-label', t('Download progress'));
-  if (state(row) === 'seeding' && Number(row.ratio_limit) >= 1) { progress.value = Math.max(0, Math.min(1, Number(row.credited_ratio ?? row.ratio) / Number(row.ratio_limit) || 0)); progress.setAttribute('aria-label', t('Seeding progress')); }
-  transfer.append(element('strong', state(row) === 'seeding' ? seedSeeding(row) : `${Math.round(progress.value * 100)}% · ${seedEta(row.eta)}`), progress,
-    element('small', state(row) === 'seeding' ? `${t('Active seeding')} ${(Number(row.seeding_time || 0) / 3600).toFixed(1)} h` : `${trackerBytes(row.completed ?? Number(row.size || 0) * progress.value)} / ${trackerBytes(row.size)}`));
+  const complete = Number(row.progress) >= 1, goal = seedCleanupProgress(row);
+  const progress = element('progress'); progress.max = 1;
+  progress.value = complete ? (goal.fraction ?? 0) : Math.max(0, Math.min(1, Number(row.progress) || 0));
+  progress.dataset.tone = seedProgressTone(row);
+  progress.setAttribute('aria-label', t(complete ? 'Seeding progress' : 'Download progress'));
+  const percent = complete && goal.fraction === undefined ? t('No cleanup goal') : `${Math.round(progress.value * 100)}%`;
+  progress.setAttribute('aria-valuetext', complete ? `${seedSeeding(row)} · ${percent}` : percent);
+  if (row.credit_observation_stale) transfer.title = t('Showing the last verified ratio while waiting for a fresh measurement.');
+  const label = element('strong', complete ? seedSeeding(row) : `${percent} · ${seedEta(row.eta)}`);
+  transfer.append(label, progress);
+  if (complete) {
+    const hours = trackerNumber(goal.hours) + (goal.hoursGoal ? ' / ' + trackerNumber(goal.hoursGoal) : '');
+    transfer.append(element('small', `${t('Active seeding')} ${hours} h`));
+    transfer.append(element('small', goal.fraction === undefined ? percent : `${t('Cleanup goal')} · ${percent}${['both', 'either'].includes(row.cleanup?.mode) ? ' · ' + t(row.cleanup.mode === 'both' ? 'Both goals required' : 'Either goal required') : ''}`, 'seed-goal-caption'));
+  } else transfer.append(element('small', `${trackerBytes(row.completed ?? Number(row.size || 0) * progress.value)} / ${trackerBytes(row.size)}`));
   const activity = element('div', undefined, 'seed-activity');
   activity.append(element('span', torrentStatus(row.state), 'torrent-state'), element('small', `↓ ${bytes(row.dlspeed || 0)}/s · ↑ ${bytes(row.upspeed || 0)}/s`));
   const actions = element('div', undefined, 'actions');
@@ -87,7 +132,7 @@ async function richDetails(row) {
   let details={properties:{total_downloaded:row.downloaded,total_uploaded:row.uploaded,addition_date:row.added_on},files:[],trackers:[],peers:[],credit:{}},selected=0,overviewLoaded=false,loadCycle=0;
   const sectionFor=index=>index===2?'files':index===3?'connections':'overview';
   function paint(){
-    content.replaceChildren();const credited={...row,...details.credit};
+    content.replaceChildren();const credited={...row,...details.credit,cleanup:details.cleanup || row.cleanup};
     if(selected===0){const list=element('dl',undefined,'seed-detail-facts');
       const amount=credited.account_credited_uploaded??credited.credited_uploaded;
       for(const [label,value] of [['Downloaded',trackerBytes(details.properties.total_downloaded)],['Uploaded',trackerBytes(details.properties.total_uploaded)],['Estimated credited upload',typeof amount==='number'?'≈ '+trackerBytes(amount):t('Unknown')],['Source',seedSource(row)],['Added',details.properties.addition_date?new Date(details.properties.addition_date*1000).toLocaleString(locale()):'—'],['Download folder',details.downloadFolder?`${t(details.downloadFolder.label)} · ${details.downloadFolder.path}`:overviewLoaded?t('Download folder is outside approved storage or unavailable'):t('Fetching details…')]])list.append(element('dt',t(label)),element('dd',value));content.append(list);

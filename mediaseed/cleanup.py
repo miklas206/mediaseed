@@ -20,6 +20,16 @@ class CleanupPolicy(BaseModel):
     delete_files: bool = False
 
 
+def cleanup_identity(rule, row):
+    """Imported rules use their tag; edited rules also bind the client add time."""
+    tag, added = rule.get("tag"), rule.get("added_on")
+    if not tag and not added:
+        return False
+    if tag and tag not in [x.strip() for x in str(row.get("tags", "")).split(",")]:
+        return False
+    return added is None or (type(row.get("added_on")) in (int, float) and row["added_on"] == added)
+
+
 def source_hashes(magnet=None, content=None, include_metadata=False):
     if magnet:
         topics = parse_qs(urlsplit(magnet).query).get("xt", [])

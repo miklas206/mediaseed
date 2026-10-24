@@ -12,3 +12,15 @@
 .seed-detail-facts dt,.seed-detail-facts dd{margin:0;align-self:start}
 @media(max-width:1100px){#torrents > .seed-rich-row.torrent{grid-template-columns:44px minmax(0,2fr) minmax(110px,1fr) 58px}#torrents > .seed-rich-row.torrent > .seed-activity{grid-column:2/4!important;grid-row:2!important}#torrents > .seed-rich-row.torrent > .actions{grid-column:4!important}}
 @media(max-width:650px){#torrents > .seed-rich-row.torrent{grid-template-columns:40px minmax(0,1fr) 58px;gap:10px;padding:14px 12px}#torrents > .seed-rich-row.torrent > .seed-progress-cell{grid-column:2/4!important;grid-row:2!important}#torrents > .seed-rich-row.torrent > .seed-activity{grid-column:2/4!important;grid-row:3!important}#torrents > .seed-rich-row.torrent > .actions{grid-column:3!important}}
+
+/* Larger, status-coloured transfer progress, shared across desktop and mobile. */
+.seed-progress-cell progress{appearance:none;display:block;height:16px;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--raised);--progress-color:#4b9ef4;accent-color:var(--progress-color)}
+.seed-progress-cell progress::-webkit-progress-bar{background:var(--raised)}
+.seed-progress-cell progress::-webkit-progress-value{background:var(--progress-color);border-radius:4px}
+.seed-progress-cell progress::-moz-progress-bar{background:var(--progress-color);border-radius:4px}
+.seed-progress-cell progress[data-tone=seeding]{--progress-color:#36be88}
+.seed-progress-cell progress[data-tone=waiting]{--progress-color:#d6a342}
+.seed-progress-cell progress[data-tone=paused]{--progress-color:#8a96a8}
+.seed-progress-cell progress[data-tone=checking]{--progress-color:#ac83e8}
+.seed-progress-cell progress[data-tone=error]{--progress-color:#ef6565}
+.seed-goal-caption{overflow-wrap:anywhere}

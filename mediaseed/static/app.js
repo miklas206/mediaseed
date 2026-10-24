@@ -455,7 +455,9 @@ function trackerCreditView(row) {
   const title = row.credit_observation_stale ? t("Waiting for traffic measurement · ratio goal protected") : row.green_pending ? t("Waiting for tracker rules · provisional 0.5× credit") : row.green_active ? t("Green period · 0.5× upload") : row.green_uploaded > 0 ? t("Green period ended · new uploads count 1×") : t("Tracker rules · uploads count 1×");
   panel.append(element('strong', title));
   const accountUpload=row.account_credited_uploaded??row.credited_uploaded;panel.append(element('p',t('Estimated credited upload')+': '+(typeof accountUpload==='number'?'≈ '+trackerBytes(accountUpload):t('Unknown'))));
-  panel.append(element('p', t("Raw upload {0} · Conservative seeding credit {1} · Goal ratio {2} / {3}", {0: trackerBytes(row.uploaded), 1: trackerBytes(row.credited_uploaded), 2: trackerNumber(row.credited_ratio), 3: trackerNumber(row.ratio_limit)})));
+  panel.append(element('p', seedSeeding(row)));
+  panel.append(element('p', t('Cleanup goal') + ': ' + (seedCleanupGoal(row.cleanup || {}) || t('No cleanup goal'))));
+  panel.append(element('p', t("Raw upload {0} · Conservative seeding credit {1}", {0: trackerBytes(row.uploaded), 1: trackerBytes(row.credited_uploaded)})));
   if (row.green_pending) panel.append(element('p', row.credit_observation_stale ? t("Waiting for a stable traffic measurement. An old measurement or reset counter must not trigger a ratio goal.") : t("Waiting for the tracker to confirm the creation date. Ratio and automatic cleanup provisionally use half upload credit."), 'muted'));
   if (row.green_rule_until) panel.append(element('p', t("The first 24 hours end at {0}. MediaSeed uses a 30-minute safety margin until {1}.", {0: new Date(row.green_rule_until * 1000).toLocaleString(locale()), 1: new Date(row.green_until * 1000).toLocaleTimeString(locale())}), 'muted'));
   if (row.green_uploaded > 0) panel.append(element('p', t("{0} of uploads were recorded at 0.5×. That portion retains half credit after the period ends.", {0: trackerBytes(row.green_uploaded)}), 'muted'));

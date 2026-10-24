@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from mediaseed.appearance import install_theme_preferences, navigation_override, theme_override
-from mediaseed.cleanup import CleanupManager, CleanupPolicy
+from mediaseed.cleanup import CleanupManager, CleanupPolicy, cleanup_identity
 from mediaseed.features import add_stopped, install_features, queue_summary
 from mediaseed.tracker_credit import TrackerCredit
 from mediaseed.storage import Storage
@@ -491,9 +491,13 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
                 raise ValueError()
             result = []
             credits = credit.observe_many(rows[:500])
+            cleanup_rules = {identifier: rule for rule in cleanup.records() for identifier in rule["hashes"]}
             for row, credited in zip(rows[:500], credits):
                 public = {key: value for key, value in row.items() if key in allowed}
                 identifier = str(row.get("hash", ""))
+                rule = cleanup_rules.get(identifier.lower())
+                public["cleanup"] = ({key: rule[key] for key in ("mode", "hours", "ratio", "delete_files", "status")}
+                                     if rule and cleanup_identity(rule, row) else {"mode": "never", "status": "disabled"})
                 if re.fullmatch(r"[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", identifier):
                     public.update(credited)
                     cached = data / "cover-cache" / (hashlib.sha256(identifier.lower().encode()).hexdigest() + ".img")

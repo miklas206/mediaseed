@@ -297,3 +297,32 @@ test('lost acknowledgement is not retried automatically and does not stop later 
   assert.equal(vm.runInContext('torrentFiles[0].state',context),'error');
   assert.equal(vm.runInContext('torrentFiles[1].state',context),'added');
 });
+
+test('seeding progress follows cleanup ratio, time and AND/OR goals instead of the stop limit', () => {
+  const {context}=setup();
+  const row={progress:1,ratio_limit:1,credited_ratio:1.3,seeding_time:24*3600,cleanup:{mode:'ratio',ratio:3,hours:48}};
+  assert.match(context.seedSeeding(row),/1[.,]3 \/ 3/);
+  assert.ok(Math.abs(context.seedCleanupProgress(row).fraction-1.3/3)<1e-9);
+  row.seeding_time=72*3600;
+  assert.ok(context.seedCleanupProgress(row).fraction<1); // No implicit 48/49-hour cutoff.
+  row.cleanup.mode='both';
+  assert.ok(context.seedCleanupProgress(row).fraction<1);
+  row.cleanup.mode='either';
+  assert.equal(context.seedCleanupProgress(row).fraction,1);
+  row.cleanup.mode='time';row.seeding_time=12*3600;
+  assert.equal(context.seedCleanupProgress(row).fraction,.25);
+  row.cleanup.mode='never';
+  assert.equal(context.seedCleanupProgress(row).fraction,undefined);
+  assert.doesNotMatch(context.seedSeeding(row),/ \/ /);
+  delete row.cleanup;
+  assert.equal(context.seedCleanupProgress(row).fraction,undefined);
+  row.cleanup={mode:'ratio',ratio:3};row.credited_ratio=9;
+  assert.equal(context.seedCleanupProgress(row).fraction,1);
+  row.credit_observation_stale=true;row.last_credited_ratio=1.3;
+  assert.ok(context.seedCleanupProgress(row).fraction<1);
+  row.last_credited_ratio=null;
+  assert.equal(context.seedCleanupProgress(row).fraction,0);
+  for(const [state,tone] of [['uploading','seeding'],['downloading','downloading'],['stalledUP','waiting'],['pausedUP','paused'],['checkingUP','checking'],['missingFiles','error']]) {
+    assert.equal(context.seedProgressTone({state,progress:state==='downloading'?.5:1}),tone);
+  }
+});
