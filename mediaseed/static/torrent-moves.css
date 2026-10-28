@@ -154,3 +154,15 @@
 #workspace #downloads #torrents .seed-activity{display:grid;grid-template-columns:minmax(0,1fr);width:var(--torrent-status-width);max-width:100%;justify-items:start}
 
 #workspace #downloads #torrents .seed-activity>*{grid-column:1!important;grid-row:auto!important}
+
+/* More separation between the list columns; keep the compact mobile layout. */
+@media(min-width:761px){
+ #workspace[data-torrent-layout=list] #downloads.torrent-actions-ready :is(.torrent-table-header,#torrents>.torrent){column-gap:var(--torrent-column-gap,24px)}
+ #workspace[data-torrent-layout=list] #downloads.torrent-actions-ready .seed-column-name{padding-left:calc(var(--torrent-poster-column,48px) + var(--torrent-column-gap,24px))}
+}
+@container(max-width:980px){
+ #workspace[data-torrent-layout=list] #downloads.torrent-actions-ready :is(.torrent-table-header,#torrents>.torrent){--torrent-column-gap:18px;--torrent-poster-column:44px}
+}
+@container(max-width:700px){
+ #workspace[data-torrent-layout=list] #downloads.torrent-actions-ready :is(.torrent-table-header,#torrents>.torrent){--torrent-column-gap:14px}
+}
