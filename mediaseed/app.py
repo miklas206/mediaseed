@@ -100,6 +100,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
     if downloads.resolve() != downloads:
         raise ValueError("Downloads directory must not contain symlink components")
     storage_catalog = Storage(downloads)
+    move_manager = None
     base = (base_url or os.environ.get("MEDIASEED_BASE_URL", "http://127.0.0.1:18800")).rstrip("/")
     parsed = urlsplit(base)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.path or parsed.username:
@@ -232,7 +233,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @asynccontextmanager
     async def lifespan(app):
-        workers = [asyncio.create_task(cleanup.run()), asyncio.create_task(credit.run())]
+        workers = [asyncio.create_task(cleanup.run()), asyncio.create_task(credit.run()), asyncio.create_task(move_manager.run())]
         if vpn_url:
             workers += [asyncio.create_task(background()), asyncio.create_task(reconcile_disconnect())]
         yield
@@ -351,6 +352,8 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         return await credit.request(path, method, payload, files)
 
     async def raw_qbit(path, method="GET", payload=None, files=None):
+        if method == "POST" and move_manager is not None:
+            move_manager.guard(path, payload)
         if vpn_url:
             selection = vpn_selection()
             if selection["provider"] != "mediavpn" or selection["disconnect_pending"]:
@@ -728,6 +731,18 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         if not re.fullmatch(r"[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", identifier):
             raise HTTPException(422, "Invalid torrent hash")
         return await cleanup.cancel(identifier.lower())
+
+    from mediaseed.moves import install_moves
+
+    async def move_capable():
+        if vpn_url:
+            observed = await vpn_status()
+            if "move-location" not in observed.get("torrentCapabilities", []):
+                raise HTTPException(409, "Update MediaVPN to 0.2.33 or newer to move torrent files")
+            if not observed.get("ready"):
+                raise HTTPException(409, "The torrent client and its VPN must be ready before moving files")
+
+    move_manager = install_moves(app, authorized, database, qbit, storage_catalog, cleanup, credit, move_capable)
 
     background = install_features(app, authorized, database, qbit, vpn_status=vpn_status, data_dir=data, cleanup=cleanup, credit=credit, storage=storage_catalog)
 
