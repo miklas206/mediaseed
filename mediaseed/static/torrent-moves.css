@@ -136,3 +136,21 @@
 #workspace #torrents .seed-status{width:var(--torrent-status-width);max-width:100%}
 #workspace #torrents .torrent-state::after{flex:none;margin-left:0}
 #workspace #torrents .torrent-state :is(.seed-state-live,.seed-state-stale){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Align the peer counts with the centre of their status box. */
+#workspace #downloads #torrents .seed-activity>.seed-swarm{width:var(--torrent-status-width);max-width:100%;flex-basis:auto}
+#workspace #downloads #torrents .seed-swarm>.seed-peer-summary{width:100%;justify-content:center}
+
+/* The list uses the same progress information and meter as the card view. */
+#workspace[data-torrent-layout=list] #downloads #torrents .seed-progress-cell{grid-template-columns:minmax(0,1fr);gap:8px}
+#workspace[data-torrent-layout=list] #downloads #torrents .seed-progress-cell>:not(.seed-list-percent){display:block;grid-column:1!important;grid-row:auto!important}
+#workspace[data-torrent-layout=list] #downloads #torrents .seed-progress-cell>.seed-progress-goal{display:grid}
+#workspace[data-torrent-layout=list] #downloads #torrents .seed-progress-cell>.seed-list-percent{display:none!important}
+#workspace[data-torrent-layout=list] #downloads #torrents .seed-progress-track,
+#workspace[data-torrent-layout=list] #downloads #torrents .seed-progress-track progress,
+#workspace #downloads #torrents .seed-progress-cell>progress{height:16px;width:100%}
+#workspace[data-torrent-layout=list] #downloads #torrents .seed-progress-cell small{font-size:10px;line-height:1.5}
+
+#workspace #downloads #torrents .seed-activity{display:grid;grid-template-columns:minmax(0,1fr);width:var(--torrent-status-width);max-width:100%;justify-items:start}
+
+#workspace #downloads #torrents .seed-activity>*{grid-column:1!important;grid-row:auto!important}
