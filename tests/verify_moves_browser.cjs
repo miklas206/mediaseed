@@ -63,6 +63,7 @@ const assert=require('node:assert/strict');
   await panel.getByRole('button',{name:'Fjern torrents · behold filer',exact:true}).click();
   let dialog=page.locator('#torrent-move-dialog');
   assert.equal(await dialog.locator('.torrent-move-names li').count(),3);
+  await dialog.getByText('Dette fjerner også torrents', {exact:false}).waitFor();
   const before=writes.length;await dialog.getByRole('button',{name:'Annuller',exact:true}).click();assert.equal(writes.length,before);
   // Partial failures retain selected rows so they can be retried; no automatic file deletion.
   failRemoval=true;
@@ -71,13 +72,15 @@ const assert=require('node:assert/strict');
   await panel.getByText('3 valgte · 300 B',{exact:true}).waitFor();
   await panel.locator('.torrent-removal-results').waitFor();assert.equal(await panel.locator('.torrent-removal-results li').count(),3);
   assert.ok(writes.filter(w=>w.path==='/api/torrents/remove').every(w=>w.delete_files===false));
-  failRemoval=false;
+  failRemoval=false;early=true;
   // Keep-files operation on two; then destructive choice on the unfinished third.
   await boxes.nth(2).uncheck();
   await panel.getByRole('button',{name:'Fjern torrents · behold filer',exact:true}).click();
   await dialog.getByRole('button',{name:'Fjern torrents · behold filer',exact:true}).click();
   await page.waitForFunction(()=>document.querySelectorAll('#torrents [data-hash]').length===1);
   assert.equal(removed.size,2);
+  assert.equal(await page.locator('#early-seeding[open]').count(),0);
+  assert.ok(writes.filter(w=>w.path==='/api/torrents/remove').every(w=>w.confirm_early===true));
   await page.locator('#torrents .torrent-move-select input').check();
   await panel.getByRole('button',{name:'Slet torrents og filer…',exact:true}).click();
   const submit=dialog.getByRole('button',{name:'Slet torrents og filer',exact:true});
@@ -87,10 +90,24 @@ const assert=require('node:assert/strict');
   const beforeDelete=writes.length;await dialog.getByRole('button',{name:'Annuller',exact:true}).click();assert.equal(writes.length,beforeDelete);
   early=true;
   await panel.getByRole('button',{name:'Slet torrents og filer…',exact:true}).click();await dialog.getByRole('checkbox').check();await submit.click();
-  await page.locator('#early-seeding[open]').waitFor();await page.locator('#confirm-early').click();
+  assert.equal(await page.locator('#early-seeding[open]').count(),0);
   await page.waitForFunction(()=>document.querySelectorAll('#torrents [data-hash]').length===0);
   assert.equal(removed.size,3);
-  const destructive=writes.filter(w=>w.delete_files===true);assert.equal(destructive.length,2);assert.equal(destructive[1].confirm_early,true);assert.equal(destructive[1].torrent_hash,rows[2].hash);
+  const destructive=writes.filter(w=>w.delete_files===true);assert.equal(destructive.length,1);assert.equal(destructive[0].confirm_early,true);assert.equal(destructive[0].torrent_hash,rows[2].hash);
+  // Regression: one confirmation deletes a mixed selection of three early torrents.
+  removed.clear();writes.length=0;job=null;
+  await page.reload();await page.locator('#torrents .torrent-move-select input').first().waitFor();
+  await page.getByRole('button',{name:'Vælg viste',exact:true}).click();
+  await panel.getByRole('button',{name:'Fjern / slet',exact:true}).click();
+  await panel.getByRole('button',{name:'Slet torrents og filer…',exact:true}).click();
+  assert.deepEqual(await dialog.locator('.torrent-move-names li').allTextContents(),rows.map(r=>r.name));
+  await dialog.getByRole('checkbox').check();
+  await dialog.getByRole('button',{name:'Slet torrents og filer',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelectorAll('#torrents [data-hash]').length===0);
+  assert.equal(await page.locator('#early-seeding[open]').count(),0);
+  assert.equal(writes.length,3);
+  assert.ok(writes.every(w=>w.delete_files===true && w.confirm_early===true));
+  assert.deepEqual(writes.map(w=>w.torrent_hash),rows.map(r=>r.hash));
   assert.deepEqual(errors,[]);await page.close();
  }
  // Viewer must not receive selection or bulk removal controls.

@@ -432,10 +432,10 @@ def test_ratio_category_is_separate_in_queue_counts():
     assert result["ratioActive"] == 1 and result["manualActive"] == 1
 
 
-def test_api_is_authenticated_csrf_guarded_and_additive_for_old_database(tmp_path):
+def test_retired_api_is_absent_and_preserves_tracker_settings(tmp_path):
     with TestClient(create_app(tmp_path, "http://testserver")) as client:
-        assert client.get("/api/ratio-scout").status_code == 401
-        assert client.put("/api/ratio-scout/settings", json={}).status_code == 401
+        assert client.get("/api/ratio-scout").status_code == 404
+        assert client.put("/api/ratio-scout/settings", json={}).status_code == 404
         sign_in(client)
         assert (
             client.post(
@@ -444,17 +444,17 @@ def test_api_is_authenticated_csrf_guarded_and_additive_for_old_database(tmp_pat
             ).status_code
             == 200
         )
-        assert client.get("/api/ratio-scout").json()["settings"]["enabled"] is False
+        assert client.get("/api/ratio-scout").status_code == 404
         assert (
             client.put("/api/ratio-scout/settings", json={"dailyLimit": 5}).status_code
-            == 200
+            == 404
         )
         cookies = client.cookies
         client.headers["X-MediaSeed-CSRF"] = "wrong"
-        assert client.put("/api/ratio-scout/settings", json={}).status_code == 403
+        assert client.put("/api/ratio-scout/settings", json={}).status_code == 404
     with TestClient(create_app(tmp_path, "http://testserver")) as client:
         client.cookies.update(cookies)
-        assert client.get("/api/ratio-scout").json()["settings"]["dailyLimit"] == 5
+        assert client.get("/api/ratio-scout").status_code == 404
     with sqlite3.connect(tmp_path / "mediaseed.sqlite") as c:
         assert (
             "preserved-secret"
@@ -573,3 +573,13 @@ def test_zero_seeders_can_be_saved_ranked_and_reviewed(rig):
         rows=scout.public()['candidates']
         assert len(rows)==1 and rows[0]['seeders']==0
     asyncio.run(check())
+
+
+def test_opportunity_score_rewards_demand_small_size_and_bonus_without_changing_credit():
+    from mediaseed.ratio_scout import opportunity
+    row={'seeders':2,'leechers':20,'size':4*1024**3,'doubleUpload':False}
+    base=opportunity(row)
+    assert opportunity({**row,'leechers':40})>base
+    assert opportunity({**row,'seeders':10})<base
+    assert opportunity({**row,'size':1024**3})>base
+    assert opportunity({**row,'doubleUpload':True})==base*2

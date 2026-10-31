@@ -2,7 +2,7 @@
 @media(max-width:1100px){.seed-download-grid{grid-template-columns:minmax(0,1fr)}.seed-rich-row.torrent{grid-template-columns:44px minmax(0,2fr) minmax(120px,1fr) auto}.seed-activity{grid-column:2/4;grid-row:2;display:flex;flex-wrap:wrap;gap:12px}.seed-rich-row .actions{grid-column:4;grid-row:1}.seed-poster{grid-row:1/3}}
 @media(max-width:650px){.seed-rich-row.torrent{grid-template-columns:40px minmax(0,1fr) auto;gap:10px;padding:14px 12px}.seed-poster{width:40px;height:60px}.seed-progress-cell{grid-column:2/4;grid-row:2}.seed-activity{grid-column:2/4;grid-row:3}.seed-rich-row .actions{grid-column:3;grid-row:1}.seed-rich-row .torrent-name{font-size:12px}.seed-subline{font-size:10px}#torrent-details{width:100vw;border-radius:0;padding:20px}.seed-detail-tabs{gap:2px}.seed-detail-tabs button{padding:8px}.seed-account{width:100%}.seed-detail-facts{grid-template-columns:1fr 1.5fr}}
 @media(prefers-reduced-motion:no-preference){#torrent-details[open]{animation:seed-slide .18s ease-out}@keyframes seed-slide{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:translateX(0)}}}
-#torrents > .seed-rich-row.torrent{grid-template-columns:44px minmax(160px,2fr) minmax(140px,1.2fr) minmax(120px,1fr) 58px;gap:16px;padding:18px}
+#torrents > .seed-rich-row.torrent{grid-template-columns:44px minmax(160px,2fr) minmax(140px,1.2fr) minmax(120px,1fr) 80px;gap:16px;padding:18px}
 #torrents > .seed-rich-row.torrent > .seed-poster{grid-column:1!important;grid-row:1!important}
 #torrents > .seed-rich-row.torrent > .seed-identity{grid-column:2!important;grid-row:1!important}
 #torrents > .seed-rich-row.torrent > .seed-progress-cell{grid-column:3!important;grid-row:1!important}
@@ -10,14 +10,58 @@
 #torrents > .seed-rich-row.torrent > .actions{grid-column:5!important;grid-row:1!important}
 #torrents .seed-rich-row .torrent-name{grid-column:1!important;grid-row:auto!important;white-space:normal;overflow:visible;overflow-wrap:anywhere}
 .seed-detail-facts dt,.seed-detail-facts dd{margin:0;align-self:start}
-@media(max-width:1100px){#torrents > .seed-rich-row.torrent{grid-template-columns:44px minmax(0,2fr) minmax(110px,1fr) 58px}#torrents > .seed-rich-row.torrent > .seed-activity{grid-column:2/4!important;grid-row:2!important}#torrents > .seed-rich-row.torrent > .actions{grid-column:4!important}}
-@media(max-width:650px){#torrents > .seed-rich-row.torrent{grid-template-columns:40px minmax(0,1fr) 58px;gap:10px;padding:14px 12px}#torrents > .seed-rich-row.torrent > .seed-progress-cell{grid-column:2/4!important;grid-row:2!important}#torrents > .seed-rich-row.torrent > .seed-activity{grid-column:2/4!important;grid-row:3!important}#torrents > .seed-rich-row.torrent > .actions{grid-column:3!important}}
+@media(max-width:1100px){#torrents > .seed-rich-row.torrent{grid-template-columns:44px minmax(0,2fr) minmax(110px,1fr) 80px}#torrents > .seed-rich-row.torrent > .seed-activity{grid-column:2/4!important;grid-row:2!important}#torrents > .seed-rich-row.torrent > .actions{grid-column:4!important}}
+@media(max-width:650px){#torrents > .seed-rich-row.torrent{grid-template-columns:40px minmax(0,1fr) 80px;gap:10px;padding:14px 12px}#torrents > .seed-rich-row.torrent > .seed-progress-cell{grid-column:2/4!important;grid-row:2!important}#torrents > .seed-rich-row.torrent > .seed-activity{grid-column:2/4!important;grid-row:3!important}#torrents > .seed-rich-row.torrent > .actions{grid-column:3!important}}
+
+/* Torrent actions and the single-torrent cleanup editor. */
+#torrents .seed-rich-row > .actions{gap:8px;flex-wrap:nowrap;align-items:center}
+.torrent-menu summary{display:grid;place-items:center;width:36px;height:36px;padding:0;border:1px solid var(--line);border-radius:8px;background:var(--raised);font-size:22px;line-height:1;color:var(--text)}
+.torrent-menu summary::-webkit-details-marker{display:none}
+.torrent-menu summary:hover,.torrent-menu[open] summary{border-color:var(--accent-line);background:var(--accent-bg)}
+.torrent-menu[open]{z-index:50}
+.torrent-menu-content{width:min(300px,calc(100vw - 32px));min-width:0;gap:3px;padding:8px;top:calc(100% + 7px);border-radius:12px;box-shadow:0 14px 40px #0005}
+.torrent-menu[data-upward=true] .torrent-menu-content{top:auto;bottom:calc(100% + 7px)}
+.torrent-menu-label{padding:5px 10px;color:var(--muted);font-size:10px;font-weight:600;letter-spacing:.04em}
+.torrent-menu-content .torrent-menu-choice{display:grid;gap:4px;padding:10px;text-align:left;border:0;background:transparent;white-space:normal;border-radius:7px}
+.torrent-menu-choice strong{font-size:12px;font-weight:600}.torrent-menu-choice small{font-size:11px;font-weight:400;color:var(--muted);line-height:1.4}
+.torrent-menu-content .torrent-menu-choice:hover{background:var(--raised)}
+.torrent-menu-content hr{width:100%;border:0;border-top:1px solid var(--line);margin:5px 0}
+.torrent-menu-danger strong{color:var(--danger)}
+#torrent-details .detail-heading{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;margin-bottom:20px}
+.detail-eyebrow{font-size:11px;color:var(--muted);margin:0 0 8px}
+.detail-header-actions{display:flex;gap:8px;align-items:start}
+#torrent-details .detail-header-actions button{padding:8px 12px;min-height:36px;font-size:12px}
+#torrent-details .seed-detail-hero{margin:0 0 24px;gap:20px;padding-bottom:22px;border-bottom:1px solid var(--line)}
+.seed-detail-hero p{margin:0;line-height:1.6}.seed-detail-hero .seed-badge{justify-self:start}
+.seed-detail-tabs{scrollbar-width:thin;scroll-padding:8px}
+.seed-detail-content>h3{margin-top:0}.seed-detail-content>button{margin:6px 0 14px}
+.torrent-cleanup-dialog{width:min(560px,calc(100vw - 32px));max-width:calc(100vw - 32px);max-height:calc(100dvh - 32px);padding:24px;overflow:auto}
+.cleanup-torrent-name{font-size:12px;line-height:1.5;overflow-wrap:anywhere;color:var(--muted);padding-bottom:16px;border-bottom:1px solid var(--line)}
+.torrent-cleanup-dialog form{display:grid;gap:18px}.torrent-cleanup-dialog form>label{display:grid;gap:8px;font-size:12px}
+.torrent-cleanup-dialog p{margin:0;line-height:1.6;font-size:12px}.torrent-cleanup-dialog>.heading{margin-bottom:14px}.torrent-cleanup-dialog>p{margin-bottom:18px}
+.cleanup-rule-summary{padding:14px;border:1px solid var(--accent-line);border-radius:9px;background:var(--accent-bg);font-weight:600}
+.torrent-cleanup-dialog label.cleanup-delete-confirmation{display:flex;gap:10px;align-items:flex-start;padding:14px;border:1px solid var(--danger);border-radius:9px;color:var(--danger);line-height:1.5}
+.cleanup-delete-confirmation input{width:18px;height:18px;flex:none;margin:1px 0 0}
+.cleanup-editor-footer{display:flex;justify-content:flex-end;gap:10px;padding-top:18px;border-top:1px solid var(--line)}
+@media(max-width:650px){
+  #torrent-details .detail-heading{grid-template-columns:minmax(0,1fr);gap:12px}
+  .detail-header-actions{grid-row:1;justify-content:flex-end}.detail-eyebrow{margin-top:-38px;max-width:calc(100% - 155px);min-height:36px;display:flex;align-items:center}
+  #torrent-details .seed-detail-hero{gap:16px}.seed-poster.large{width:72px;height:108px}
+  #torrent-details .seed-detail-facts{grid-template-columns:1fr;gap:6px}.seed-detail-facts dd{margin-bottom:12px}
+  .torrent-cleanup-dialog{padding:20px}.cleanup-editor-footer{position:sticky;bottom:-20px;background:var(--surface);padding:16px 0 4px;margin-bottom:-4px}
+  .cleanup-editor-footer button{flex:1}
+}
+
+.torrent-cleanup-dialog [role=alert]:empty{display:none}
+
+.seed-detail-tabs{flex-wrap:wrap;overflow:visible;gap:6px}
+@media(max-width:650px){.torrent-cleanup-dialog h2{font-size:18px}}
 
 /* Larger, status-coloured transfer progress, shared across desktop and mobile. */
 .seed-progress-cell progress{appearance:none;display:block;height:16px;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--raised);--progress-color:#4b9ef4;accent-color:var(--progress-color)}
 .seed-progress-cell progress::-webkit-progress-bar{background:var(--raised)}
-.seed-progress-cell progress::-webkit-progress-value{background:var(--progress-color);border-radius:4px}
-.seed-progress-cell progress::-moz-progress-bar{background:var(--progress-color);border-radius:4px}
+.seed-progress-cell progress::-webkit-progress-value{background:linear-gradient(180deg,color-mix(in srgb,var(--progress-color) 78%,white),var(--progress-color));border-radius:4px;box-shadow:inset 0 1px 0 #ffffff30}
+.seed-progress-cell progress::-moz-progress-bar{background:linear-gradient(180deg,color-mix(in srgb,var(--progress-color) 78%,white),var(--progress-color));border-radius:4px;box-shadow:inset 0 1px 0 #ffffff30}
 .seed-progress-cell progress[data-tone=seeding]{--progress-color:#36be88}
 .seed-progress-cell progress[data-tone=waiting]{--progress-color:#d6a342}
 .seed-progress-cell progress[data-tone=paused]{--progress-color:#8a96a8}
@@ -41,3 +85,44 @@
 .seed-peer-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;line-height:1.5;font-size:12px;overflow-wrap:anywhere}
 .seed-peer-source,.seed-peer-note{flex-basis:100%;color:var(--muted)}
 #torrents .seed-activity>.seed-swarm{flex-basis:100%}
+
+/* Keep ratio and active-time progress next to their own values on every width. */
+.seed-progress-goal{display:grid;gap:6px;min-width:0}
+.seed-goal-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.seed-goal-heading>strong,.seed-goal-heading>small:first-child{min-width:0;overflow-wrap:anywhere}
+.seed-goal-heading .seed-goal-percent{flex:none;font-variant-numeric:tabular-nums;color:var(--text)}
+.seed-progress-goal progress[data-unknown=true]{opacity:.35}
+
+/* Moving highlights follow the measured fill without changing the progress value. */
+.seed-progress-track{position:relative;display:block;min-width:0;border-radius:6px;overflow:hidden}
+.seed-progress-track[data-moving=true]::after,.seed-progress-track[data-tone=checking]::after{content:"";position:absolute;inset:1px auto 1px 1px;width:calc((100% - 2px) * var(--progress-value));border-radius:4px;pointer-events:none;background:repeating-linear-gradient(110deg,transparent 0 10px,#ffffff32 10px 20px);background-size:43px 100%;animation:seed-progress-flow 1.4s linear infinite}
+.seed-progress-track::before{content:"";position:absolute;z-index:1;inset:1px 1px auto;height:35%;border-radius:4px;background:linear-gradient(180deg,#ffffff15,transparent);pointer-events:none}
+.seed-progress-track[data-tone=checking]::after{animation-duration:2.2s;opacity:.75}
+@keyframes seed-progress-flow{from{background-position:0 0}to{background-position:43px 0}}
+:root[data-reduced-motion=true] .seed-progress-track::after{display:none}
+@media(prefers-reduced-motion:reduce){.seed-progress-track::after{display:none}}
+
+/* A single short status opens its explanation without adding another card row. */
+.seed-status{position:relative;min-width:0;max-width:100%}
+.seed-status>summary{list-style:none;cursor:pointer;width:fit-content;max-width:100%;border-radius:4px}
+.seed-status>summary::-webkit-details-marker{display:none}
+.seed-status>summary::after{content:'⌄';margin-left:6px;color:var(--muted);font-size:.75em}
+.seed-status>summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.seed-status[open]{z-index:61}
+.seed-status-popover{position:absolute;top:calc(100% + 8px);right:0;z-index:1;width:min(280px,calc(100vw - 32px));padding:14px;border:1px solid var(--line);border-radius:var(--radius-control,9px);background:var(--surface);box-shadow:0 8px 24px #0004;color:var(--text);font-weight:400}
+.seed-status-popover p{font-size:.8rem;line-height:1.7;margin:0}
+.seed-status-popover .seed-status-stale-note{margin-top:10px;color:var(--muted)}
+.seed-state-stale,.seed-status-stale-note{display:none}
+#torrents[data-fresh=false] .seed-state-live{display:none}
+#torrents[data-fresh=false] .seed-state-stale,#torrents[data-fresh=false] .seed-status-stale-note{display:initial}
+#torrents[data-fresh=false] .seed-status-stale-note{display:block}
+#torrents[data-fresh=false] .seed-progress-track::after{display:none}
+.seed-poster[data-tone=seeding]{color:var(--healthy)}
+.seed-poster[data-tone=error]{color:var(--danger)}
+@media(max-width:1100px){.seed-status-popover{left:0;right:auto;width:min(280px,calc(100vw - 96px))}}
+#torrents[data-fresh=false] .torrent-state{color:var(--muted)}
+#torrents .torrent[data-tone=checking] .torrent-state{color:#ac83e8}
+#torrents .torrent[data-tone=waiting] .torrent-state{color:var(--warning,#d6a342)}
+#torrents .torrent[data-tone=error] .torrent-state{color:var(--danger)}
+#torrents .torrent[data-tone=paused] .torrent-state{color:var(--muted)}
+#torrents[data-fresh=false] .torrent .torrent-state{color:var(--muted)}

@@ -1,0 +1,100 @@
+These rules are in effect for all new uploads on the site. Failure to abide by them may lead to staff relinquishing your upload rights and in certain cases, for example when involving malware, a ban.
+Included below are also our naming rules for each section, this is in regards to the name on the site and not specifically the name of the files. Name of the files can vary depending on your source, and in general they should not deviate from the original source.
+If you rip your own content, try to follow these as closely as possible. If you re-upload, generally you should keep the original format. Further details to be found on this page.
+These rules are subject to change at any time, new uploads after rule changes may be postponed to be fixed for a little bit. We will try to advertise rule changes.
+- 1.0 Staff has final say in any torrent moderation, changes that needs to be made or if a torrent is allowed to be uploaded or not. Staff interprets the rules at their discretion.
+- 1.1 Torrents not meeting the rules laid out in this page will get deleted.
+- 1.2 Multiple infractions and excessive wrongdoing will have your upload rights revoked for a period or permanently.
+- 1.3 If you do not have a trusted uploader rank, all torrents must be approved by staff before they go live on the site.
+- 1.4 All uploads need to retain their original release name. No so called "RETAGS". If you have done transformative work on a title, in which case credit to original ripper, encoder or uploader is a must.
+  - 1.4.1 Just removing some subtitles or an audio track does not count as transformative work and will get deleted if spotted.
+  - 1.4.2 Adding something new to the file, like new subtitles counts as transformative work. Must still give credit to original source.
+  - 1.4.3 If we find that the uploaded torrent has been changed from its original release by some other site before it's uploaded, it might still get deleted. Torrents from sites like IPT, TD, TL etc often have changes made to them. Be vigilant.
+- 1.5 NFO is for the most part optional. If the release comes with an NFO, you may use it on the site but it is not required to be kept in the torrent folder.
+  - 1.5.1 Do not make a new NFO or add an NFO to a torrent that does not have it from the start. Do not add new files at all to someone elses torrent, unless making transformative work, see 1.4.
+- 1.6 No advertising other trackers. Automatic censorship will be added to the uploaded NFO/Details. Trying to circumvent this will cause action to be taken against the uploading account.
+- 1.7 The .torrent-file uploaded cannot exceed 1MiB in size.
+- 1.8 No special lettering in the name on the site, except periods, underscores or dashes (., _, -).
+- 1.9 Scene releases that can be found in a PRE-DB must be unpacked, rar-files removed, SAMPLE folder, NFO-file removed. But NFO should be uploaded on site to give credit. NFO-file can remain with app and game torrents if it contains installation instructions.
+  - 1.9.1 If you are unsure if it's a scene release or p2p release, check [predb.net](https://predb.net/) or [predb.org](https://predb.org/) for the release.
+- 1.10 Tags are mandatory, if no tag, use on of the following:
+  - -NOGROUP
+  - -NOGRP
+  - -NOTAG
+  - -P2P
+- 1.11 If a torrent is to be tagged NORDIC it must include subtitles from SE, NO, DK, FI.
+- 1.12 Dupes are not allowed. Staff can sometimes at their own discretion constitute what goes as dupe in a case by case scenario. Internal groups have priority on uploaded content, and will be allowed to keep a dupe up, in case another release was uploaded before the internals.
+  - 1.12.1 Another type of rip, encode or source for music, movies and tv is not considered a dupe. x264 and x265 content can live side by side, as can a 1080p and 720p, disc and web-dl etc.
+  - 1.12.2 See 8. Trumping for when dupes are no longer allowed.
+- 1.13 No custom, non-official or AI-upscaled content is allowed, neither are machine/AI-translated subs.
+- 1.14 Excessive useless files in the torrent will probably get it deleted.
+- 1.15 All upload of visual media must include MediaInfo and preferably, include a couple of screenshots. Screenshots are not a requirement, but it is nice to have.
+- 1.16 All uploads must properly reflect what they contain in the name, see some of the naming rules below.
+- 2.0 TMDB ID is mandatory for Movie uploads. IMDB, TVDB etc are nice to haves.
+- 2.1 Both HD and SD movie content is allowed on site, but SD content will be deleted if there is a HD/UHD source.
+- 2.2 Name of torrent should include the following: Name, year, (possible edition), subtitles, quality, source type, video codec, and if non-standard: audio codec.
+  - 2.2.1 Video and audio codec may be interchangable in order.
+  - 2.2.2 Examples:
+    - The.Lord.Of.The.Rings.TRILOGY.EXTENDED.EDITIONS.NORDiC.1080p.BluRay.DTS.x264-GROUPTAG
+    - Terminator.2.1991.2160p.UHD.BluRay.REMUX.DV.HDR.HEVC.FLAC.2.0-GROUPTAG
+    - Apocalypse.Now.1979.REDUX.1080p.WEB-DL.DDp.2.0.H.264-GROUPTAG
+    - Apocalypse.Now.1979.THEATRICAL.1080p.UHD.BluRay.DD+.7.1.HDR.x265-GROUPTAG
+    - Apocalypse.Now.1979.FINAL.CUT.2160p.UHD.BluRay.TrueHD.7.1.Atmos.DV.HDR.x265-GROUPTAG
+    - Apocalypse.Now.1979.THEATRICAL.1080p.BluRay.DD+.5.1.x264-GROUPTAG
+- 2.3 If the movie is in english, keep the english name of the movie. If it is dubbed, for example a disney movie, the main dubbed language may be used, but preferably keep the english one.
+- 3.0 TMDB ID is mandatory for TV uploads. IMDB, TVDB etc are nice to haves.
+- 3.1 Season and episode format names are Sxx and Exx, for example S01E01.
+- 3.2 Both HD and SD TV content is allowed on site, but SD content will be deleted if there is a HD/UHD source.
+- 3.3 Season uploads must contain all releases related to that season (must be completely aired). Several seasons in 1 torrent is only allowed if whole show is complete and included. For example S01-S02 is not allowed, if there is a S03 coming out later.
+- 3.4 No partial uploading of seasons. If a season is not complete, single episode uploads are required. Example: E05-E10, E01-03 etc are not allowed.
+- 3.5 If you upload a complete boxset put together from different release groups, make sure all original rippers or uploaders gets displayed credit on the torrent page.
+- 3.6 Name of torrent should include the following: Name, season, episode (if not season pack), subtitles, quality, source type, video codec, and if non-standard: audio codec.
+  - 3.6.1 Video and audio codec may be interchangable in order.
+  - 3.6.2 Examples:
+    - Wu.Assassins.S01E01.NORDiC.720p.WEB-DL.DDP5.1.H.264-GROUPTAG
+    - Beyond.The.Brush.S01E01.The.Scream.1080p.NOW.WEB-DL.AAC2.0.H.264-GROUPTAG
+    - Futurama.S06.1080p.BluRay.DTS.x264-GROUPTAG
+    - A.Woman.of.Substance.S01.1080p.ALL4.WEB-DL.AAC2.0.H.264-GROUPTAG
+    - Taskmaster.S16.with.BSL.1080p.ALL4.WEB-DL.AAC.2.0.H.264-GROUPTAG
+    - My.Hero.Academia.Vigilantes.S02.JAPANESE.1080p.CR.WEB-DL.DD+.2.0.H.264-GROUPTAG
+- 4.0 Platform is to be specified in torrent name if it's a game release. PC/Windows, MAC, iOS, Android, Linux.
+- 4.1 Software releases should include a virustotal link when possible.
+- 4.2 Descriptions for installation shall be visible and explained on the torrent page.
+  - 4.2.1 If NFO contains installation instructions for an app or a game, it is advantageous to keep it.
+- 4.3 Crack type should be specified.
+- 4.4 Description should include which platform and architecture.
+- 4.5 Freeware or open source is not to be uploaded unless it is threatened by DMCA to be taken down.
+- 4.6 Uploads containing virus/malware will be promptly deleted, and the uploader can have warnings issued to their account.
+  - 4.6.1 NBy takes no responsibility for malware in application or game torrents, if you find a torrent that is positive for malware, make sure to report it to us directly so that rule 4.6 can be utilized.
+  - 4.6.2 The new form of cracks that utilizes hypervisor bypass for Denuvo games will get scrutinized very hard, the uploader is responsible to make absolutely sure that these do not contain malware in any way.
+- 4.7 Censor any potential CDKEYS in the uploaded NFO on the.
+- 5.0 Music uploads should include: Artist, Title, Release Year, Format, Bitrate, Source.
+  - 5.0.1 Podcasts should include episode or season numbers if applicable, and be tagged PODCAST.
+  - 5.0.2 Source, format and bitrate may be interchangable in naming.
+  - 5.0.3 Examples:
+    - At.The.Gates-Slaughter.Of.The.Soul.1995.FLAC.16bit.WEB-GROUPTAG
+    - At.The.Gates-Slaughter.Of.The.Soul.1995.MP3.320.WEB-GROUPTAG
+    - Maend.Der.Oedelaegger.Kvinder.S01.DANiSH.WEB-DL.PODCAST.MP3-GROUPTAG
+- 5.1 Tracklist is to be shown in torrent page description.
+- 5.2 Podcasts should generally be mp3 in format. Flac is a waste of space unless it's a podcast including for example music.
+- 5.3 Music should be in flac or mp3 format.
+- 5.4 VA should be used for Various Artists in music torrents.
+- 5.5 OST should be in the name if it's an original soundtrack.
+- 5.6 Re-encodes from lossy to lossless is forbidden, for example mp3 -> flac.
+- 6.0 Title should include: Author, Title, Language, Format, Release year.
+  - 6.0.1 Leave scene release names alone.
+  - 6.0.2 Examples:
+    - Stephen.King-The.Shining.1977.DANISH.ePUB-GROUPTAG
+    - Date or edition included if magazine: Magazines.19-03-2026.SWEDiSH.WEB-DL.PDF-GROUPTAG
+    - Sofia.og.Michael.Bergenstjerna-Pottetræning.På.3.Dage.2020.DANiSH.eBook.ePub-GROUPTAG
+    - Lars.Kjaedegaard-En.Aerlig.Mand.II.Del.2-AUDiOBOOK-WEB-DK-2016-GROUPTAG
+  - 6.1 Audiobooks should be m4a, m4b or mp3 in format.
+  - 6.2 Magazine packs for a time period is okay to upload, specify period in date.
+- 7.0 Title should include: Title, Resolution, Source, Codec, optional: year.
+  - 7.0.1 No example titles provided, this is a family friendly site. No, but seriously, just go look at an XXX upload, they have very little standards.
+- 8.0 Movie and TV torrents of different quality, remux, full disc, web rip, web-dl may co-exist on the site.
+  - 8.0.1 An upload that is considered subpar, transcoded or otherwise of inferior quality can be trumped by a better release.
+- 8.1 If a torrent has been dead for long enough it may be trumped by a similar release.
+- 8.2 All categories are trumpable by a better release.
+  - 8.2.1 New versions of apps does not trump a previous version.
+  - 8.2.2 More subtitles is a reason for trumping, especially more nordic subtitles.

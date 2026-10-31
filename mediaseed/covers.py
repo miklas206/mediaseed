@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from mediaseed.enrichment import Enrichment
+from mediaseed.tracker_sites import origin, matching_accounts
 
 
 def poster_url(value):
@@ -56,8 +57,9 @@ class Covers:
         self.swarm_sink = None
         self.metadata_sink = None
         self.metadata_source = None
-        self.enrichment = Enrichment(self)
+        self.recovery_needed = lambda torrents: {}
         self.username = username or (lambda identifier: None)
+        self.enrichment = Enrichment(self)
 
     def remember(self, identifier, account, attributes):
         if str(attributes.get("info_hash", "")).lower() != identifier.lower():
@@ -66,10 +68,11 @@ class Covers:
             self.swarm_sink(identifier.lower(), account, attributes)
         if self.metadata_sink:
             try:
-                self.metadata_sink(identifier.lower(), account, attributes)
+                self.metadata_sink(identifier.lower(),account,attributes)
             except Exception as error:
-                logging.getLogger(__name__).warning("Metadata observation failed (%s)", type(error).__name__)
+                logging.getLogger(__name__).warning("Metadata observation failed (%s)",type(error).__name__)
         featured = attributes.get("featured") is True
+        featured_bonus = featured and account.get("provider","nordicbytes") == "nordicbytes"
         try:
             freeleech = float(str(attributes.get("freeleech")).rstrip("%"))
         except (ValueError, TypeError):
@@ -77,10 +80,11 @@ class Covers:
         username = self.username(account["id"])
         evidence = {"status": "matched", "infoHash": identifier.lower(), "tracker": account["name"][:80],
                     "size": attributes.get("size") if type(attributes.get("size")) is int and attributes["size"] >= 0 else None,
+                    "trackerId": account["id"], "baseUrl": origin(account), "greenRule": account.get("provider","nordicbytes") == "nordicbytes",
                     "checkedAt": time.time(), "createdAt": attributes.get("created_at") if isinstance(attributes.get("created_at"), str) and len(attributes["created_at"]) <= 80 else None,
                     "ownUpload": bool(username and attributes.get("uploader") == username),
-                    "freeleech": 100 if featured else freeleech if freeleech in {0, 25, 50, 75, 100} else None,
-                    "featured": featured, "doubleUpload": True if featured else attributes.get("double_upload") if type(attributes.get("double_upload")) is bool else None,
+                    "freeleech": 100 if featured_bonus else freeleech if freeleech in {0, 25, 50, 75, 100} else None,
+                    "featured": featured, "doubleUpload": True if featured_bonus else attributes.get("double_upload") if type(attributes.get("double_upload")) is bool else None,
                     "internal": attributes.get("internal") is True, "refundable": attributes.get("refundable") is True}
         path = self.path(identifier).with_suffix(".json")
         temporary = path.with_suffix(".json.tmp")
@@ -106,6 +110,24 @@ class Covers:
                 path = self.path(str(torrent.get("hash", ""))) if isinstance(torrent, dict) else None
                 return 0 if path is not None and not path.is_file() else 1
             candidates.sort(key=priority)
+            # An announce host must match a configured account. Do not probe
+            # every account for local/unidentified torrents with no tracker.
+            candidates = [row for row in candidates if isinstance(row, dict) and row.get("tracker")
+                          and self.path(str(row.get("hash", ""))) is not None and matching_accounts(accounts, row["tracker"])]
+            candidates = list({str(row["hash"]).lower(): row for row in candidates}.values())[:500]
+            needed = self.recovery_needed(candidates)
+            manual = set()
+            identifiers = list(dict.fromkeys(str(row["hash"]).lower() for row in candidates))
+            if identifiers:
+                scopes = {self.enrichment.scope(account) for account in accounts}
+                with self.enrichment.connect() as db:
+                    for identifier, scope, payload in db.execute("SELECT hash,scope,state FROM jobs WHERE hash IN (" + ",".join("?" for _ in identifiers) + ")", identifiers):
+                        state = json.loads(payload)
+                        if scope in scopes and state.get("manual_at") and (state.get("force_image") or not state.get("detail_read")):
+                            manual.add(identifier)
+            candidates = [row for row in candidates if str(row["hash"]).lower() in manual
+                          or not self.path(str(row["hash"])).is_file()
+                          or needed.get(str(row["hash"]).lower(), True)]
             await self.enrichment.run(candidates, accounts)
             self.pending = {key: value for key, value in self.pending.items() if key not in observed}
             self.cleanup()
@@ -119,6 +141,21 @@ class Covers:
             self.pending[identifier] = {'hash': identifier, 'name': name[:500]}
             return True
         return identifier in self.pending
+
+    async def refresh(self, torrent):
+        identifier = torrent["hash"].lower()
+        accounts = matching_accounts(self.accounts("trackers")[:10], torrent.get("tracker"))
+        if not accounts:
+            return "unavailable"
+        async with self.lock:
+            if len(self.pending) >= 100 and identifier not in self.pending:
+                return "busy"
+            if not self.enrichment.request_refresh(identifier, accounts):
+                return "cooldown"
+            # Run through the ordinary bounded worker, with the current tracker
+            # identity; never synthesize a match from the torrent name.
+            self.pending[identifier] = dict(torrent)
+        return "queued"
 
     async def download(self, url, path):
         async with httpx.AsyncClient(timeout=8, follow_redirects=False, trust_env=False) as client:

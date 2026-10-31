@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 
 class ThemePreference(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-    themeOverride: Literal["classic", "midnight-glass", "soft-orbit", "precision-terminal", "floating-layers", "edge-signal", "light"] | None = None
+    themeOverride: Literal["classic", "midnight-glass", "soft-orbit", "precision-terminal", "floating-layers", "edge-signal", "duck-pond", "light"] | None = None
 
 
 class NavigationPreference(BaseModel):

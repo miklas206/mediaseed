@@ -8,6 +8,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY --from=dependency-manifest /manifest/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg mediainfo mkvtoolnix ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN useradd --uid 1000 --create-home mediaseed && mkdir /data /downloads && chown mediaseed:mediaseed /data /downloads
 COPY pyproject.toml ./
 COPY mediaseed ./mediaseed

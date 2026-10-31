@@ -210,3 +210,44 @@ def test_pending_rss_start_survives_restart_and_respects_feed_changes(tmp_path, 
         await restarted.start_pending()
         assert not calls  # A later manual pause is never undone.
     asyncio.run(check())
+
+
+def test_capacity_rejection_does_not_consume_new_article_or_retry_old_intent(tmp_path):
+    import hashlib
+    from fastapi import HTTPException
+    @contextmanager
+    def database():
+        with sqlite3.connect(tmp_path / 'capacity.sqlite') as db:
+            yield db
+    feed = {'id': 'a'*24, 'enabled': True, 'url': 'https://nordicbytes.org/rss/synthetic',
+            'cleanup': {'mode': 'ratio', 'ratio': 3}}
+    articles = [{'id': str(i), 'title': 'Synthetic '+str(i),
+                 'torrentURL': 'https://nordicbytes.org/torrents/download/'+str(i)} for i in range(2)]
+    items = {'MediaSeed-RSS-'+feed['id']: {'url': feed['url'], 'articles': articles}}
+    writes = []
+    async def vpn(): return {'downloadsEnabled': True}
+    async def qbit(path, method='GET', payload=None, **kwargs):
+        if method == 'POST': writes.append(path)
+        if path.endswith('/items'): return httpx.Response(200, json=items)
+        return httpx.Response(200, content=b'synthetic metadata')
+    class Full:
+        def require_capacity(self): raise HTTPException(409, 'Synthetic capacity reached')
+    worker = RssWorker(database, lambda kind: [feed], qbit, vpn)
+    worker.cleanup = Full()
+    old = articles[0]
+    token = hashlib.sha256((feed['id']+'\n'+old['id']+'\n'+old['torrentURL']).encode()).hexdigest()
+    with database() as db:
+        db.execute('INSERT INTO rss_history VALUES (?,?,?,?,?)', (token, feed['id'], 'intent', 1, None))
+    asyncio.run(worker.tick())
+    assert worker.reports[feed['id']] == 'Synthetic capacity reached'
+    assert not writes
+    with database() as db:
+        assert db.execute('SELECT token,status FROM rss_history').fetchall() == [(token, 'intent')]
+    # Upgraded startup preserves blocked old intents and retries only admission
+    # checks for the unconsumed new article, without issuing any import.
+    restarted = RssWorker(database, lambda kind: [feed], qbit, vpn)
+    restarted.cleanup = Full()
+    asyncio.run(restarted.tick())
+    assert not writes
+    with database() as db:
+        assert db.execute('SELECT COUNT(*) FROM rss_history').fetchone()[0] == 1

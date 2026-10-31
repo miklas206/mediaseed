@@ -11,6 +11,7 @@ function setup(){
   const document={createElement:node,documentElement:{dataset:{}}};
   const context=vm.createContext({document});vm.runInContext(source,context);
   const route=node();route.getBoundingClientRect=()=>({left:0,top:0,width:500});
+  route.querySelector=()=>null;
   route.querySelectorAll=()=>[0,460].map(left=>({getBoundingClientRect:()=>({left,top:0,width:40,height:40})}));
   const packets=context.MediaSeedPackets.mount(route),overlay=route.children[0];
   return {api:context.MediaSeedPackets,packets,overlay,document};
@@ -32,6 +33,7 @@ test('continuous journeys span the icons, keep their identity and drain at the e
   assert.ok(durations[0]>durations[1]&&durations[1]>durations[2]);
   packets.update(1048576,65536,true);assert.deepEqual(down.children,originals);
   packets.update(1,0,true);assert.deepEqual(down.children,originals);
+  assert.equal(up.children.length,0,'Zero measured upload clears its lane immediately');
   for(const packet of [...down.children,...up.children])packet.listeners.animationiteration();
   assert.equal(down.children.length,1);assert.equal(up.children.length,0);
   packets.update(1048576,1048576,false);assert.equal(down.children.length+up.children.length,0);

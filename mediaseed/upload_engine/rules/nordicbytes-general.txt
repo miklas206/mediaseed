@@ -1,0 +1,70 @@
+These rules must be followed at all times, failure to do so will result in a warning, a ban or the ban of your entire invite tree.
+Being a member of NordicBytes is a privilege, not a human right. Staff reserves the right to warn you or ban you without notice for any reason.
+- 1.0 Always be respectful of staff members on the site, they are doing an unpaid job to keep you with media to consume.
+  - 1.0.1 Staff has final say in all discussions regarding any site functionality or rules.
+  - 1.0.2 Do not message staff directly without explicit permission, use the support feature.
+- 1.1 Respect eachother. Rude or unwanted behavior towards other users or staff will not be tolerated.
+  - 1.1.1 Respect other torrent sites, do not talk shit about other sites or break other sites rules on our site.
+- 1.2 Do not try to scam anyone on NBy.
+- 1.3 Do not try to hack or exploit the site, if you find a security hole by chance, report it instantly.
+  - 1.3.1 Do not publish exploits for NBy anywhere online.
+- 1.4 Do not use NBy, our tracker, website, or chat channels for personal monetary gain.
+  - 1.4.1 Do not sell bonus points for money.
+  - 1.4.2 Do not trade or sell bonus points for points on another site.
+- 1.5 Do not scrape NBy with outside tools not meant for the API.
+  - 1.5.1 Do not abuse the API or other automated access.
+- 1.6 Do not try to manipulate your ratio with outside tools or by reporting bad data to the tracker.
+- 1.7 We respect the privacy of our users. Do not share any private, identifiable information you have on another user in any way.
+  - 1.7.1 Do not harvest user information in any way.
+  - 1.7.2 Do not blackmail or threaten other users.
+- 1.8 Do not impersonate staff, do not backseat moderate or police other users. Ask staff for help or use the report button.
+- 1.9 Do not ask for shards or gold coins.
+- 1.10 Do not upload our .torrent-files to other sites.
+  - 1.10.1 Your passkey is visible in these .torrent-files, see rule 2.3.
+- 1.11 Do not request special events on the site like global freeleech, these will happen at staff discretion.
+- 1.12 Do not try to manipulate your ratio in any way other than the intended leeching/seeding.
+- 1.12.1 Do not report incorrect data to the tracker by using a modified client.
+- 1.13 No discussion about religion anywhere on site. Discussions about politics should be civil, and preferably be related to piracy and privacy.
+- 2.1 Do not create more than one account, only one account per person per lifetime is allowed.
+- 2.2 Your account is personal, do not share it with anyone else.
+- 2.3 Do not share your passkey with anyone.
+- 3.0 You must ensure you keep your ratio above 0.4 at any given time.
+- 3.1 You are required to seed for a minimum of 48 hours after the download has finished (100%) or until you reach a 1:1 ratio on that specific torrent.
+  - 3.1.1 Seed requirements are effective when you have downloaded 5% of the torrent, or 1 GB. Whichever one comes first.
+  - 3.1.2 Seed requirements are always a requirement, even when the torrent is freeleech, green or burning.
+    - When you have been disconnected for 48 hours, you get a pre-warning. This is a warning that a warning is about to arrive.
+    - When you have been disconnected for 96 hours, you get an actual warning.
+    - You can recieve a maximum of one warning per day. If you should have gotten multiple warnings the same day, then the warnings will be queued and given then following days. 1 per day.
+    - You can only be warned once per torrent.
+    - Your download rights are revoked if you get 3 warnings.
+    - Warnings will automatically expire after 10 days.
+- 3.2 Log in at least once every 90 days, your account will be put in disabled status if you do not.
+- 4.1 No aggressive or disturbing behavior. See rule 1.1.
+- 4.2 Do not give excessive feedback to NBy in the chat, refer to tickets or issues.
+  - 4.2.1 Feedback about NBy or staff of NBy should most likely always be given in private, in tickets or through an issue. But if asked for explicitly by staff, is allowed.
+- 4.3 No links to other trackers.
+- 4.4 No requests, use the request feature.
+- 4.5 No affiliate links, see rule 1.4.
+- 4.6 Do not spam the chat.
+- 4.7 Stick to the language of the chat, as much as you can. If you are Danish or Norwegian, you can of course reply to someone in the Swedish chat without worry.
+All rules from section 4. Chat applies here, except for rule 4.3, see rule 7.2.1.
+- 5.1 Make sure there is no open topic for the topic you want to discuss before you make said topic.
+- 5.2 Make sure your topic is in the appropriate category.
+- 5.3 Do not hijack someone else's thread by changing the topic or spamming.
+All rules from section 4. Chat applies here.
+- 6.1 Comments should be jovial, if you see something you think does not belong on the site, report it instead.
+- 7.0 You are responsible for any person you invite to the site, if they break the rules, there might be consequences for you.
+- 7.1 Do not invite a previously banned user, so called "ban evasion".
+- 7.2 Do not ask for invites to other trackers or for NBy on behalf of someone else.
+  - 7.2.1 Dedicated spaces for offering invites and recruitment might be on the site somewhere.
+  - 7.2.2 Do not ask about this magical place.
+- 7.3 Do not sell invites for NBy on other sites, or invites to other sites on NBy.
+  - 7.3.1 If you paid real money for an invite to NBy, then if you inform us about it will get you clemency.
+- 8.0 Do not make requests that somehow break any other rules.
+- 8.1 Claims that are not fulfilled within 7 days are automatically reset.
+- 8.2 You may not request games that utilize Denuvo DRM unless they are already cracked by a known scene group or reputable cracker.
+- 8.3 Do not create requests for upcoming movies, TV shows, games, books and other media that have not yet been released, unless there is a known, valid release out there.
+- 9.0 Issues and feature requests must be made in English, if they are written in another language they will be thrown out.
+- 9.1 Nordic language is allowed everywhere in the forums and comments, try to stick to talking the right language in the right chat, see rule 4.7.
+  - 9.1.1 If you want faster help from staff, consider writing your support ticket in English. Then more people can reply to your ticket.
+- 10.0 If you report a torrent, make sure to write as much information as possible. Just "doesn't work" will probably lead no-where.

@@ -1,0 +1,179 @@
+/* MediaSeed's workspace keeps the account's palette, scene, shape and navigation. */
+#workspace{--workspace-gap:18px;--workspace-radius:var(--skin-radius,12px)}
+#workspace .seed-page-heading{padding-block:8px 12px}
+#workspace .seed-page-heading h1{font-size:clamp(1.8rem,3vw,2.3rem);letter-spacing:-.04em;line-height:1.15}
+#workspace .seed-page-heading p{font-size:.9rem;margin-top:10px;max-width:60ch;line-height:1.6}
+#workspace .view{min-width:0}
+#workspace :is(.workspace-card,.download-status-card,.download-flow,.automatic-activity){border-radius:var(--workspace-radius);background:var(--glass,var(--surface))}
+#workspace .workspace-card{padding:22px}
+#workspace .workspace-card>h2{font-size:1.05rem;margin-bottom:18px}
+#workspace .heading{gap:16px;flex-wrap:wrap}
+#workspace .heading h2{letter-spacing:-.025em}
+#workspace button:focus-visible,#workspace summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+#workspace button{transition:background .18s,border-color .18s,color .18s}
+#workspace button.primary{box-shadow:none}
+
+/* A compact live route makes space for the work below it. */
+#workspace .download-flow{display:grid;grid-template-columns:minmax(180px,.65fr) minmax(0,1.4fr);align-items:center;gap:24px;padding:24px;margin-block:18px}
+.download-flow-heading{display:grid;gap:10px;min-width:0}
+.download-flow-eyebrow{font-size:.7rem;font-weight:650;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.download-flow-heading strong{font-size:1rem;line-height:1.55;color:var(--muted)}
+.download-flow[data-active=true] .download-flow-heading strong{color:var(--healthy)}
+#workspace .download-route{margin:0;min-width:0;gap:8px}
+#workspace .download-route-node{min-width:68px;gap:10px}
+#workspace .download-route-node .route-icon{width:46px;height:46px;border-radius:var(--radius-control,9px);background:var(--surface)}
+.download-flow[data-active=true] .download-route-node:nth-child(3) .route-icon{color:var(--healthy);border-color:color-mix(in srgb,var(--healthy) 55%,var(--line))}
+#workspace .seed-stats{gap:var(--workspace-gap);margin-block:18px 24px}
+#workspace .seed-stats article{border-radius:var(--workspace-radius);min-width:0;min-height:104px;padding:20px;gap:16px}
+#workspace .seed-stats small{font-size:.78rem;letter-spacing:.01em}
+#workspace .seed-stats strong{font-size:clamp(1.2rem,2.3vw,1.8rem);line-height:1.25}
+#workspace .seed-spark{margin-left:auto;max-width:38%;opacity:.75}
+#workspace .download-status-cards{gap:var(--workspace-gap);align-items:start;margin-block:20px}
+#workspace .download-status-card{padding:20px;gap:10px}
+#workspace .download-status-card>span{font-size:.75rem;font-weight:600;letter-spacing:.025em}
+#workspace .download-status-card>strong{font-size:1rem;line-height:1.6}
+#workspace .download-status-card small{font-size:.78rem;line-height:1.65}
+#workspace .download-status-card:is(button):hover{border-color:var(--accent-line);background:var(--glass-raised,var(--raised))}
+#workspace .download-account-totals{gap:8px 20px;padding-top:14px;margin-top:4px}
+#workspace .automatic-activity{padding:16px 20px}
+.automatic-activity>summary,.client-details>summary{font-size:.85rem;color:var(--muted)}
+.automatic-activity[open]>summary{color:var(--text);margin-bottom:10px}
+#workspace .client-details{margin-block:16px 24px}
+
+/* Individual torrent cards retain every action, source and goal meter. */
+#workspace .downloads-heading{margin-block:24px 16px}
+#workspace .download-filters{border:1px solid var(--line);border-radius:var(--workspace-radius);background:var(--glass,var(--surface));padding:18px}
+#workspace .download-filters .toolbar{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin:0;align-items:end}
+#workspace .download-filters label{min-width:0;gap:7px;font-size:.75rem;font-weight:550;color:var(--muted)}
+#workspace .download-filters :is(input,select){width:100%;min-width:0;font-size:.85rem;background:var(--surface)}
+#workspace #count{margin:16px 2px 12px;font-size:.8rem}
+#torrents{display:grid;gap:12px}
+#torrents>.seed-rich-row.torrent{padding:20px;border:1px solid var(--line);border-radius:var(--workspace-radius);background:var(--glass,var(--surface));transition:border-color .18s}
+#torrents>.seed-rich-row.torrent:hover{border-color:var(--accent-line)}
+#torrents .torrent-name{line-height:1.5!important;font-weight:650}
+#torrents .seed-identity{gap:8px}
+#torrents .seed-subline,#torrents .seed-upload-credit{font-size:.75rem;line-height:1.6}
+#torrents .seed-progress-cell{gap:10px}
+#torrents .seed-activity{gap:10px}
+#torrents .torrent-state{font-weight:600}
+#torrents .seed-progress-cell progress{height:12px}
+#workspace .torrent-pagination{margin-block:20px;gap:16px}
+#workspace .torrent-pagination button{font-size:.8rem}
+
+/* RSS switches control future imports, independently of the existing torrents. */
+#workspace #feed-list{display:grid;gap:16px;min-height:0}
+#workspace #feed-list:has(>p:only-child){min-height:160px}
+#workspace .feed-card{padding:22px;margin:0;border:1px solid var(--line);border-radius:var(--workspace-radius);background:var(--glass,var(--surface));min-width:0}
+.feed-card-heading{display:flex;align-items:center;justify-content:space-between;gap:20px}
+.feed-card-identity{display:flex;align-items:center;gap:12px;min-width:0}
+#workspace .feed-card h2{font-size:1.05rem;letter-spacing:-.02em;margin:0;overflow-wrap:anywhere;line-height:1.5}
+.feed-card-type{display:grid;place-items:center;flex:none;font-size:.65rem;font-weight:700;letter-spacing:.05em;width:38px;height:38px;border:1px solid var(--accent-line);border-radius:var(--radius-control,9px);background:var(--accent-bg);color:var(--accent)}
+.feed-card-controls{display:flex;align-items:center;gap:12px;flex:none}
+#workspace .feed-state-switch{background:transparent;border:1px solid transparent;padding:8px;min-height:40px;font-size:.8rem;gap:10px;color:var(--muted)}
+#workspace .feed-state-switch:hover:not(:disabled){border-color:var(--accent-line);background:var(--accent-bg)}
+#workspace .feed-state-switch[aria-checked=true]{color:var(--accent)}
+.feed-switch-track{position:relative;display:inline-block;width:38px;height:22px;border:1px solid var(--line);border-radius:20px;background:var(--raised);flex:none;transition:background .2s,border-color .2s}
+.feed-switch-track::after{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:transform .2s,background .2s}
+.feed-state-switch[aria-checked=true] .feed-switch-track{background:var(--accent-bg);border-color:var(--accent)}
+.feed-state-switch[aria-checked=true] .feed-switch-track::after{transform:translateX(16px);background:var(--accent)}
+.feed-state-switch[aria-busy=true] .feed-switch-track{opacity:.6}
+.feed-state-badge{display:inline-flex;padding:4px 10px;font-size:.75rem;border:1px solid var(--line);border-radius:20px;color:var(--muted)}
+.feed-state-badge[data-enabled=true]{color:var(--accent);border-color:var(--accent-line)}
+#workspace .feed-runtime-status{margin:12px 0 0;font-size:.8rem;color:var(--muted);overflow-wrap:anywhere}
+#workspace .feed-upload-total{font-size:.95rem;font-weight:600;margin-block:18px;color:var(--accent);overflow-wrap:anywhere}
+.feed-card-details{border-block:1px solid var(--line);padding-block:14px;margin-block:16px}
+.feed-card-details summary{cursor:pointer;color:var(--muted);font-size:.8rem;width:fit-content}
+.feed-card-details[open] summary{color:var(--text);margin-bottom:14px}
+#workspace .feed-card-details p{font-size:.8rem;line-height:1.8;overflow-wrap:anywhere;margin-block:10px}
+.feed-card-actions{display:flex;gap:8px;flex-wrap:wrap}
+#workspace .feed-card-actions button{font-size:.8rem;min-height:36px;padding:7px 12px}
+#workspace .feed-card-actions button.source-remove{margin-left:auto;color:var(--danger);background:transparent;border-color:transparent}
+#workspace .feed-card-actions button.source-remove:hover{border-color:var(--danger);background:var(--danger-bg)}
+
+/* Matching surfaces for trackers, discovery, insights and editors. */
+#workspace .tracker-card{border-radius:var(--workspace-radius);background:var(--glass,var(--surface))}
+#workspace .tracker-card-heading{gap:16px;align-items:start}
+#workspace .tracker-stats{gap:12px}
+#workspace .ratio-candidate{padding:20px 0}
+#workspace .ratio-candidate:first-child{padding-top:4px}
+#workspace .ratio-candidate h3{font-size:1rem;line-height:1.6}
+#workspace :is(.insight-card,.ratio-workspace>.workspace-card){border-radius:var(--workspace-radius)}
+.source-editor,#add-torrent,#torrent-details,#app-settings{border-radius:var(--skin-radius,12px);border-color:var(--line)}
+.source-editor .settings-form{gap:20px}
+.source-editor .workspace-card>h2{font-size:1.3rem;letter-spacing:-.03em}
+#workspace :is(.settings-form,fieldset){min-width:0}
+
+/* All existing navigation modes remain available. Narrow topbars scroll as a row. */
+:root[data-app-navigation=topbar] #app-navigation button{flex:0 0 auto;white-space:nowrap;min-width:max-content}
+:root[data-app-navigation=topbar] #app-navigation{scrollbar-width:thin;scroll-padding-inline:12px}
+@media(max-width:1100px){
+ #workspace .download-filters .toolbar{grid-template-columns:repeat(3,minmax(0,1fr))}
+ #workspace .download-status-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+ #workspace .download-status-card:has(.download-account-totals){grid-column:2;grid-row:1 / span 2}
+}
+@media(max-width:900px){
+ #workspace .download-flow{grid-template-columns:minmax(0,1fr);gap:20px;padding:20px}
+ .download-flow-heading{gap:6px}
+}
+@media(max-width:650px){
+ #workspace{--workspace-gap:12px}
+ #workspace .seed-page-heading{padding-block:4px 10px}
+ #workspace .seed-stats article{padding:14px 10px;min-height:96px;gap:8px;flex-wrap:wrap;align-content:center}
+ #workspace .seed-stats strong{font-size:1.1rem}
+ #workspace .seed-stats small{font-size:.68rem}
+ #workspace .seed-stats .stat-icon{width:18px;height:18px}
+ #workspace .seed-spark{display:none}
+ #workspace .download-status-cards{grid-template-columns:minmax(0,1fr)}
+ #workspace .download-status-card:has(.download-account-totals){grid-column:auto;grid-row:auto}
+ #workspace .download-route-node{min-width:44px;font-size:.65rem}
+ #workspace .download-route-node .route-icon{width:36px;height:36px}
+ #workspace .download-route{gap:4px}
+ #workspace .download-flow{padding:18px 14px}
+ #workspace :is(.workspace-card,.download-status-card,.feed-card){padding:18px}
+ #workspace .download-filters{padding:14px}
+ #workspace .download-filters .toolbar{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 10px}
+ #torrents>.seed-rich-row.torrent{padding:16px 12px;gap:12px}
+ .feed-card-heading{align-items:start;flex-direction:column;gap:10px}
+ .feed-card-controls{align-self:flex-end}
+ #workspace .feed-card h2{font-size:1rem}
+ #workspace .feed-upload-total{font-size:.85rem}
+ #workspace .feed-card-actions button{flex:1}
+ #workspace .feed-card-actions button.source-remove{margin-left:0}
+ #workspace .torrent-pagination{gap:10px}
+}
+@media(prefers-reduced-motion:reduce){#workspace *,#workspace *::after{transition:none!important}}
+:root[data-reduced-motion=true] #workspace *, :root[data-reduced-motion=true] #workspace *::after{transition:none!important}
+
+/* One heading per view; existing explanations remain beside their controls. */
+#workspace .seed-page-heading{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:20px}
+.workspace-intro{min-width:0}
+.workspace-eyebrow{display:block;color:var(--accent);font-size:.65rem;font-weight:700;letter-spacing:.16em;margin-bottom:12px}
+.workspace-page-actions{display:flex;align-items:center;gap:10px;flex:none}
+#workspace .view>h1,#workspace .view>.heading h1{display:none}
+#workspace .download-filters .toolbar{padding:0;border:0;background:transparent}
+#workspace #torrents{border:0;background:transparent;border-radius:0}
+#workspace #feeds>.workspace-columns>.workspace-card{padding:0;border:0;background:transparent;box-shadow:none}
+#workspace #feeds>.workspace-columns>.workspace-card>h2{color:var(--muted);font-size:.8rem;font-weight:550}
+:root[data-density=compact] #workspace :is(.download-status-card,.workspace-card,.feed-card){padding:14px 16px}
+:root[data-density=compact] #torrents>.seed-rich-row.torrent{padding:12px}
+@media(max-width:650px){
+ #workspace .seed-page-heading{align-items:start;flex-wrap:wrap;gap:16px;margin-bottom:16px}
+ .workspace-page-actions{margin-left:auto}
+ #workspace .seed-page-heading p{font-size:.85rem}
+}
+
+/* Step 2 refines only torrent cards; the restored dashboard stays as it was. */
+#torrents>.seed-rich-row.torrent{padding:16px;gap:12px}
+#torrents .torrent-name{display:-webkit-box!important;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden!important;max-height:3em}
+#torrents .seed-identity{gap:6px}
+#torrents .seed-progress-cell,#torrents .seed-activity{gap:7px}
+#workspace #torrents .seed-poster{width:44px;height:66px}
+#torrents .seed-progress-goal{gap:0}
+#torrents .seed-goal-heading{gap:8px}
+#torrents .seed-goal-caption{font-size:.7rem;line-height:1.5}
+@media(max-width:650px){
+ #torrents>.seed-rich-row.torrent{padding:12px;gap:8px}
+ #workspace #torrents .seed-poster{width:36px;height:54px}
+ #torrents .seed-subline,#torrents .seed-upload-credit{font-size:.7rem;line-height:1.5}
+ #torrents .seed-progress-cell small,#torrents .seed-activity small{font-size:.72rem}
+}

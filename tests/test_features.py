@@ -1,3 +1,4 @@
+import json
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -5,11 +6,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mediaseed.app import create_app
+from mediaseed.cleanup import source_hashes
 from test_app import sign_in
 
 
+@pytest.mark.parametrize("detail_envelope", ["wrapped", "direct"])
 @pytest.mark.parametrize("add_format", ["no-content", "legacy-text", "current-json"])
-def test_tracker_search_and_stopped_import_keep_secrets_private(tmp_path, monkeypatch, add_format):
+def test_tracker_search_and_stopped_import_keep_secrets_private(tmp_path, monkeypatch, add_format, detail_envelope):
     from mediaseed import features
     original_client = httpx.AsyncClient
     calls = []
@@ -19,8 +22,9 @@ def test_tracker_search_and_stopped_import_keep_secrets_private(tmp_path, monkey
         calls.append(request)
         if request.url.path.startswith("/api/"):
             assert request.headers["Authorization"] == "Bearer synthetic-key"
-            row = {"id": "12", "attributes": {"name": "Legal test", "size": 42, "seeders": 3, "leechers": 0, "download_link": secret_link}}
-            return httpx.Response(200, json={"data": [row] if request.url.path.endswith("filter") else row})
+            row = {"id": "12", "attributes": {"name": "Legal test", "size": 42, "seeders": 3, "leechers": 0, "download_link": secret_link, "info_hash": source_hashes(content=b"d4:infod4:name4:testee")[0]}}
+            payload = {"data": [row]} if request.url.path.endswith("filter") else {"data": row} if detail_envelope == "wrapped" else row
+            return httpx.Response(200, json=payload)
         assert "Authorization" not in request.headers
         return httpx.Response(200, content=b"d4:infod4:name4:testee")
 
@@ -65,7 +69,7 @@ def test_tracker_search_rejects_remote_errors_and_oversized_responses(tmp_path, 
         assert request.url.host == "nordicbytes.org"
         return httpx.Response(remote_status, content=content, headers={"Location": "https://localhost/private-key"})
 
-    monkeypatch.setattr(features.httpx, "AsyncClient", lambda **kwargs: original_client(**kwargs, transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr(features.httpx, "AsyncClient", lambda **kwargs: original_client(**{**kwargs, "transport": httpx.MockTransport(handler)}))
     with TestClient(create_app(tmp_path, "http://testserver")) as client:
         sign_in(client)
         identifier = client.post("/api/trackers", json={"name": "Test", "api_key": "private-key"}).json()["id"]
@@ -74,11 +78,89 @@ def test_tracker_search_rejects_remote_errors_and_oversized_responses(tmp_path, 
         assert "private-key" not in response.text
 
 
+@pytest.mark.parametrize('operation', ['import', 'prepare'])
+@pytest.mark.parametrize('envelope', ['direct', 'wrapped'])
+@pytest.mark.parametrize('invalid', ['wrong-id', 'wrong-hash', 'missing-attributes', 'null-data', 'list-data', 'unsafe-url', 'malformed-file', 'oversized-file'])
+def test_tracker_import_formats_preserve_identity_and_schema_checks(tmp_path, monkeypatch, envelope, invalid, operation):
+    from mediaseed import features
+    original_client = httpx.AsyncClient
+    writes = []
+
+    def tracker(request):
+        if not request.url.path.startswith('/api/'):
+            content = b'dgarbagee' if invalid == 'malformed-file' else b'd' + b'x' * (4 * 1024 ** 2) + b'e' if invalid == 'oversized-file' else b'd4:infod4:name4:testee'
+            return httpx.Response(200, content=content)
+        row = {'id': '13' if invalid == 'wrong-id' else '12', 'attributes': {
+            'download_link': 'https://nordicbytes.org/torrents/download/12/private-passkey',
+            'info_hash': 'a' * 40}}
+        if invalid == 'unsafe-url': row['attributes']['download_link'] = 'https://localhost/torrents/download/12/private-passkey'
+        if invalid == 'missing-attributes': row['attributes'] = None
+        payload = {'data': row} if envelope == 'wrapped' else row
+        if invalid == 'null-data': payload = {**row, 'data': None}
+        if invalid == 'list-data': payload = {**row, 'data': [row]}
+        return httpx.Response(200, json=payload)
+
+    monkeypatch.setattr(features.httpx, 'AsyncClient', lambda **kw: original_client(**{**kw, 'transport': kw.get('transport', httpx.MockTransport(tracker))}))
+    def qbit(request):
+        writes.append(request)
+        return httpx.Response(204)
+
+    with TestClient(create_app(tmp_path, 'http://testserver', qbit_password='synthetic', transport=httpx.MockTransport(qbit))) as client:
+        sign_in(client)
+        identifier = client.post('/api/trackers', json={'name': 'Synthetic', 'api_key': 'synthetic-key'}).json()['id']
+        response = client.post(f'/api/trackers/{identifier}/torrents/12' + ('/prepare' if operation == 'prepare' else ''), json={'ratio': 1})
+        assert response.status_code == (422 if invalid == 'malformed-file' else 502)
+        assert not writes
+        assert 'private-passkey' not in response.text and 'synthetic-key' not in response.text
+
+
+@pytest.mark.parametrize('envelope', ['direct', 'wrapped'])
+@pytest.mark.parametrize('name', ['Synthetic legal release', '../nested\\file\x00\nname', 'Film.æøå.TORRENT'])
+def test_tracker_preparation_returns_validated_file_without_adding(tmp_path, monkeypatch, envelope, name):
+    import base64
+    from mediaseed import features
+    original_client = httpx.AsyncClient
+    content = b'd4:infod4:name4:testee'
+    requests = []
+    client_writes = []
+    row = {'id': '12', 'attributes': {'name': name, 'info_hash': source_hashes(content=content)[0],
+        'download_link': 'https://nordicbytes.org/torrents/download/12/private-passkey'}}
+    def tracker(request):
+        requests.append(request)
+        if request.url.path.startswith('/api/'):
+            return httpx.Response(200, json={'data': row} if envelope == 'wrapped' else row)
+        assert 'Authorization' not in request.headers
+        return httpx.Response(200, content=content)
+    def qbit(request):
+        client_writes.append(request)
+        return httpx.Response(204)
+    monkeypatch.setattr(features.httpx, 'AsyncClient', lambda **kw: original_client(**{**kw, 'transport': kw.get('transport', httpx.MockTransport(tracker))}))
+    with TestClient(create_app(tmp_path, 'http://testserver', qbit_password='synthetic', transport=httpx.MockTransport(qbit))) as client:
+        assert client.post('/api/trackers/test/torrents/12/prepare').status_code == 401
+        sign_in(client)
+        identifier = client.post('/api/trackers', json={'name': 'Synthetic', 'api_key': 'synthetic-key'}).json()['id']
+        response = client.post(f'/api/trackers/{identifier}/torrents/12/prepare')
+        assert response.status_code == 200
+        result = response.json()
+        assert base64.b64decode(result['base64'], validate=True) == content
+        assert result['name'].lower().endswith('.torrent') and len(result['name']) <= 228
+        assert all(c not in result['name'] for c in ['/', '\\', '\x00', '\n'])
+        assert response.headers['cache-control'] == 'no-store'
+        assert not client_writes
+        assert 'private-passkey' not in response.text and 'synthetic-key' not in response.text
+        requests.clear()
+        client.headers['X-MediaSeed-CSRF'] = 'invalid'
+        assert client.post(f'/api/trackers/{identifier}/torrents/12/prepare').status_code == 403
+        assert not requests
+
+
 def test_torrent_details_policy_and_early_stop(tmp_path):
     calls = []
 
     def handler(request):
         calls.append(request)
+        if request.url.path.endswith('/torrents/info'):
+            return httpx.Response(200, json=[{'hash': 'a' * 40, 'state': 'uploading', 'progress': 1}])
         if request.url.path.endswith("/login"):
             return httpx.Response(200, text="Ok.")
         if request.url.path.endswith("/properties"):
@@ -118,7 +200,7 @@ def test_torrent_details_policy_and_early_stop(tmp_path):
         assert client.post("/api/torrents/remove", json={"torrent_hash": identifier, "delete_files": True, "confirm_early": True}).status_code == 200
         assert parse_qs(calls[-1].content.decode())["deleteFiles"] == ["true"]
         assert client.post("/api/torrents/stop", json={"torrent_hash": identifier, "delete_files": True, "confirm_early": True}).status_code == 200
-        assert parse_qs(calls[-1].content.decode())["deleteFiles"] == ["false"]
+        assert parse_qs(calls[-1].content.decode()) == {"hashes": [identifier]}
         assert client.post(f"/api/torrents/{identifier}/policy", json={"ratio": 0.5}).status_code == 422
         assert client.post(f"/api/torrents/{identifier}/policy", json={"ratio": 2}).status_code == 200
         assert parse_qs(calls[-1].content.decode())["seedingTimeLimit"] == ["-1"]
@@ -257,7 +339,7 @@ def test_tracker_statistics_are_bounded_private_and_cached(tmp_path, monkeypatch
     def handler(request):
         requests.append(request)
         return httpx.Response(200, json={"username": "tester", "passkey": "private", "autogroup": {"title": "Explorer", "icon": "private-icon"}, "uploadgroup": {"title": "Uploader", "secret": "private"}, "stats": {"uploaded": 123, "ratio": 2, "api_key": "private", "warnings": {"hnr": 2, "manual": 1, "unknown": 100}}})
-    monkeypatch.setattr(features.httpx, "AsyncClient", lambda **kwargs: original(**kwargs, transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr(features.httpx, "AsyncClient", lambda **kwargs: original(**{**kwargs, "transport": httpx.MockTransport(handler)}))
     with TestClient(create_app(tmp_path, "http://testserver")) as client:
         sign_in(client)
         identifier = client.post("/api/trackers", json={"name": "Test", "api_key": "private-key"}).json()["id"]
@@ -281,7 +363,7 @@ def test_missing_tracker_warnings_are_unknown_not_zero(tmp_path, monkeypatch):
     from mediaseed import features
     original = httpx.AsyncClient
     transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"autogroup": {"title": 45}, "stats": {"ratio": 0, "downloaded": 0}}))
-    monkeypatch.setattr(features.httpx, "AsyncClient", lambda **kwargs: original(**kwargs, transport=transport))
+    monkeypatch.setattr(features.httpx, "AsyncClient", lambda **kwargs: original(**{**kwargs, "transport": transport}))
     with TestClient(create_app(tmp_path, "http://testserver")) as client:
         sign_in(client)
         client.post("/api/trackers", json={"name": "Test", "api_key": "synthetic-key"})
@@ -316,7 +398,7 @@ def test_mediavpn_proxy_requires_fresh_readiness_for_start(tmp_path, monkeypatch
         mutations.append(body)
         return httpx.Response(200, json={"status": 204, "body": base64.b64encode(b"").decode()})
 
-    monkeypatch.setattr(module.httpx, "AsyncClient", lambda **kwargs: original_client(**kwargs, transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr(module.httpx, "AsyncClient", lambda **kwargs: original_client(**{**kwargs, "transport": httpx.MockTransport(handler)}))
     with TestClient(create_app(tmp_path / "state", "http://testserver")) as client:
         sign_in(client)
         assert client.put("/api/vpn", json={"provider": "mediavpn", "enabled": True, "profileId": "a" * 24}).status_code == 200
@@ -339,3 +421,68 @@ def test_local_storage_rejects_symlink(tmp_path):
         pytest.skip("Symlink creation unavailable")
     with pytest.raises(ValueError):
         create_app(tmp_path / "data", "http://testserver", downloads_dir=link)
+
+
+def test_insights_search_metadata_and_settings_use_shared_reads_without_secrets(tmp_path,monkeypatch):
+    from mediaseed import features
+    original_client=httpx.AsyncClient
+    calls=[]
+    identifier='a'*40
+    def tracker_handler(request):
+        calls.append(str(request.url.path))
+        assert request.headers['Authorization']=='Bearer synthetic-key'
+        if request.url.path=='/api/user':
+            return httpx.Response(200,json={'username':'synthetic','autogroup':{'title':'Member'},'stats':{'uploaded':100,'downloaded':20,'ratio':5,'buffer':100,'seedbonus':3,'avg_seedtime':4,'total_seedtime':10},'premium':{'type':None,'expires_at':None},'events':{'dm':2,'notifications':1,'tickets':0,'global':[]}})
+        assert request.url.params.get('free')=='100'
+        assert request.url.params.get('doubleup')=='1'
+        assert request.url.params.get('alive')=='1'
+        return httpx.Response(200,json={'data':[{'id':'12','attributes':{'info_hash':identifier,'name':'Legal test','freeleech':'100%','double_upload':True,'seeders':4,'leechers':2,'description':'<b>Safe</b><script>bad()</script>','download_link':'https://nordicbytes.org/torrents/download/private-passkey','files':[{'name':'test','size':10}]}}]})
+    def qbit_handler(request):
+        if request.url.path.endswith('login'):return httpx.Response(204)
+        if request.url.path.endswith('/info'):return httpx.Response(200,json=[{'hash':identifier,'name':'Legal test','uploaded':100,'downloaded':100,'size':100,'progress':1,'added_on':1,'num_leechs':0}])
+        return httpx.Response(200,json={})
+    def factory(**kwargs):
+        kwargs.setdefault('transport',httpx.MockTransport(tracker_handler))
+        return original_client(**kwargs)
+    monkeypatch.setattr(features.httpx,'AsyncClient',factory)
+    with TestClient(create_app(tmp_path,'http://testserver',qbit_password='synthetic',transport=httpx.MockTransport(qbit_handler))) as client:
+        assert client.get('/api/insights').status_code==401
+        assert client.get('/api/torrents/'+identifier+'/media').status_code==401
+        sign_in(client)
+        account=client.post('/api/trackers',json={'name':'Test','api_key':'synthetic-key'}).json()['id']
+        assert client.get('/api/trackers').json()[0]['notifications']['dm']==2
+        path=f'/api/trackers/{account}/search?query=Legal&free=100&double=true&availability=alive'
+        for _ in range(2):assert client.get(path).json()['results'][0]['double_upload'] is True
+        assert calls.count('/api/torrents/filter')==1
+        media=client.get(f'/api/torrents/{identifier}/media').json()['metadata']
+        assert media['description']=='Safe'
+        assert client.get('/api/torrents').status_code==200
+        result=client.get('/api/insights?days=30')
+        assert result.status_code==200 and result.json()['torrentDataFresh'] is True
+        assert len(result.json()['history'][0]['samples'])==1
+        assert result.json()['accounts'][0]['stats']['avg_seedtime']==4
+        assert 'synthetic-key' not in result.text and 'private-passkey' not in result.text
+        assert 'private-passkey' not in json.dumps(media)
+        assert client.put('/api/insights/settings',json={'lowBufferGiB':5}).status_code==200
+        assert client.get('/api/insights').json()['settings']=={'lowBufferGiB':5}
+        assert client.put('/api/insights/settings',json={'lowBufferGiB':-1}).status_code==422
+        assert client.get('/api/insights?days=999').status_code==422
+
+
+@pytest.mark.parametrize('status,expected',[(401,502),(429,503)])
+def test_tracker_error_backoff_does_not_repeat_reads_and_key_rotation_retries(tmp_path,monkeypatch,status,expected):
+    from mediaseed import features
+    original=httpx.AsyncClient;calls=[]
+    def handler(request):calls.append(request);return httpx.Response(status,headers={'Retry-After':'60'})
+    def factory(**kwargs):
+        kwargs.setdefault('transport',httpx.MockTransport(handler))
+        return original(**kwargs)
+    monkeypatch.setattr(features.httpx,'AsyncClient',factory)
+    with TestClient(create_app(tmp_path,'http://testserver')) as client:
+        sign_in(client)
+        identifier=client.post('/api/trackers',json={'name':'Test','api_key':'synthetic-key'}).json()['id']
+        for _ in range(2):assert client.get(f'/api/trackers/{identifier}/search').status_code==expected
+        assert len(calls)==1
+        client.put('/api/trackers/'+identifier,json={'name':'Test','api_key':'replacement-key'})
+        assert client.get(f'/api/trackers/{identifier}/search').status_code==expected
+        assert len(calls)==2

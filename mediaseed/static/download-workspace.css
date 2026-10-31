@@ -11,12 +11,14 @@
 .download-route-node > strong { font-size:inherit; min-width:0; max-width:100%; overflow-wrap:anywhere; text-align:center; }
 .download-route-node .route-icon { background:var(--surface); }
 .download-route-link { flex:1; min-width:0; height:20px; }
-.route-packets { position:absolute; z-index:0; height:20px; transform:translateY(-50%); overflow:hidden; pointer-events:none; border-block:1px solid var(--line); }
-.packet-lane { position:absolute; inset:0; }
-.traffic-packet { position:absolute; left:0; display:block; border-radius:2px; background:var(--accent); opacity:.9; animation:route-packet-travel var(--packet-duration) linear infinite both; }
+.route-packets { position:absolute; z-index:0; height:20px; transform:translateY(-50%); overflow:visible; clip-path:inset(-4px 0); pointer-events:none; }
+.route-packets::before,.route-packets::after { content:""; position:absolute; z-index:0; left:0; right:0; height:1px; background:var(--line); transform:translateY(-50%); }
+.route-packets::before { top:0; }.route-packets::after { top:100%; }
+.packet-lane { position:absolute; inset:0; z-index:1; }
+.traffic-packet { position:absolute; left:0; display:block; translate:0 -50%; border-radius:2px; background:var(--accent); opacity:.9; animation:route-packet-travel var(--packet-duration) linear infinite both; }
 .packet-small { width:6px; height:3px; }.packet-medium { width:11px; height:5px; }.packet-large { width:17px; height:7px; }
-.packet-lane-download .traffic-packet { top:2px; }
-.packet-lane-upload .traffic-packet { bottom:2px; background:var(--healthy); animation-direction:reverse; }
+.packet-lane-download .traffic-packet { top:0; }
+.packet-lane-upload .traffic-packet { top:100%; background:var(--healthy); animation-direction:reverse; }
 .download-flow[data-active="false"] .route-packets { visibility:hidden; }
 @keyframes route-packet-travel { from { transform:translateX(-20px); } to { transform:translateX(var(--packet-distance)); } }
 :root[data-reduced-motion="true"] .traffic-packet { animation:none; left:var(--packet-rest); }
@@ -81,3 +83,109 @@
 
 /* Short status cards keep their own height around the wider central tracker. */
 @media(max-width:1100px){.download-status-cards{grid-template-columns:minmax(0,1fr);align-items:start;}}
+
+/* The existing shield gains a quiet heartbeat only with verified, fresh evidence. */
+.route-vpn .route-icon, .connection-vpn .connection-icon { position:relative; }
+.route-vpn .route-icon::before, .connection-vpn .connection-icon::before {
+  content:''; position:absolute; inset:-5px; border:1px solid currentColor;
+  border-radius:inherit; opacity:0; pointer-events:none;
+}
+.download-flow[data-state="active"] .route-vpn .route-icon,
+.connection-flow[data-state="active"] .connection-vpn .connection-icon {
+  color:var(--healthy); border-color:color-mix(in srgb,var(--healthy) 65%,var(--line));
+}
+.download-flow[data-state="active"] .route-vpn .route-icon::before,
+.connection-flow[data-state="active"] .connection-vpn .connection-icon::before { animation:vpn-heartbeat 3.6s ease-in-out infinite; }
+.download-flow[data-state="connecting"] .route-vpn .route-icon,
+.connection-flow[data-state="connecting"] .connection-vpn .connection-icon { color:var(--accent); border-style:dashed; }
+.download-flow[data-state="blocked"] .route-vpn .route-icon,
+.connection-flow[data-state="blocked"] .connection-vpn .connection-icon { color:var(--theme-danger,var(--muted)); }
+.download-flow:not([data-state="active"]) .route-vpn svg path:last-child,
+.connection-flow:not([data-state="active"]) .connection-vpn svg path:last-child { visibility:hidden; }
+.vpn-connection-details { margin-top:12px; font-size:.8rem; color:var(--muted); }
+.vpn-connection-details > summary { cursor:pointer; width:fit-content; margin-inline:auto; padding:6px; }
+.vpn-connection-details .connection-details { padding-block:12px 4px; }
+@keyframes vpn-heartbeat { 0%,100% { opacity:.12; transform:scale(.98); } 50% { opacity:.5; transform:scale(1.1); } }
+/* Hidden routes consume no motion budget; reduced motion retains the state colours. */
+.download-flow[hidden] *, .download-flow[hidden] *::before,
+.connection-flow[hidden] *, .connection-flow[hidden] *::before,
+html[data-page-hidden="true"] .download-flow *, html[data-page-hidden="true"] .download-flow *::before,
+html[data-page-hidden="true"] .connection-flow *, html[data-page-hidden="true"] .connection-flow *::before { animation-play-state:paused!important; }
+html[data-reduced-motion="true"] .route-icon::before,
+html[data-reduced-motion="true"] .connection-icon::before,
+html[data-reduced-motion="true"] .connection-flow .binary-lane b { animation:none!important; }
+@media(prefers-reduced-motion:reduce) {
+  .route-icon::before,.connection-icon::before { animation:none!important; }
+}
+
+/* Andedammen: the measured transfer lanes become a small stream. */
+:root[data-look="duck-pond"] .download-route .route-packets {
+  height:32px; border-radius:48% 52% 45% 55% / 24% 34% 28% 32%;
+  background:linear-gradient(180deg,#315e50aa,#173f3be6 48%,#397b695c);
+  box-shadow:inset 0 1px #89c2a43b,inset 0 -1px #90c7b233;
+  clip-path:inset(-10px 0 round 16px);
+}
+:root[data-look="duck-pond"] .route-packets::before,
+:root[data-look="duck-pond"] .route-packets::after {
+  height:7px; background:none; border-top:1px solid #a0dbc52e;
+  border-radius:50%; transform:skewX(-24deg); top:24%;
+}
+:root[data-look="duck-pond"] .route-packets::after {top:68%;left:8%;right:5%;}
+:root[data-look="duck-pond"] .route-packets .traffic-packet {
+  width:26px;height:20px;background:none;opacity:1;
+  animation-duration:calc(var(--packet-duration) * 1.6);
+}
+:root[data-look="duck-pond"] .route-packets .packet-small {width:21px;height:17px;}
+:root[data-look="duck-pond"] .route-packets .packet-large {width:32px;height:25px;}
+:root[data-look="duck-pond"] .packet-lane-download .traffic-packet {top:22%;}
+:root[data-look="duck-pond"] .packet-lane-upload .traffic-packet {top:77%;}
+:root[data-look="duck-pond"] .traffic-packet::before {
+  content:"";position:absolute;inset:-6px -2px 0;
+  background:url("themes/duck.svg") center/contain no-repeat;
+  animation:river-swimmer-bob 2.2s ease-in-out infinite alternate;
+}
+:root[data-look="duck-pond"] .packet-lane-upload .traffic-packet::before {scale:-1 1;}
+:root[data-look="duck-pond"] .traffic-packet::after {
+  content:"";position:absolute;left:-15%;right:-15%;height:5px;bottom:-1px;
+  border:1px solid #b1e4cd55;border-top-color:transparent;border-radius:50%;
+}
+/* Keep the stream legible even at very high throughput. Hidden swimmers retain
+   their animation events so the existing rate-based retirement still works. */
+:root[data-look="duck-pond"] .traffic-packet:nth-child(n+9) {visibility:hidden;}
+@keyframes river-swimmer-bob {from{transform:translateY(-1px) rotate(-3deg);}to{transform:translateY(1px) rotate(3deg);}}
+:root[data-look="duck-pond"] .duck-pond-scene[data-paused="true"] ~ * .route-packets *,
+:root[data-look="duck-pond"] .duck-pond-scene[data-paused="true"] ~ * .route-packets *::before {animation-play-state:paused!important;}
+:root[data-look="duck-pond"][data-reduced-motion="true"] .traffic-packet::before {animation:none;}
+@media(prefers-reduced-motion:reduce) {:root[data-look="duck-pond"] .traffic-packet::before {animation:none;}}
+@media(max-width:650px) {
+  :root[data-look="duck-pond"] .route-packets .traffic-packet {width:19px;height:16px;}
+  :root[data-look="duck-pond"] .route-packets .packet-small {width:16px;height:14px;}
+  :root[data-look="duck-pond"] .route-packets .packet-large {width:23px;height:19px;}
+  :root[data-look="duck-pond"] .traffic-packet:nth-child(n+5) {visibility:hidden;}
+}
+
+/* VPN boarding shares the packet's duration, delay and travel direction. */
+:root[data-look="duck-pond"] .traffic-packet::before {
+  animation:river-duck-board-down calc(var(--packet-duration) * 1.6) linear infinite both;
+  animation-delay:inherit;
+}
+:root[data-look="duck-pond"] .traffic-packet::after {
+  z-index:-1;left:-18%;right:-18%;height:11px;bottom:3px;border:0;
+  background:conic-gradient(from 35deg,transparent 0deg 36deg,#70b58b 38deg 360deg);
+  box-shadow:0 2px 1px #061f2280,inset 0 1px #b7e3ac77;
+  animation:river-leaf-board-down calc(var(--packet-duration) * 1.6) linear infinite both;
+  animation-delay:inherit;
+}
+:root[data-look="duck-pond"] .packet-lane-upload .traffic-packet::before {animation-name:river-duck-board-up;animation-direction:reverse;}
+:root[data-look="duck-pond"] .packet-lane-upload .traffic-packet::after {animation-name:river-leaf-board-up;animation-direction:reverse;}
+@keyframes river-duck-board-down {0%,31%{transform:translateY(0);}33%{transform:translateY(-12px);}35%,100%{transform:translateY(-5px);}}
+@keyframes river-duck-board-up {0%,31%{transform:translateY(-5px);}33%{transform:translateY(-12px);}35%,100%{transform:translateY(0);}}
+@keyframes river-leaf-board-down {0%,31%{opacity:0;}35%,100%{opacity:1;}}
+@keyframes river-leaf-board-up {0%,31%{opacity:1;}35%,100%{opacity:0;}}
+:root[data-look="duck-pond"] .duck-pond-scene[data-paused="true"] ~ * .route-packets *::after {animation-play-state:paused!important;}
+:root[data-look="duck-pond"][data-reduced-motion="true"] .traffic-packet::before {animation:none;transform:translateY(-5px);}
+:root[data-look="duck-pond"][data-reduced-motion="true"] .traffic-packet::after {animation:none;opacity:1;}
+@media(prefers-reduced-motion:reduce) {
+  :root[data-look="duck-pond"] .traffic-packet::before {animation:none;transform:translateY(-5px);}
+  :root[data-look="duck-pond"] .traffic-packet::after {animation:none;opacity:1;}
+}

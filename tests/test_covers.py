@@ -30,7 +30,7 @@ def test_pagination_only_caches_exact_match_and_verified_flags(tmp_path):
             return {"data": [{"attributes": {"info_hash": "b" * 40, "meta": {"poster": poster}}}], "links": {"next": "https://nordicbytes.org/api/torrents/filter?cursor=next"}}
         return {"data": [{"attributes": {"info_hash": "a" * 40, "featured": True, "freeleech": 0, "meta": {"poster": poster}}}]}
     async def qbit(path, payload):
-        return httpx.Response(200, json=[{"hash": "a" * 40, "name": "Test.Release"}])
+        return httpx.Response(200, json=[{"hash": "a" * 40, "name": "Test.Release", "tracker": "https://t.nordicbytes.org/announce"}])
     cache = Covers(tmp_path, lambda kind: [{"id": "test", "name": "Test account"}], tracker_read, qbit)
     async def download(url, path):
         downloads.append(url)
@@ -44,3 +44,22 @@ def test_pagination_only_caches_exact_match_and_verified_flags(tmp_path):
     assert evidence["freeleech"] == 100 and evidence["doubleUpload"] is True
     asyncio.run(cache.tick())
     assert len(calls) == 2
+
+def test_bad_first_account_does_not_hide_second_account_metadata(tmp_path):
+    from fastapi import HTTPException
+    from mediaseed.covers import Covers
+    import asyncio
+    import httpx
+    identifier='a'*40
+    calls=[]
+    async def read(account,path,params):
+        calls.append(account['id'])
+        if account['id']=='bad':raise HTTPException(502,'Tracker API key lacks access')
+        return {'data':[{'attributes':{'info_hash':identifier,'name':'Test','freeleech':'100%'}}]}
+    async def qbit(*args,**kwargs):return httpx.Response(200,json=[{'hash':identifier,'name':'Test','tracker':'https://t.nordicbytes.org/announce'}])
+    covers=Covers(tmp_path,lambda kind:[{'id':'bad','name':'Bad'},{'id':'good','name':'Good'}],read,qbit)
+    remembered=[];covers.metadata_sink=lambda ident,account,attrs:remembered.append(account['id'])
+    asyncio.run(covers.tick())
+    assert calls==['bad','good']
+    assert remembered==['good']
+    assert covers.path(identifier).with_suffix('.json').is_file()

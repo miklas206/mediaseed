@@ -7,9 +7,9 @@ from test_app import sign_in
 
 def test_dashboard_reuses_one_bounded_sanitized_read_for_queue_and_traffic(tmp_path):
     calls = []
-    rows = [{"hash": "a" * 40, "name": "Synthetic", "state": "downloading", "dlspeed": 4096, "upspeed": 0, "save_path": "private"},
-            {"hash": "b" * 40, "state": "metaDL", "category": "MediaSeed-RSS-test"},
-            {"hash": "c" * 40, "state": "queuedDL"}]
+    rows = [{"hash": "a" * 40, "name": "Synthetic", "state": "downloading", "dlspeed": 4096, "upspeed": 0, "save_path": "private", "tracker": "https://t.polarswarm.org/private-passkey/announce"},
+            {"hash": "b" * 40, "state": "metaDL", "category": "MediaSeed-RSS-test", "tracker": "https://t.polarswarm.org.attacker.test/private"},
+            {"hash": "c" * 40, "state": "queuedDL", "tracker": "http://[malformed"}]
 
     def handler(request):
         calls.append(request)
@@ -29,6 +29,7 @@ def test_dashboard_reuses_one_bounded_sanitized_read_for_queue_and_traffic(tmp_p
         snapshot = response.json()
         assert "private" not in response.text and "save_path" not in response.text
         assert snapshot["torrents"][0]["dlspeed"] == 4096
+        assert [row["tracker_provider"] for row in snapshot["torrents"]] == ["nordicbytes", None, None]
         assert snapshot["queue"] == {"active": 2, "limit": 8, "waiting": 1, "rssActive": 1, "manualActive": 1, "boundedView": False}
         assert snapshot["runtime"]["downloadsEnabled"] is False
         assert len(calls) == 4  # One list read and one cached queue-preferences read, with login each.

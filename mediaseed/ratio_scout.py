@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mediaseed.cleanup import source_hashes
 from mediaseed.activity import Activity
+from mediaseed.tracker_sites import download_address
 
 
 class RatioSettings(BaseModel):
@@ -53,7 +54,7 @@ def integer(value):
     return value if type(value) is int and 0 <= value <= 2**63 - 1 else None
 
 
-def candidate(row, settings, now):
+def candidate(row, settings, now, nordic_rules=True):
     """Only API data is accepted; an unknown benefit never becomes freeleech."""
     if not isinstance(row, dict) or not re.fullmatch(
         r"[1-9][0-9]{0,17}", str(row.get("id", ""))
@@ -73,9 +74,10 @@ def candidate(row, settings, now):
     except (ValueError, TypeError, KeyError, OverflowError):
         return None
     featured = a.get("featured") is True
-    double = featured or a.get("double_upload") is True
+    featured_bonus = featured and nordic_rules
+    double = featured_bonus or a.get("double_upload") is True
     # Exclude Green and uncertain dates. A 30-minute margin avoids clock skew.
-    if age < 24 * 3600 + 1800 or (not featured and free != 100):
+    if age < 0 or (nordic_rules and age < 24 * 3600 + 1800) or (not featured_bonus and free != 100):
         return None
     if (
         seeds is None
@@ -107,6 +109,17 @@ def candidate(row, settings, now):
         "featured": featured,
         "checkedAt": now,
     }
+
+
+def opportunity(row):
+    """Relative discovery ranking, never a forecast or credited ratio."""
+    gib=max(0.1,(row.get('size') or 0)/1024**3)
+    demand=(row.get('leechers') or 0)/max(1,row.get('seeders') or 0)
+    return round(demand*(2 if row.get('doubleUpload') else 1)/math.sqrt(gib),3)
+
+
+def opportunity_key(row):
+    return (-opportunity(row),row.get('size') or 0)
 
 
 class RatioScout:
@@ -269,6 +282,8 @@ class RatioScout:
             ).fetchone()[0]
         page_size, deadline = self.scan_state(settings.tracker)
         for row in candidates:
+            row["opportunityScore"] = opportunity(row)
+            row["estimateOnly"] = True
             row["importStatus"] = imports.get(row["hash"])
             row["stale"] = (
                 not 0 <= time.time() - row["checkedAt"] < settings.scanMinutes * 120
@@ -277,7 +292,7 @@ class RatioScout:
             "status": self.status,
             "settings": settings.model_dump(),
             "candidates": sorted(
-                candidates, key=lambda r: (-r["leechers"] / max(1, r["seeders"]), r["size"])
+                candidates, key=opportunity_key
             )[:50],
             "dailyUsed": count,
             "scanMinutes": settings.scanMinutes,
@@ -319,7 +334,7 @@ class RatioScout:
                 matches = [
                     match
                     for row in rows[:page_size]
-                    if (match := candidate(row, settings, time.time()))
+                    if (match := candidate(row, settings, time.time(), account.get("provider","nordicbytes")=="nordicbytes"))
                 ]
                 with self.database() as c:
                     c.execute("DELETE FROM ratio_candidates")
@@ -346,7 +361,7 @@ class RatioScout:
                         m
                         for m in sorted(
                             matches,
-                            key=lambda r: (-r["leechers"] / max(1, r["seeders"]), r["size"]),
+                            key=opportunity_key,
                         )
                         if m["hash"] not in imported
                     ]
@@ -433,7 +448,7 @@ class RatioScout:
         account = self.account(settings)
         data = await self.read(account, "/api/torrents/" + previous["id"])
         source = data.get("data") if isinstance(data, dict) else None
-        fresh = candidate(source, settings, time.time())
+        fresh = candidate(source, settings, time.time(), account.get("provider","nordicbytes")=="nordicbytes")
         if (
             fresh is None
             or fresh["hash"] != previous["hash"]
@@ -441,14 +456,7 @@ class RatioScout:
         ):
             raise HTTPException(409, "Candidate no longer matches; no download started")
         attributes = source["attributes"]
-        address = urlsplit(str(attributes.get("download_link", "")))
-        if (
-            address.scheme != "https"
-            or address.netloc != "nordicbytes.org"
-            or address.fragment
-            or not re.fullmatch(r"/torrents?/download/[^\s]+", address.path)
-        ):
-            raise HTTPException(502, "Tracker did not provide a safe torrent download")
+        address = download_address(account, attributes.get("download_link"))
         if not (await self.vpn_status()).get("downloadsEnabled"):
             raise HTTPException(409, "A verified VPN is required for ratio downloads")
         content = (
@@ -505,6 +513,8 @@ class RatioScout:
         ):
             raise HTTPException(409, "Not enough unreserved storage for this candidate")
         account_data = await self.read(account, "/api/user")
+        if isinstance(account_data, dict) and isinstance(account_data.get("data"), dict):
+            account_data = account_data["data"]
         stats = account_data.get("stats", {}) if isinstance(account_data, dict) else {}
         if not isinstance(stats, dict):
             stats = {}

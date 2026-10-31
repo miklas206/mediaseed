@@ -1,0 +1,78 @@
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE || '@playwright/test');
+(async()=>{const browser=await chromium.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox']});
+const origin=process.env.MEDIASEED_TEST_ORIGIN||'http://127.0.0.1:15392';
+for(const width of [390,1440]){
+ const page=await browser.newPage({ignoreHTTPSErrors:true,viewport:{width,height:1000}}),errors=[],calls=[];let trackerSaved=null;page.on('pageerror',e=>errors.push(e.message));
+ await page.addInitScript(()=>{window.EventSource=class extends EventTarget{close(){}}});
+ const now=Date.now()/1000,hash='a'.repeat(40),torrent={hash,name:'Synthetic release',size:2**30,uploaded:2**31,downloaded:2**30,progress:1,ratio:2,credited_ratio:2,ratio_limit:1,cleanup:{mode:'ratio',ratio:1},state:'stalledUP',added_on:now-86400,num_leechs:0,tracker_provider:'nordicbytes',download_history:{downloaded:2**30,unknownBytes:0,observations:[{bytes:2**30,globalFreeleech:true,freeleech:100,doubleUpload:true,green:false}]}};
+ const stats={ratio:2,buffer:10*2**30,uploaded:100*2**30,downloaded:50*2**30,seedbonus:12,seeding:90,leeching:1,warnings:1,hit_and_runs:0,seeding_size:300*2**30,total_uploads:3,avg_seedtime:20,total_seedtime:2000};
+ const accounts=[{id:'bad',name:'Broken account',status:'error'}, {id:'good',name:'Test tracker',status:'ok',checkedAt:now,stats,ranks:{automatic:'Member'},notifications:{dm:2,notifications:1,tickets:0},premium:{type:null,expiresAt:null},events:[],globalEvents:[]}];
+ const data={accounts,history:[{account:'good',samples:Array.from({length:10},(_,i)=>({at:now-(9-i)*900,stats:{...stats,ratio:1+i/10}}))}],alerts:[{account:'good',kind:'warnings',value:1,createdAt:now}],settings:{lowBufferGiB:10},torrentCheckedAt:now,torrentDataFresh:true,keepSeeding:[{...torrent,seeders:2,leechers:5,reasons:['rare_seed','tracker_demand']}],reviewStorage:[{...torrent,seeders:5,leechers:0,reasons:['local_goal_met','no_observed_demand']}],results:[{source:'manual',torrents:1,size:2**30,totalUpload:2**31,observedUpload:2**29,uploadPerGiB:2}],topTorrents:[{...torrent,observedUpload:2**29}],remainingBytes:2**30,torrentLimit:500};
+ await page.route('**/api/**',async route=>{const req=route.request(),url=new URL(req.url()),path=url.pathname;calls.push(path+url.search);let result=[];
+ if(path==='/api/auth/status')result={needsSetup:false};
+ else if(path==='/api/auth/me')result={username:'synthetic',role:'administrator',language:'da',csrf:'synthetic'};
+ else if(path==='/api/dashboard')result={runtime:{ready:true,downloadsEnabled:true,checkedAt:now},torrents:[torrent],queue:{active:0,limit:8,waiting:0}};
+ else if(path==='/api/trackers/test'){const body=req.postDataJSON();if(body.provider!=='unit3d'||body.base_url!=='https://sagmire.org'||body.api_key!=='synthetic-key')throw Error('Wrong tracker test payload');result={connected:true};}
+ else if(path==='/api/trackers'&&req.method()==='POST'){trackerSaved=req.postDataJSON();result={saved:true,id:'synthetic-tracker'};}
+ else if(path==='/api/trackers')result=accounts;
+ else if(path==='/api/insights')result=data;
+ else if(path==='/api/insights/settings')result={lowBufferGiB:5};
+ else if(path==='/api/storage')result={defaultLocation:'tv',locations:[{id:'tv',label:'TV',filesystemId:'1',available:true,writable:true,totalBytes:3e12,freeBytes:2e12}]};
+ else if(path==='/api/client')result={name:'qBittorrent',version:'v5.2.4'};
+ else if(path.endsWith('/details'))result={properties:{total_downloaded:2**30,total_uploaded:2**31},credit:{},cleanup:{mode:'never'},files:[],trackers:[],peers:[]};
+ else if(path.endsWith('/media'))result={metadata:{name:'Synthetic release',category:'TV',resolution:'1080p',genres:'Drama',release_year:'2026',seeders:4,leechers:2,times_completed:100,checkedAt:now,description:'Safe plain text',media_info:'Video: H.264',labels:[{name:'Danish'}],screenshots:[{url:'https://example.org/screenshot.png'}],files:[{name:'test.mkv',size:2**30}],imdb_id:123}};
+ else if(path.includes('/search')){if(url.searchParams.get('free')!=='100'||url.searchParams.get('double')!=='true')throw Error('Search filters missing');result={results:[{id:'1',name:'Test search release',size:2**30,seeders:5,leechers:4,category:'TV',resolution:'1080p',freeleech:100,double_upload:true}]};}
+ else if(path==='/api/ratio-scout')result={settings:{enabled:false,automatic:false},candidates:[],scanMinutes:10,resultLimit:10,dailyUsed:0};
+ await route.fulfill({json:result});
+ });
+ await page.goto(origin+'/static/index.html');await page.locator('#workspace').waitFor({state:'visible'});
+ data.keepSeeding=Array.from({length:10},(_,i)=>({...data.keepSeeding[0],name:'Synthetic long torrent name '.repeat(4)+i}));
+ await page.locator('[data-view=trackers]').click();await page.locator('#insight-account').selectOption('good');await page.locator('.history-line').waitFor();
+ if(await page.locator('#insight-account').inputValue()!=='good')throw Error('Bad default account');
+ if(await page.locator('.insight-chart .history-line').count()!==1)throw Error('Missing chart');
+ // Alert indicator must not change MediaHub's 58px dock buttons.
+ await page.evaluate(()=>{document.documentElement.dataset.appNavigation='dock-top';document.querySelector('.insight-indicator').hidden=false;});
+ const geometry=await page.evaluate(()=>{const nav=document.querySelector('#app-navigation');return {height:nav.getBoundingClientRect().height,buttons:[...nav.querySelectorAll('button')].map(b=>b.getBoundingClientRect().height)};});
+ if(geometry.height>76||geometry.buttons.some(h=>Math.abs(h-58)>2))throw Error('Dock height changed: '+JSON.stringify(geometry));
+ if(await page.locator('.insight-facts').first().locator('dt').count()!==6)throw Error('Account summary is not compact');
+ await page.getByText('Kontodetaljer',{exact:true}).click();
+ if(!await page.locator('.tracker-account-summary details').first().evaluate(el=>el.open))throw Error('Account details inaccessible');
+ await page.getByText('Kontodetaljer',{exact:true}).click();
+ await page.locator('[data-view=insights]').click();
+ if(await page.locator('.insight-torrent:visible').count()!==4)throw Error('Suggestions not compact');
+ await page.getByText('Flere forslag',{exact:true}).click();
+ if(await page.locator('.insight-torrent:visible').count()!==11)throw Error('Additional suggestions inaccessible');
+ await page.getByText('Flere forslag',{exact:true}).click();
+ await page.locator('[data-view=trackers]').click();
+ await page.locator('.history-periods [data-period="30"]') .click();await page.waitForTimeout(100);
+ await page.locator('.history-metrics [data-metric=buffer]') .click();
+ await page.getByText('Vis gemte målinger',{exact:true}).click();
+ const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2);if(overflow)throw Error('Viewport overflow at '+width);
+ await page.getByText('Vis gemte målinger',{exact:true}).click();
+ await page.evaluate(()=>scrollTo(0,0));await page.waitForTimeout(100);
+ await page.screenshot({path:'/tmp/mediaseed-insights-'+width+'.png',fullPage:true});
+ await page.locator('[data-view=downloads]').click();
+ torrent.credited_ratio=.16;torrent.last_credited_ratio=.16;await page.evaluate(()=>document.querySelector('#refresh').click());
+ await page.waitForFunction(()=>document.querySelector('#torrents .seed-progress-cell strong')?.textContent.includes('0,16'));
+ torrent.credited_ratio=0;torrent.credit_observation_stale=true;await page.evaluate(()=>document.querySelector('#refresh').click());await page.waitForTimeout(100);
+ if(!(await page.locator('#torrents .seed-progress-cell strong').textContent()).includes('0,16'))throw Error('Stale ratio flickered to zero');
+ if(Math.abs(await page.locator('#torrents progress').evaluate(el=>el.value)-.16)>.001)throw Error('Stale ratio progress flickered');
+ torrent.credit_observation_stale=false;torrent.credited_ratio=.17;torrent.last_credited_ratio=.17;await page.evaluate(()=>document.querySelector('#refresh').click());
+ await page.waitForFunction(()=>document.querySelector('#torrents .seed-progress-cell strong')?.textContent.includes('0,17'));
+ await page.locator('#torrents .torrent-name').first().click();
+ await page.getByRole('tab',{name:'Medieoplysninger',exact:true}).click();await page.getByText('Safe plain text',{exact:true}).waitFor({state:'attached'});
+ if(await page.getByRole('link',{name:'Screenshot 1',exact:true}).getAttribute('rel')!=='noopener noreferrer')throw Error('Unsafe link');
+ await page.locator('#close-details').click();
+ await page.locator('[data-view=trackers]').click();await page.locator('summary').filter({hasText:'Søg efter udgivelser'}).click();await page.locator('#tracker-account').selectOption('good');
+ await page.locator('#tracker-search [name=free]').selectOption('100');await page.locator('#tracker-search [name=double]').selectOption('true');await page.locator('#tracker-search-submit').click();await page.getByText('Test search release',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Tilføj tracker',exact:true}).click();
+ const trackerForm=page.locator('#tracker-form');
+ await trackerForm.locator('[name=name]').fill('Sagmire');await trackerForm.locator('[name=provider]').selectOption('unit3d');
+ await trackerForm.locator('[name=base_url]').fill('https://sagmire.org');await trackerForm.locator('[name=api_key]').fill('synthetic-key');
+ await page.locator('#test-tracker').click();await page.getByText('API-forbindelsen virker. Gem for at tilføje trackeren.',{exact:true}).waitFor();
+ await trackerForm.getByRole('button',{name:'Gem konto',exact:true}).click();
+ await page.waitForTimeout(100);
+ if(trackerSaved?.base_url!=='https://sagmire.org'||trackerSaved.provider!=='unit3d')throw Error('Tracker was not saved correctly');
+ if(errors.length)throw Error(JSON.stringify(errors));console.log(JSON.stringify({width,chart:true,historyPeriod:true,media:true,filteredSearch:true,pageErrors:errors}));await page.close();
+}
+await browser.close();})().catch(e=>{console.error(e);process.exit(1)});

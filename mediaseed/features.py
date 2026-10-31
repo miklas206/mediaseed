@@ -1,27 +1,33 @@
 import asyncio
+import base64
+import hashlib
 import json
 import math
 import re
 import secrets
 import time
 from typing import Literal
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 
 import httpx
 from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from mediaseed.cleanup import source_hashes, CleanupPolicy
-from mediaseed.covers import Covers
+from mediaseed.cleanup import source_hashes, CleanupPolicy, announce_hosts
+from mediaseed.covers import Covers, matching_attributes
 from mediaseed.swarm import SwarmMonitor
-from mediaseed.intelligence import Intelligence
 from mediaseed.rss_worker import RssWorker
-from mediaseed.ratio_scout import RatioScout, RatioSettings
 from mediaseed.activity import Activity
 from mediaseed import feed_uploads, feed_series
 from mediaseed.nordic_ranks import rank_progress
+from mediaseed.tracker_events import global_events
+from mediaseed.download_history import DownloadHistory
 from mediaseed.background import run_background
+from mediaseed.traffic_history import TrafficHistory
+from mediaseed.intelligence import Intelligence, metadata, text
+from mediaseed.tracker_reads import TrackerReads
+from mediaseed.tracker_sites import origin, identity, normalize_origin, download_address, secure_client, account_data, matching_accounts
 
 
 class SeedingPolicy(BaseModel):
@@ -86,8 +92,20 @@ class FeedSettings(BaseModel):
 class TrackerSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     name: str = Field(min_length=1, max_length=80)
-    provider: str = Field(default="nordicbytes", pattern="^nordicbytes$")
-    api_key: str = Field(default="", max_length=512)
+    provider: str = Field(default="nordicbytes", pattern="^(nordicbytes|unit3d)$")
+    base_url: str = Field(default="", max_length=300)
+    api_key: str = Field(default="", max_length=512, pattern=r"^[^\x00-\x20\x7f]*$")
+
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def trim_key(cls, value):
+        return value.strip() if isinstance(value,str) else value
+
+    @field_validator("base_url")
+    @classmethod
+    def website(cls, value):
+        return normalize_origin(value) if value else value
+
 
 
 def queue_summary(torrents, limit=None):
@@ -132,9 +150,19 @@ async def add_stopped(qbit, ratio, content=None, magnet=None, start=False, vpn_s
 
 
 
+class InsightSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    lowBufferGiB: int = Field(default=10,ge=0,le=100000,strict=True)
+
+
 def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=None, cleanup=None, credit=None, storage=None):
+    from mediaseed.torrent_import import install_import_status
+    install_import_status(app,authorized,qbit,storage,cleanup)
     tracker_cache = {}
     intelligence = Intelligence(database)
+    traffic = TrafficHistory(database)
+    shared_reads = TrackerReads()
+    app.state.tracker_reads = shared_reads
     activity = Activity(database)
 
     @app.get("/api/activity")
@@ -166,6 +194,7 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         if identifier and existing is None:
             raise HTTPException(404, "Settings not found")
         secret = "url" if kind == "feeds" else "api_key"
+        incoming_key = bool(payload.get(secret))
         if not payload[secret]:
             if not existing:
                 raise HTTPException(422, "A source credential is required")
@@ -176,6 +205,17 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
                     raise HTTPException(409, "Download folder is unavailable or read-only")
                 storage.destination(payload["location"], payload["folder"])
             payload["enabled"] = existing.get("enabled", False) if existing else False
+        if kind == "trackers":
+            if payload["provider"] == "nordicbytes":
+                if payload.get("base_url") not in ("", "https://nordicbytes.org"):
+                    raise HTTPException(422, "Choose UNIT3D for another tracker website")
+                payload["base_url"] = "https://nordicbytes.org"
+            elif not payload.get("base_url"):
+                raise HTTPException(422, "A tracker website address is required")
+            elif payload["base_url"] == "https://nordicbytes.org":
+                payload["provider"] = "nordicbytes"
+            if existing and origin(existing) != origin(payload) and not incoming_key:
+                raise HTTPException(422, "Enter an API key when changing tracker website")
         identifier = identifier or secrets.token_hex(12)
         with database() as connection:
             connection.execute("INSERT INTO settings VALUES (?,?,?) ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload", (kind, identifier, json.dumps(payload)))
@@ -187,31 +227,73 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
             raise HTTPException(404, "Tracker account not found")
         return account
 
-    async def tracker_read(account, path, params=None, binary=False):
+    async def fetch_tracker(account, path, params=None, binary=False):
         limit = 4 * 1024 * 1024 if binary else 1024 * 1024
+        credential=identity(account)
+        denied=shared_reads.blocked.get(credential)
+        if not binary and denied and time.monotonic()<denied[0]:
+            raise HTTPException(denied[1],denied[2])
         try:
-            async with httpx.AsyncClient(timeout=10, follow_redirects=False, trust_env=False) as client:
-                headers = {} if binary else {"Authorization": "Bearer " + account["api_key"], "Accept": "application/json"}
-                async with client.stream("GET", "https://nordicbytes.org" + path, params=params, headers=headers) as response:
-                    if response.status_code in (401, 403):
-                        raise HTTPException(502, "Tracker API key lacks access")
-                    if response.status_code == 429:
-                        raise HTTPException(503, "Tracker rate limit reached; try again later")
-                    if response.status_code != 200:
-                        raise HTTPException(502, "Tracker request failed")
-                    content = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        content.extend(chunk)
-                        if len(content) > limit:
-                            raise HTTPException(502, "Tracker response is too large")
+            if shared_reads.client is None:
+                shared_reads.client = secure_client(httpx.AsyncClient(timeout=10, follow_redirects=False, trust_env=False))
+            client = shared_reads.client
+            headers = {"Cookie":""} if binary else {"Authorization": "Bearer " + account["api_key"], "Accept": "application/json", "Cookie":""}
+            async with client.stream("GET", origin(account) + path, params=params, headers=headers) as response:
+                if response.status_code in (401, 403):
+                    shared_reads.blocked[credential]=(time.monotonic()+60,502,"Tracker API key lacks access")
+                    if len(shared_reads.blocked)>100: shared_reads.blocked.pop(next(iter(shared_reads.blocked)))
+                    raise HTTPException(502, "Tracker API key lacks access")
+                if response.status_code == 429:
+                    retry=response.headers.get('Retry-After','60')
+                    retry=int(retry) if retry.isdecimal() else 60
+                    shared_reads.blocked[credential]=(time.monotonic()+max(1,min(300,retry)),503,"Tracker rate limit reached; try again later")
+                    raise HTTPException(503, "Tracker rate limit reached; try again later")
+                if response.status_code == 404 and path == "/api/user":
+                    raise HTTPException(502, "This tracker does not provide a compatible account API")
+                if response.status_code != 200:
+                    raise HTTPException(502, "Tracker request failed")
+                content = bytearray()
+                async for chunk in response.aiter_bytes():
+                    content.extend(chunk)
+                    if len(content) > limit:
+                        raise HTTPException(502, "Tracker response is too large")
             return bytes(content) if binary else json.loads(content)
         except (httpx.HTTPError, ValueError):
             raise HTTPException(502, "Tracker unavailable or invalid response") from None
 
+    async def tracker_read(account, path, params=None, binary=False, cache_seconds=0):
+        if binary:
+            return await fetch_tracker(account,path,params,binary=True)
+        return await shared_reads.read(account,path,params,lambda: fetch_tracker(account,path,params),ttl=cache_seconds)
+
+    async def cached_tracker_read(account,path,params=None):
+        return await tracker_read(account,path,params,cache_seconds=30)
+
+    @app.get("/api/insights")
+    def insights(days: int = Query(default=7,ge=1,le=90), session=Depends(authorized)):
+        return {**intelligence.public(tracker_overview(),days), 'traffic':traffic.public(days)}
+
+    @app.put("/api/insights/settings")
+    def insight_settings(body: InsightSettings, session=Depends(authorized)):
+        if session.get('role') != 'administrator':
+            raise HTTPException(403,'Administrator access required')
+        return intelligence.configure(body.model_dump())
+
+    @app.get("/api/torrents/{identifier}/media")
+    def torrent_media(identifier: str, session=Depends(authorized)):
+        return {"metadata":intelligence.media(torrent_hash(identifier))}
+
     @app.get("/api/trackers/{identifier}/search")
-    async def tracker_search(identifier: str, query: str = Query(default="", max_length=200), session=Depends(authorized)):
+    async def tracker_search(identifier: str, query: str = Query(default="", max_length=200), free: int | None = Query(default=None,ge=0,le=100), double: bool = False, featured: bool = False, availability: Literal["all","alive","dead"] = "all", session=Depends(authorized)):
         account = tracker_account(identifier)
-        data = await tracker_read(account, "/api/torrents/filter", {"name": query, "perPage": 50})
+        params={"name": query, "perPage": 50}
+        if free is not None:
+            if free not in {0,25,50,75,100}: raise HTTPException(422,'Choose a supported freeleech percentage')
+            params['free']=free
+        if double: params['doubleup']=1
+        if featured: params['featured']=1
+        if availability!='all': params[availability]=1
+        data = await tracker_read(account, "/api/torrents/filter", params, cache_seconds=30)
         if not isinstance(data, dict) or not isinstance(data.get("data"), list):
             raise HTTPException(502, "Invalid tracker search response")
         results = []
@@ -225,47 +307,53 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
             for field in ("size", "seeders", "leechers"):
                 value = attributes.get(field)
                 result[field] = value if type(value) is int and 0 <= value <= 2**63 - 1 else None
+            public_metadata=metadata(attributes)
+            result.update({key:public_metadata[key] for key in ['category','resolution','release_year','freeleech','double_upload','featured','internal','refundable','genres']})
+            identifier_hash=str(attributes.get('info_hash','')).lower()
+            intelligence.remember(identifier_hash,account,attributes)
             results.append(result)
-        return {"results": results, "limit": 50, "downloadsEnabled": False}
+        return {"results": results, "limit": 50, "downloadsEnabled": False, "checkedAt":time.time(), "bounded":True}
 
     def tracker_username(identifier):
         cached = tracker_cache.get(identifier)
         account = next((a for a in rows("trackers") if a["id"] == identifier), None)
-        return cached["public"].get("username") if cached and account and cached["key"] == account["api_key"] and time.monotonic() - cached["checked"] < 360 and cached["public"].get("status") == "ok" else None
-    covers = Covers(data_dir, rows, tracker_read, qbit, username=tracker_username) if data_dir else None
+        return cached["public"].get("username") if cached and account and cached["key"] == identity(account) and time.monotonic() - cached["checked"] < 360 and cached["public"].get("status") == "ok" else None
+    covers = Covers(data_dir, rows, cached_tracker_read, qbit, username=tracker_username) if data_dir else None
+    rss_worker = RssWorker(database, rows, qbit, vpn_status, storage=storage) if vpn_status else None
+    if rss_worker:
+        rss_worker.cleanup = cleanup
     if covers:
         covers.metadata_sink = intelligence.remember
         covers.metadata_source = intelligence.media
 
-    @app.get("/api/torrents/{identifier}/media")
-    def torrent_media(identifier: str, session=Depends(authorized)):
-        return {"metadata": intelligence.media(torrent_hash(identifier))}
-
-    rss_worker = RssWorker(database, rows, qbit, vpn_status, storage=storage) if vpn_status else None
-    if rss_worker:
-        rss_worker.cleanup = cleanup
-    scout = RatioScout(database, rows, tracker_read, qbit, vpn_status, storage, add_stopped, covers, credit) if vpn_status and storage else None
-
-    @app.get("/api/ratio-scout")
-    def ratio_candidates(session=Depends(authorized)):
-        if scout is None:
-            raise HTTPException(409, "Ratio discovery requires configured storage and VPN")
-        return scout.public()
-
-    @app.put("/api/ratio-scout/settings")
-    async def ratio_settings(body: RatioSettings, session=Depends(authorized)):
-        if scout is None:
-            raise HTTPException(409, "Ratio discovery requires configured storage and VPN")
-        return await scout.save(body)
-
-    @app.post("/api/ratio-scout/{identifier}/add")
-    async def ratio_add(identifier: str, session=Depends(authorized)):
-        if scout is None or not re.fullmatch(r"[a-f0-9]{32}", identifier):
-            raise HTTPException(404, "Candidate not found; wait for the next scan")
-        return await scout.add(identifier)
+    @app.post("/api/torrents/{identifier}/metadata/refresh", status_code=202)
+    async def refresh_torrent_metadata(identifier: str, session=Depends(authorized)):
+        if session.get("role") == "viewer":
+            raise HTTPException(403, "Operator access required")
+        identifier = torrent_hash(identifier)
+        torrents = await read_json("/api/v2/torrents/info", {"hashes": identifier})
+        torrent = next((row for row in torrents if isinstance(row, dict) and str(row.get("hash", "")).lower() == identifier), None) if isinstance(torrents, list) else None
+        if torrent is None:
+            raise HTTPException(404, "Torrent not found")
+        if not covers:
+            raise HTTPException(409, "Tracker metadata refresh is unavailable")
+        result = await covers.refresh(torrent)
+        if result == "unavailable":
+            raise HTTPException(409, "Configure a matching tracker API account to fetch images and metadata")
+        if result == "cooldown":
+            raise HTTPException(429, "Tracker refresh already requested; try again in five minutes")
+        if result != "queued":
+            raise HTTPException(503, "Metadata refresh queue is busy; try again later")
+        # Discard short-lived search responses so a formerly unpublished upload
+        # can be discovered on the next worker tick.
+        credentials = {identity(account) for account in matching_accounts(rows("trackers")[:10], torrent.get("tracker"))}
+        for key in list(shared_reads.saved):
+            if key[0] in credentials:
+                shared_reads.saved.pop(key, None)
+        return {"status": "queued"}
 
     async def verify_badges(identifier, title):
-        for account in rows("trackers")[:3]:
+        for account in [a for a in rows("trackers") if a.get("provider","nordicbytes")=="nordicbytes"][:3]:
             result = await tracker_read(account, "/api/torrents/filter", {"name": title[:200], "perPage": 50})
             for row in result.get("data", [])[:50]:
                 attributes = row.get("attributes", {})
@@ -285,7 +373,7 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
             if len(content) > 4 * 1024 * 1024:
                 raise HTTPException(413, "Torrent file exceeds 4 MiB")
         if request.headers.get("content-type", "").startswith("application/x-bittorrent"):
-            metadata = source_hashes(content=bytes(content), include_metadata=True)
+            metadata = source_hashes(content=bytes(content), include_metadata=True, include_trackers=True)
         else:
             try:
                 body = json.loads(content)
@@ -295,29 +383,71 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
                 hashes = source_hashes(magnet=magnet)
                 if not hashes or any(not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", value) for value in hashes):
                     raise ValueError()
-                metadata = {"name": None, "size": None, "hashes": hashes}
+                metadata = {"name": parse_qs(urlsplit(magnet).query).get("dn", [None])[0], "size": None, "hashes": hashes,
+                            "tracker_hosts": announce_hosts({b"announce-list":[[v.encode() for v in parse_qs(urlsplit(magnet).query).get("tr",[])]]})}
             except (KeyError, ValueError, TypeError):
                 raise HTTPException(422, "Invalid torrent source") from None
-        evidence = next((benefits(value, session={}) for value in metadata["hashes"] if benefits(value, session={}).get("status") == "matched"), {})
-        pending = False
-        if covers and not evidence:
-            for value in metadata['hashes']:
-                pending = covers.enqueue(value, metadata.get('name')) or pending
-        size = metadata["size"] if metadata["size"] is not None else evidence.get("size")
-        estimates = []
-        if type(size) is int and size >= 0:
-            for account in tracker_overview():
-                stats = account.get("stats")
-                if account["status"] != "ok" or not stats or not account.get("checkedAt") or time.time() - account["checkedAt"] > 600:
-                    continue
-                uploaded, downloaded = stats.get("uploaded"), stats.get("downloaded")
-                if type(uploaded) not in (int, float) or type(downloaded) not in (int, float) or not all(math.isfinite(value) for value in (uploaded, downloaded)) or min(uploaded, downloaded) < 0:
-                    continue
-                discount = evidence.get("freeleech") if evidence.get("tracker") == account["name"] else None
-                charged = size * (1 - discount / 100) if discount in {0,25,50,75,100} else size
-                estimates.append({"name": account["name"], "current": uploaded / downloaded if downloaded else None,
-                                  "projected": uploaded / (downloaded + charged) if downloaded + charged else None, "accountId": account["id"], "uploaded":uploaded, "downloaded":downloaded, "charged":charged})
-        return {"name": metadata["name"], "size": size, "estimates": estimates, "benefits": evidence, "metadataPending": pending}
+        selected = {}
+        for host in metadata.get("tracker_hosts",[]):
+            for account in matching_accounts(rows("trackers"), "https://"+host+"/announce"):
+                selected[account["id"]] = account
+        response = {"name":metadata["name"],"size":metadata["size"],"estimates":[],"benefits":{},"metadataPending":False}
+        if len(selected) != 1:
+            return {**response,"lookupStatus":"tracker_unknown" if not selected else "tracker_ambiguous"}
+        account = next(iter(selected.values()))
+        response["tracker"] = {"id":account["id"],"name":account["name"]}
+        try:
+            attributes = None
+            name = re.sub(r"\.(?:mkv|mp4|avi|m4v|iso)$", "", metadata.get("name") or "", flags=re.I)[:200]
+            prefix = re.split(r"[ ._-](?:19|20)\d{2}(?:[ ._-]|$)",name,maxsplit=1)[0]
+            names = list(dict.fromkeys(filter(None,[name,re.sub(r"[._]+"," ",name),prefix,re.sub(r"[._]+"," ",prefix)])))
+            queries = [{"name":name,"perPage":50} for name in names] if names else [{"info_hash":metadata["hashes"][0],"perPage":50}]
+            budget = 6
+            for query in queries:
+                cursor = None
+                for page in range(2):
+                    if not budget: break
+                    budget -= 1
+                    params = {**query,**({"cursor":cursor} if cursor else {})}
+                    result = await tracker_read(account,"/api/torrents/filter",params,cache_seconds=30)
+                    attributes = next((a for identifier in metadata["hashes"] if (a:=matching_attributes(result,identifier))),None)
+                    if attributes: break
+                    meta = result.get("meta",{}) if isinstance(result,dict) else {}
+                    cursor = meta.get("next_cursor") if isinstance(meta,dict) else None
+                    if not isinstance(cursor,str) or not 0 < len(cursor) <= 2048: break
+                if attributes or not budget: break
+            if not attributes:
+                return {**response,"lookupStatus":"torrent_unmatched"}
+            api_size = attributes.get("size")
+            if type(api_size) is not int or api_size < 0 or (metadata["size"] is not None and metadata["size"] != api_size):
+                return {**response,"lookupStatus":"torrent_unmatched"}
+            current = (await refresh_accounts([account]))[0]
+            stats = current.get("stats") or {}
+            if current.get("status") != "ok":
+                return {**response,"lookupStatus":"api_unavailable"}
+            identifier = str(attributes["info_hash"]).lower()
+            if covers:
+                covers.remember(identifier,account,attributes)
+                response["benefits"] = benefits(identifier,session={})
+            events = current.get("globalEvents")
+            global_free = any(e.get("type")=="global_freeleech" and DownloadHistory.end(e.get("endsAt"))>time.time() for e in events) if isinstance(events,list) else None
+            response["benefits"]["globalFreeleech"] = global_free
+            free = response["benefits"].get("freeleech")
+            charged = 0 if global_free is True or free == 100 else api_size*(1-free/100) if free in {0,25,50,75} and global_free is False else None
+            uploaded, downloaded = stats.get("uploaded"),stats.get("downloaded")
+            if any(type(value) not in (int,float) or not math.isfinite(value) or value<0 for value in (uploaded,downloaded)):
+                return {**response,"lookupStatus":"api_unavailable"}
+            current_ratio = stats.get("ratio")
+            if type(current_ratio) not in (int,float) or not math.isfinite(current_ratio) or current_ratio < 0:
+                current_ratio = uploaded/downloaded if downloaded else None
+            response.update(size=api_size,lookupStatus="matched",estimates=[{
+                "name":account["name"],"accountId":account["id"],"uploaded":uploaded,"downloaded":downloaded,
+                "current":current_ratio,
+                "projected":current_ratio if charged==0 else uploaded/(downloaded+charged) if charged is not None and downloaded+charged else None,
+                "charged":charged,"chargeKnown":charged is not None,"globalFreeleech":global_free}])
+            return response
+        except HTTPException:
+            return {**response,"lookupStatus":"api_unavailable"}
 
     @app.get("/api/feeds/{identifier}/history")
     def feed_history(identifier: str, page: int = Query(default=1,ge=1,le=100000), pageSize: int = Query(default=25,ge=1,le=50),
@@ -358,28 +488,45 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
         except (ValueError, OSError, TypeError):
             return {"status": "unknown"}
 
-    @app.post("/api/trackers/{identifier}/torrents/{torrent_id}")
-    async def tracker_import(identifier: str, torrent_id: str, body: SeedingPolicy, session=Depends(authorized)):
+    async def tracker_file(identifier, torrent_id):
         if not re.fullmatch(r"[1-9][0-9]{0,17}", torrent_id):
             raise HTTPException(422, "Invalid tracker torrent ID")
         account = tracker_account(identifier)
         data = await tracker_read(account, "/api/torrents/" + torrent_id)
-        row = data.get("data") if isinstance(data, dict) else None
+        row = data.get("data", data) if isinstance(data, dict) else None
         attributes = row.get("attributes") if isinstance(row, dict) else None
         if not isinstance(attributes, dict) or str(row.get("id")) != torrent_id:
             raise HTTPException(502, "Invalid tracker torrent response")
         link = attributes.get("download_link")
         if not isinstance(link, str) or len(link) > 4096:
             raise HTTPException(502, "Tracker did not provide a torrent download")
-        address = urlsplit(link)
-        if address.scheme != "https" or address.netloc != "nordicbytes.org" or address.fragment or not address.path.startswith("/torrents/download/"):
-            raise HTTPException(502, "Unsafe tracker download address")
+        address = download_address(account, link)
         content = await tracker_read(account, address.path + ("?" + address.query if address.query else ""), binary=True)
         if not content.startswith(b"d") or not content.endswith(b"e"):
             raise HTTPException(502, "Tracker did not return a torrent file")
+        hashes = source_hashes(content=content)
+        if not hashes:
+            raise HTTPException(502, "Tracker did not return a torrent file")
+        expected_hash = str(attributes.get("info_hash", "")).lower()
+        if expected_hash and expected_hash not in hashes:
+            raise HTTPException(502, "Torrent file does not match the selected release")
         if covers:
-            for info_hash in source_hashes(content=content):
+            for info_hash in hashes:
                 covers.remember(info_hash, account, attributes)
+        return content, attributes
+
+    @app.post("/api/trackers/{identifier}/torrents/{torrent_id}/prepare")
+    async def tracker_prepare(identifier: str, torrent_id: str, session=Depends(authorized)):
+        content, attributes = await tracker_file(identifier, torrent_id)
+        name = attributes.get("name")
+        name = re.sub(r'[\\/:*?"<>|\x00-\x1f\x7f]', '_', name if isinstance(name, str) else 'download')[:220].strip(' .') or 'download'
+        if not name.lower().endswith('.torrent'):
+            name += '.torrent'
+        return {"name": name, "base64": base64.b64encode(content).decode('ascii')}
+
+    @app.post("/api/trackers/{identifier}/torrents/{torrent_id}")
+    async def tracker_import(identifier: str, torrent_id: str, body: SeedingPolicy, session=Depends(authorized)):
+        content, _ = await tracker_file(identifier, torrent_id)
         await add_stopped(qbit, body.ratio, content=content)
         return {"added": True, "stopped": True, "downloadsEnabled": False}
 
@@ -492,19 +639,16 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
     def edit_feed(identifier: str, body: FeedSettings, session=Depends(authorized)):
         return save("feeds", body.model_dump(), identifier)
 
-    @app.get("/api/trackers")
-    async def accounts(session=Depends(authorized)):
+    async def refresh_accounts(selected=None):
         results = []
         async with tracker_lock:
-            for account in rows("trackers")[:10]:
+            for account in (selected if selected is not None else rows("trackers")[:10]):
                 cached = tracker_cache.get(account["id"])
-                if not cached or cached["key"] != account["api_key"] or time.monotonic() - cached["checked"] >= 60:
+                if not cached or cached["key"] != identity(account) or time.monotonic() - cached["checked"] >= 60:
                     try:
-                        data = await tracker_read(account, "/api/user")
-                        if not isinstance(data, dict) or not isinstance(data.get("stats"), dict):
-                            raise ValueError("Invalid tracker statistics")
+                        data = account_data(await tracker_read(account, "/api/user"))
                         stats = {}
-                        for field in ("uploaded", "downloaded", "ratio", "buffer", "seeding", "leeching", "seedbonus", "hit_and_runs", "seeding_size", "total_uploads"):
+                        for field in ("uploaded", "downloaded", "ratio", "buffer", "seeding", "leeching", "seedbonus", "hit_and_runs", "seeding_size", "total_uploads", "avg_seedtime", "total_seedtime"):
                             value = data["stats"].get(field)
                             stats[field] = value if type(value) in (int, float) and math.isfinite(value) else None
                         warnings = data["stats"].get("warnings")
@@ -518,14 +662,39 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
                                 ranks[target] = title.strip()[:80]
                         if not ranks.get("automatic") and isinstance(data.get("group"), str) and data["group"].strip():
                             ranks["automatic"] = data["group"].strip()[:80]
-                        public = {"status": "ok", "stats": stats, "ranks": ranks, "rankProgress": rank_progress(ranks, stats), "username": str(data.get("username", ""))[:80], "checkedAt": time.time()}
+                        notifications={key:data.get('events',{}).get(key) if type(data.get('events',{}).get(key)) is int and data['events'][key]>=0 else None for key in ['dm','notifications','tickets']} if isinstance(data.get('events'),dict) else {}
+                        premium=data.get('premium') if isinstance(data.get('premium'),dict) else {}
+                        event_rows=data.get('events',{}).get('global',[]) if isinstance(data.get('events'),dict) else []
+                        public_events=[]
+                        for event in event_rows[:20] if isinstance(event_rows,list) else []:
+                            if not isinstance(event,dict): continue
+                            until=credit.download_history.end(event.get('ends_at')) if credit else 0
+                            if until>time.time(): public_events.append({'type':text(event.get('type'),80),'title':text(event.get('title'),150),'endsAt':event.get('ends_at')[:80]})
+                        public = {"status": "ok", "stats": stats, "ranks": ranks, "rankProgress": rank_progress(ranks, stats) if account.get("provider", "nordicbytes") == "nordicbytes" else None, "base_url": origin(account), "globalEvents": global_events(data), "username": str(data.get("username", ""))[:80], "checkedAt": time.time(), "notifications":notifications, "premium":{"type":text(premium.get('type'),80),"expiresAt":text(premium.get('expires_at'),80)}, "events":public_events,"lastSeen":text(data.get('last_seen'),80)}
+                        intelligence.account(account['id'],public)
                     except (HTTPException, ValueError, TypeError):
-                        previous = cached["public"] if cached and cached["key"] == account["api_key"] else {}
+                        previous = cached["public"] if cached and cached["key"] == identity(account) else {}
                         public = {**previous, "status": "stale" if previous.get("stats") else "error", "error": "Tracker account statistics are unavailable"}
-                    cached = {"key": account["api_key"], "checked": time.monotonic(), "public": public}
+                    cached = {"key": identity(account), "checked": time.monotonic(), "public": public}
                     tracker_cache[account["id"]] = cached
                 results.append({key: value for key, value in account.items() if key != "api_key"} | {"configured": True, **cached["public"]})
         return results
+
+    @app.get("/api/trackers")
+    async def accounts(session=Depends(authorized)):
+        return await refresh_accounts()
+
+    @app.post("/api/trackers/test")
+    async def test_account(body: TrackerSettings, session=Depends(authorized)):
+        if session.get("role") != "administrator":
+            raise HTTPException(403, "Administrator access required")
+        account = body.model_dump()
+        if not account["api_key"] or (account["provider"] == "unit3d" and not account["base_url"]):
+            raise HTTPException(422, "Enter a tracker website and API key")
+        if account["provider"] == "nordicbytes" and account["base_url"] not in ("", "https://nordicbytes.org"):
+            raise HTTPException(422, "Choose UNIT3D for another tracker website")
+        account_data(await tracker_read(account, "/api/user"))
+        return {"connected": True, "base_url": origin(account)}
 
     @app.post("/api/trackers")
     def add_account(body: TrackerSettings, session=Depends(authorized)):
@@ -551,25 +720,44 @@ def install_features(app, authorized, database, qbit, vpn_status=None, data_dir=
     if covers:
         covers.swarm_sink = swarm.observe
 
+    async def traffic_tick():
+        try:
+            values = (await qbit('/api/v2/transfer/info')).json()
+            if not traffic.observe(values):
+                # Standalone qBittorrent exposes these via sync. MediaVPN supplies
+                # only the two totals on transfer/info; its whitelist stays closed.
+                values = (await qbit('/api/v2/sync/maindata')).json()
+                traffic.observe(values.get('server_state') if isinstance(values,dict) else None)
+        except (HTTPException, ValueError, TypeError):
+            if traffic.failure!='upgrade_required':traffic.failure = 'unavailable'
+
     async def background():
         async def account_tick():
             if rows("trackers"):
                 await accounts(session={})
-        jobs = [("accounts", account_tick), ("swarm", swarm.tick)]
-        for name, worker in (("rss", rss_worker), ("ratio-scout", scout), ("covers", covers)):
+        jobs = [("accounts", account_tick), ("swarm", swarm.tick), ("traffic", traffic_tick)]
+        for name, worker in (("rss", rss_worker), ("covers", covers)):
             if worker:
                 jobs.append((name, worker.tick))
-        await run_background(jobs)
+        await run_background(jobs, intervals={"covers": 60,"traffic":60})
 
     def tracker_overview():
         # Overview must not fetch third-party APIs or expose credentials/URLs.
         result = []
         for account in rows("trackers")[:10]:
             cached = tracker_cache.get(account["id"])
-            fresh = cached and cached["key"] == account["api_key"]
+            fresh = cached and cached["key"] == identity(account)
             public = cached["public"] if fresh else {}
-            result.append({"id": account["id"], "name": account["name"], "status": public.get("status", "pending"), "stats": public.get("stats"), "ranks": public.get("ranks", {}), "rankProgress": public.get("rankProgress"), "checkedAt": public.get("checkedAt")})
+            result.append({"id": account["id"], "name": account["name"], "provider": account.get("provider","nordicbytes"), "base_url": origin(account), "status": public.get("status", "pending"), "stats": public.get("stats"), "ranks": public.get("ranks", {}), "rankProgress": public.get("rankProgress"), "checkedAt": public.get("checkedAt"), "globalEvents": public.get("globalEvents"), **{key:public.get(key) for key in ["premium","notifications","events","lastSeen"]}})
         return result
 
     app.state.tracker_overview = tracker_overview
+    if credit:
+        credit.tracker_accounts = lambda: [{k:a[k] for k in ("id","name","provider","base_url") if k in a} for a in rows("trackers")]
+        credit.download_history.accounts = tracker_overview
+        credit.observer = intelligence.observe
+        credit.upload_owners = lambda torrents: intelligence.upload_owners(torrents,
+            [{**account, "username": tracker_username(account["id"])} for account in rows("trackers")[:10]])
+        if covers:
+            covers.recovery_needed = lambda torrents: credit.download_history.recovery_needed(torrents, credit.upload_owners(torrents))
     return background

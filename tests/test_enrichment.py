@@ -20,7 +20,7 @@ def attributes(**updates):
 
 def setup_cache(tmp_path, read, torrents=None):
     async def qbit(*args, **kwargs):
-        return httpx.Response(200, json=torrents or [{"hash": HASH, "name": "Synthetic.Release.mkv"}])
+        return httpx.Response(200, json=[{"tracker": "https://t.nordicbytes.org/announce", **row} for row in (torrents or [{"hash": HASH, "name": "Synthetic.Release.mkv"}])])
     return Covers(tmp_path, lambda kind: [ACCOUNT], read, qbit)
 
 
@@ -291,3 +291,157 @@ def test_missing_cover_is_prioritized_ahead_of_existing_cover_metadata_work(tmp_
     cache.download = image
     asyncio.run(cache.tick())
     assert cache.path(hashes[-1]).is_file()
+
+
+@pytest.mark.parametrize("legacy_exhausted", [False, True])
+def test_title_fallback_recovers_renamed_release_on_fresh_install_and_upgrade(tmp_path, legacy_exhausted):
+    name = "Synthetic.Show.S01.DANiSH.1080p.WEB-DL.H.264-Group"
+    calls = []
+    async def read(account, path, params):
+        calls.append((path, params))
+        if path.endswith("filter"):
+            if params["name"] != "Synthetic Show S01":
+                return {"data": []}
+            return {"data": [
+                {"id": "41", "attributes": attributes(info_hash="b" * 40)},
+                {"id": "42", "attributes": attributes(name=name.replace("-Group", ".DD5.1-Group"))},
+            ]}
+        return {"id": "42", "attributes": attributes()}
+    cache = setup_cache(tmp_path, read, [{"hash": HASH, "name": name}])
+    if legacy_exhausted:
+        state = {"search": MAX_ATTEMPTS, "variant": 5, "search_at": 9999999999}
+        cache.enrichment.save(HASH, ACCOUNT, state)
+    async def image(url, path):
+        path.write_bytes(b"\xff\xd8\xffsynthetic")
+    cache.download = image
+    asyncio.run(cache.tick())
+    asyncio.run(cache.tick())
+    assert cache.enrichment.load(HASH, ACCOUNT)["record_id"] == "42"
+    assert cache.path(HASH).is_file()
+    assert any(params and params["name"] == "Synthetic Show S01" for _, params in calls)
+    if legacy_exhausted:
+        assert cache.enrichment.load(HASH, ACCOUNT)["search"] == MAX_ATTEMPTS
+
+
+def test_title_fallback_is_bounded_persistent_and_rejects_wrong_hash(tmp_path, monkeypatch):
+    clock = [100000.0]
+    monkeypatch.setattr("mediaseed.enrichment.time.time", lambda: clock[0])
+    calls, saved = [], []
+    async def read(account, path, params):
+        calls.append(params["name"])
+        return {"data": [{"id": "42", "attributes": attributes(info_hash="b" * 40)}]}
+    for _ in range(9):
+        cache = setup_cache(tmp_path, read, [{"hash": HASH, "name": "Synthetic.Show.S01.1080p-Group"}])
+        cache.metadata_sink = lambda *args: saved.append(args)
+        asyncio.run(cache.tick())
+        clock[0] += 86401
+    assert len(calls) == MAX_ATTEMPTS + 2
+    assert calls.count("Synthetic Show S01") == 1
+    assert calls.count("Synthetic Show") == 1
+    assert not saved
+    assert not cache.enrichment.load(HASH, ACCOUNT).get("matched")
+
+
+def test_manual_refresh_recovers_exhausted_job_and_persists_cooldown(tmp_path, monkeypatch):
+    clock = [100000.0]
+    monkeypatch.setattr('mediaseed.enrichment.time.time', lambda: clock[0])
+    calls = []
+    async def read(account, path, params):
+        calls.append(path)
+        record = {'id': '42', 'attributes': attributes()}
+        return {'data': [record]} if path.endswith('filter') else record
+    cache = setup_cache(tmp_path, read)
+    cache.enrichment.save(HASH, ACCOUNT, {'search': 5, 'fallback': 2, 'detail': 5, 'image': 5, 'search_at': 999999, 'cursor': 'stale'})
+    async def image(url, path):
+        path.write_bytes(b'\xff\xd8\xffsynthetic')
+    cache.download = image
+    torrent = {'hash': HASH, 'name': 'Synthetic.S01E01', 'tracker': 'https://t.nordicbytes.org/secret'}
+    async def scenario():
+        assert await cache.refresh(torrent) == 'queued'
+        await cache.tick()
+        assert calls == ['/api/torrents/filter', '/api/torrents/42']
+        assert cache.path(HASH).is_file()
+        restored = setup_cache(tmp_path, read)
+        assert await restored.refresh(torrent) == 'cooldown'
+        assert restored.enrichment.load(HASH, ACCOUNT)['record_id'] == '42'
+        clock[0] += 301
+        assert await restored.refresh(torrent) == 'queued'
+        state = restored.enrichment.load(HASH, ACCOUNT)
+        assert state['record_id'] == '42' and state['matched']
+        assert not state['detail_read'] and state['detail'] == 0
+        assert 'private-synthetic-key' not in json.dumps(state)
+    asyncio.run(scenario())
+
+
+def test_manual_refresh_respects_tracker_scope(tmp_path):
+    async def read(*args):
+        raise AssertionError('Refresh only queues work')
+    cache = setup_cache(tmp_path, read)
+    other = {**ACCOUNT, 'id': 'other', 'provider': 'unit3d', 'base_url': 'https://tracker.example.org'}
+    cache.accounts = lambda kind: [ACCOUNT, other]
+    cache.enrichment.save(HASH, other, {'search': 5})
+    async def scenario():
+        assert await cache.refresh({'hash': HASH, 'name': 'Test', 'tracker': 'https://foreign.invalid/announce'}) == 'unavailable'
+        assert await cache.refresh({'hash': HASH, 'name': 'Test', 'tracker': 'https://t.nordicbytes.org/secret'}) == 'queued'
+        assert cache.enrichment.load(HASH, other) == {'search': 5}
+    asyncio.run(scenario())
+
+
+def test_manual_refresh_reloads_fresh_cover_without_removing_it_on_failure(tmp_path):
+    async def read(account, path, params):
+        return {'id': '42', 'attributes': attributes()}
+    cache = setup_cache(tmp_path, read)
+    cache.path(HASH).write_bytes(b'old cover')
+    cache.enrichment.save(HASH, ACCOUNT, {'record_id': '42', 'matched': True, 'complete': True, 'detail_read': True, 'poster': POSTER})
+    attempts = []
+    async def image(url, path):
+        attempts.append(url)
+        assert path.read_bytes() == b'old cover'
+        raise httpx.ConnectError('synthetic outage')
+    cache.download = image
+    async def scenario():
+        assert await cache.refresh({'hash': HASH, 'name': 'Test'}) == 'queued'
+        await cache.tick()
+        assert attempts == [POSTER]
+        assert cache.path(HASH).read_bytes() == b'old cover'
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("wrapped_name", [
+    "Marshals (2026) S01 (1080p BluRay x265 10bit EAC3 5.1 Ghost)",
+    "Marshals [2026] S01 [1080p BluRay x265 Ghost]",
+    "Marshals.{2026}.S01.1080p-Ghost",
+])
+def test_title_fallback_removes_brackets_at_year_boundary(wrapped_name):
+    from mediaseed.enrichment import title_queries
+    assert title_queries(wrapped_name) == ["Marshals 2026", "Marshals"]
+
+
+@pytest.mark.parametrize("legacy_exhausted", [False, True])
+def test_parenthesized_release_recovers_exact_hash_preserving_old_limits(tmp_path, legacy_exhausted, monkeypatch):
+    name = "Marshals (2026) S01 (1080p BluRay x265 10bit EAC3 5.1 Ghost)"
+    calls = []
+    async def read(account, path, params):
+        calls.append((path, params))
+        if path.endswith("filter"):
+            if params["name"] != "Marshals": return {"data": []}
+            return {"data": [
+                {"id": "41", "attributes": attributes(info_hash="b" * 40, name="Marshals.2026.S01-Ghost")},
+                {"id": "42", "attributes": attributes(name="Marshals.2026.S01.NORDiC.1080p.BluRay.DDP5.1.x265-Ghost")},
+            ]}
+        return {"id": "42", "attributes": attributes()}
+    cache = setup_cache(tmp_path, read, [{"hash": HASH, "name": name}])
+    if legacy_exhausted:
+        cache.enrichment.save(HASH, ACCOUNT, {"search": 5, "fallback": 1, "search_at": 9999999999})
+    async def image(url, path): path.write_bytes(b"\xff\xd8\xffsynthetic")
+    cache.download = image
+    clock = [100000.0]
+    monkeypatch.setattr("mediaseed.enrichment.time.time", lambda: clock[0])
+    asyncio.run(cache.tick())
+    clock[0] += 1000
+    asyncio.run(cache.tick())
+    state = cache.enrichment.load(HASH, ACCOUNT)
+    assert state["record_id"] == "42"
+    assert state["fallback"] == 2
+    assert cache.path(HASH).is_file()
+    if legacy_exhausted: assert state["search"] == 5

@@ -3,7 +3,7 @@ import asyncio
 import logging
 
 
-async def run_background(jobs, interval=15):
+async def run_background(jobs, interval=15, intervals=None):
     async def repeat(name, job):
         while True:
             try:
@@ -11,7 +11,7 @@ async def run_background(jobs, interval=15):
             except Exception as error:  # noqa: BLE001 - isolate and report a failed background job
                 # Do not log exception messages: tracker URLs can contain secrets.
                 logging.getLogger(__name__).warning("Background job %s failed (%s)", name, type(error).__name__)
-            await asyncio.sleep(interval)
+            await asyncio.sleep((intervals or {}).get(name, interval))
 
     async with asyncio.TaskGroup() as group:
         for name, job in jobs:

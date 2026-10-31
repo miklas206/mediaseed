@@ -224,13 +224,19 @@ class RssWorker:
             if next((row for row in self.rows("feeds") if row["id"] == feed["id"]), None) != feed:
                 self.reports[feed["id"]] = "Feed changed; waiting for the next refresh"
                 return
+            policy = CleanupPolicy(**(feed.get('cleanup') or {}))
+            if policy.mode != 'never':
+                if not self.cleanup:
+                    raise HTTPException(409, "Automatic cleanup unavailable; import blocked")
+                # Local admission failures must not create an uncertain import.
+                # Old intents remain blocked; only new articles reach this gate.
+                self.cleanup.require_capacity()
             with self.database() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 if connection.execute("SELECT 1 FROM rss_history WHERE token IN (?,?)", (token, file_token)).fetchone():
                     continue
                 connection.execute("INSERT INTO rss_history VALUES (?,?,?,strftime('%s','now'),NULL)", (token, feed["id"], "intent"))
                 connection.execute("INSERT INTO rss_history VALUES (?,?,?,strftime('%s','now'),NULL)", (file_token, feed["id"], "intent"))
-            policy = CleanupPolicy(**(feed.get('cleanup') or {}))
             async def import_stopped(qbit, ratio, **args):
                 payload = {"stopped": "true", "paused": "true", "savepath": destination, "autoTMM": "false", "ratioLimit": str(ratio), "seedingTimeLimit": "2940", "category": item_path}
                 if args.get('tag'):

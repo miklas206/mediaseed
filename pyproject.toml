@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mediaseed"
-version = "0.1.38"
+version = "0.1.39"
 description = "Independent MediaHub seedbox application"
 requires-python = ">=3.12"
 dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "httpx>=0.28,<1", "argon2-cffi>=23.1,<26"]
@@ -13,7 +13,7 @@ dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "httpx>=0.28,<1", "argo
 include = ["mediaseed*"]
 
 [tool.setuptools.package-data]
-mediaseed = ["static/*", "static/flags/*", "static/themes/*", "static/extensions/*"]
+mediaseed = ["static/*", "static/flags/*", "static/themes/*", "static/extensions/*", "upload_engine/rules/*.txt", "upload_engine/assets/*.txt"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

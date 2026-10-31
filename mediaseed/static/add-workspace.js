@@ -34,7 +34,7 @@
   const feedRatio=feedRatioInput.closest('label');feedRatio.hidden=true;
   const cleanupCopy=cleanup.cloneNode(true);
   for(const node of cleanupCopy.querySelectorAll('[id]'))node.id=node.id.replace('add-','feed-');
-  const policy=()=>({mode:document.querySelector('#feed-cleanup-mode').value,hours:Number(document.querySelector('#feed-cleanup-hours').value||49),ratio:Number(document.querySelector('#feed-cleanup-ratio').value||1),delete_files:document.querySelector('#feed-cleanup-action').value==='files'});
+  const policy=()=>({mode:document.querySelector('#feed-cleanup-mode').value,hours:Number(document.querySelector('#feed-cleanup-hours').value||50),ratio:Number(document.querySelector('#feed-cleanup-ratio').value||1),delete_files:document.querySelector('#feed-cleanup-action').value==='files'});
   const updatePolicy=()=>{const value=policy(),active=value.mode!=='never';document.querySelector('#feed-cleanup-options').hidden=!active;
     for(const [key,visible] of [['hours',['time','both','either'].includes(value.mode)],['ratio',['ratio','both','either'].includes(value.mode)]]) {document.querySelector('#feed-cleanup-'+key+'-field').hidden=!visible;document.querySelector('#feed-cleanup-'+key).disabled=!visible;}
     document.querySelector('#feed-cleanup-action').disabled=!active;document.querySelector('#feed-cleanup-warning').hidden=!active||!value.delete_files;
@@ -43,6 +43,6 @@
   const first=[...feed.children].filter(node=>node!==feedRatio&&!node.classList.contains('actions'));
   MediaWizard({form:feed,dialog:feedDialog,titles:['Feed and filters','Seeding and files'],groups:[first,[cleanupCopy,feedHelp]]});
   cleanupCopy.onchange=updatePolicy;
-  globalThis.MediaSeedFeedPolicy={value:policy,load:value=>{value=value||{};for(const [key,defaultValue] of [['mode','never'],['hours',49],['ratio',1],['action','torrent']])document.querySelector('#feed-cleanup-'+key).value=key==='action'?(value.delete_files?'files':'torrent'):(value[key]??defaultValue);updatePolicy();}};
+  globalThis.MediaSeedFeedPolicy={value:policy,load:value=>{value=value||{};for(const [key,defaultValue] of [['mode','never'],['hours',50],['ratio',1],['action','torrent']])document.querySelector('#feed-cleanup-'+key).value=key==='action'?(value.delete_files?'files':'torrent'):(value[key]??defaultValue);updatePolicy();}};
   feed.addEventListener('reset',()=>MediaSeedFeedPolicy.load()); updatePolicy();
 })();

@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from datetime import datetime
 import hashlib
 import json
+import logging
 import math
 from pathlib import Path
 import re
@@ -16,6 +17,8 @@ import time
 from fastapi import HTTPException
 from mediaseed.cleanup import source_hashes
 from mediaseed import feed_uploads
+from mediaseed.download_history import DownloadHistory
+from mediaseed.tracker_sites import matching_accounts, origin
 
 
 def number(value):
@@ -37,6 +40,11 @@ class TrackerCredit:
         self.lock = asyncio.Lock()
         self._connection = None
         self.scan_offset = 0
+        self.observer = None
+        self.upload_owners = lambda rows: {}
+        self.tracker_accounts = lambda: []
+        self._sites_snapshot = None
+        self.download_history = DownloadHistory(database)
         self.cleanup = lambda identifier: {"mode": "never"}
         with database() as db:
             feed_uploads.initialize(db)
@@ -56,9 +64,32 @@ class TrackerCredit:
         with self.database() as db:
             previous, self._connection = self._connection, db
             try:
-                return [self.observe(row) if isinstance(row, dict) else {} for row in rows]
+                result = []
+                accounts = self.download_history.accounts()
+                self._sites_snapshot = self.tracker_accounts()
+                for row in rows:
+                    credited = self.observe(row) if isinstance(row, dict) else {}
+                    if isinstance(row, dict):
+                        credited["download_history"] = self.download_history.observe(db, row, credited, accounts=accounts)
+                    result.append(credited)
             finally:
+                self._sites_snapshot = None
                 self._connection = previous
+        try:
+            owners = self.upload_owners(rows)
+        except Exception as error:
+            logging.getLogger(__name__).warning("Upload ownership unavailable (%s)", type(error).__name__)
+            owners = {}
+        for row, credited in zip(rows, result):
+            if isinstance(row, dict):
+                owner = owners.get(str(row.get("hash", "")).lower())
+                credited["own_upload"] = owner if type(owner) is bool else None
+        if self.observer:
+            try:
+                self.observer(rows,result)
+            except Exception as error:
+                logging.getLogger(__name__).warning("Insight observation failed (%s)",type(error).__name__)
+        return result
 
     def enabled(self):
         with self.connection() as db:
@@ -103,14 +134,24 @@ class TrackerCredit:
             record = {"target": max(1, number(row.get("ratio_limit"))), "uploaded": 0,
                       "discounted": 0, "unclassified": 0, "at": added or now}
         evidence = self.evidence(identifier) or record.get("policy", {})
+        # A configured site's announce host identifies which adapter applies even
+        # before metadata is matched. Never assign Nordic Green to another site.
+        if row.get("tracker"):
+            accounts = matching_accounts(self._sites_snapshot if self._sites_snapshot is not None else self.tracker_accounts(), row["tracker"])
+            if accounts:
+                account = accounts[0]
+                site = origin(account)
+                previous_site = evidence.get("baseUrl", "https://nordicbytes.org")
+                if previous_site != site:
+                    evidence = {"infoHash":identifier,"trackerId":account["id"],"tracker":account["name"],"baseUrl":site,"greenRule":account.get("provider","nordicbytes")=="nordicbytes"}
         if evidence:
             record["policy"] = evidence
         tracker_name = evidence.get("tracker") if isinstance(evidence.get("tracker"),str) and evidence.get("infoHash")==identifier else None
-        created = publication(evidence.get("createdAt"))
+        created = publication(evidence.get("createdAt")) if evidence.get("greenRule") is not False else None
         # Like FjordSeed, allow 30 minutes for announce/clock skew. The API
         # publication time, never the local add time, starts the 24-hour rule.
         until = created + 24 * 3600 + 1800 if created else None
-        exempt = evidence.get("ownUpload") is True
+        exempt = evidence.get("ownUpload") is True or evidence.get("greenRule") is False
         pending = not exempt and until is None
         if until and until > now + 25 * 3600:
             pending, until, created = True, None, None
@@ -119,9 +160,10 @@ class TrackerCredit:
             # Overlapping RPC reads can return out of order. Neither a stale
             # snapshot nor an unconfirmed counter reset may erase lost credit.
             # A different added_on identity is reset separately above.
-            return {"credited_ratio": 0, "credited_uploaded": None, "green_uploaded": None,
+            return {"credited_ratio": 0, "last_credited_ratio": record.get("last_credited_ratio"),
+                    "ratio_checked_at": record.get("ratio_checked_at"), "credited_uploaded": None, "green_uploaded": None,
                     "green_pending": True, "green_active": False, "green_until": until,
-                    "credit_observation_stale": True, "tracker_name": tracker_name, "account_credited_uploaded": record.get("account_credited_uploaded"), "account_credit_estimated":True, "ratio_limit": record["target"], "native_ratio_limit": record["target"] * 2}
+                    "credit_observation_stale": True, "tracker_name": tracker_name, "tracker_id": evidence.get("trackerId"), "account_credited_uploaded": record.get("account_credited_uploaded"), "account_credit_estimated":True, "ratio_limit": record["target"], "native_ratio_limit": record["target"] * 2}
         delta = max(0, uploaded - record["uploaded"])
         if not exempt and until and (record["at"] < until or not record.get("classified")) and (not added or added < until):
             record["discounted"] += delta
@@ -165,16 +207,20 @@ class TrackerCredit:
             record["seed_clock"] = {"raw": raw_seconds, "seconds": seconds, "moving": moving}
         if added:
             record["added_on"] = added
+        ratio = credited / denominator if denominator else number(row.get("ratio")) / (2 if active or pending else 1)
+        # The last accepted ratio is display-only when a later RPC read is stale.
+        # Keep credited_ratio=0 in that rejection branch to protect goal checks.
+        record.update(last_credited_ratio=ratio, ratio_checked_at=now)
         self.save(identifier, record)
-        return {"credited_ratio": credited / denominator if denominator else number(row.get("ratio")) / (2 if active or pending else 1),
+        return {"credited_ratio": ratio, "last_credited_ratio": ratio, "ratio_checked_at": now,
                 "credited_uploaded": credited, "account_credited_uploaded": credited+bonus, "account_credit_estimated": True, "green_uploaded": discounted, "green_until": until,
                 "green_active": active, "green_pending": pending, "green_history_estimated": bool(record.get("estimated")),
                 "ratio_limit": record["target"], "native_ratio_limit": native,
                 "green_rule_until": created + 24 * 3600 if created and not exempt else None,
                 **({"seeding_time": record["seed_clock"]["seconds"]} if "seed_clock" in record else {}),
                 "tracker_benefits": evidence if 0 <= now - number(evidence.get("checkedAt")) < 300 else None,
-                "tracker_name": tracker_name,
-                "tracker_rule": "NordicBytes Green: 0,5× upload i 24 timer + 30 minutters sikkerhedsmargin"}
+                "tracker_name": tracker_name, "tracker_id": evidence.get("trackerId"),
+                "tracker_rule": "NordicBytes Green: 0,5× upload i 24 timer + 30 minutters sikkerhedsmargin" if evidence.get("greenRule") is not False else None}
 
     async def request(self, path, method="GET", payload=None, files=None):
         if method == "POST" and path.rsplit("/", 1)[-1] in {"add", "delete", "setShareLimits", "start"}:

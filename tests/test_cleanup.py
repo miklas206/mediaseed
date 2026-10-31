@@ -105,6 +105,29 @@ def test_pending_metadata_and_vpn_loss_do_not_start_or_delete_unconfigured_impor
     asyncio.run(scenario())
 
 
+def test_import_prepares_only_its_own_rule_without_scanning_other_torrents(tmp_path):
+    async def scenario():
+        manager_instance, state, calls = manager(tmp_path)
+        unrelated = {
+            **CleanupPolicy(mode="time").model_dump(), "id": "b" * 24,
+            "hashes": ["b" * 40], "tag": "MediaSeed-Cleanup-" + "b" * 24,
+            "status": "waiting", "start": False, "stop_ratio": 1,
+        }
+        manager_instance.save(unrelated)
+        result = await manager_instance.add(
+            add_stopped, CleanupPolicy(mode="time"), 1, magnet=MAGNET, start=True,
+        )
+        assert not result["cleanupPending"]
+        reads = [call[2]["hashes"] for call in calls if call[0].endswith("/info")]
+        assert reads == [HASH, HASH]
+        assert manager_instance.public("b" * 40)["status"] == "waiting"
+        assert state["rows"][0]["hash"] == HASH
+        await manager_instance.tick()
+        assert any("b" * 40 in call[2]["hashes"] for call in calls if call[0].endswith("/info"))
+
+    asyncio.run(scenario())
+
+
 def test_existing_or_replaced_torrent_never_inherits_destructive_rule(tmp_path):
     async def scenario():
         m, state, calls = manager(tmp_path)

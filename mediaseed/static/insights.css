@@ -1,0 +1,164 @@
+.insight-controls{display:flex;gap:1rem;align-items:end;flex-wrap:wrap;margin:1rem 0}.insight-controls label{display:grid;gap:.4rem;min-width:9rem}.insight-controls select,.insight-controls input{width:100%}.insight-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.insight-card{min-width:0;margin:0 0 1rem}.insight-card h2{font-size:1.1rem}.insight-card p small{display:block}.insight-facts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.45rem 1rem}.insight-facts dt{color:var(--muted,#94a3b8)}.insight-facts dd{margin:0;text-align:right;overflow-wrap:anywhere}.insight-chart{margin:0}.insight-chart svg{width:100%;height:auto;min-height:120px}.insight-chart path{stroke:var(--accent,#6ee7b7);stroke-width:2.5;fill:none;vector-effect:non-scaling-stroke}.insight-chart figcaption{margin-bottom:1rem;font-weight:600}.insight-chart details{margin-top:1rem}.insight-torrent{padding:.8rem 0;border-bottom:1px solid var(--border,#334155)}.insight-torrent .torrent-name{white-space:normal;text-align:left;overflow-wrap:anywhere}.insight-description{white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto}.insight-mediainfo{white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto;font-size:.8rem}.insight-card table{font-size:.85rem}.insight-card .seed-badge{white-space:normal;overflow-wrap:anywhere}@media(max-width:760px){.insight-grid{grid-template-columns:minmax(0,1fr)}.insight-controls label{min-width:0;flex:1 1 130px}.insight-facts{font-size:.9rem}#insights .heading{gap:.5rem}#insights{min-width:0}}
+
+.insight-indicator{color:var(--warning,#fbbf24);font-size:1.2rem;margin-inline-start:.35rem}.insight-indicator[hidden]{display:none}
+.insight-card .table-wrap{overflow-x:auto;max-width:100%;min-width:0}.insight-card table{min-width:620px}.insight-card th,.insight-card td{white-space:nowrap}.insight-chart details table{min-width:280px}.insight-card td:first-child{white-space:normal;min-width:120px;max-width:300px;overflow-wrap:anywhere}
+
+/* Match MediaHub dock geometry: the alert dot must never create a third row. */
+#app-navigation [data-view="insights"]{position:relative}
+#app-navigation .insight-indicator{position:absolute;inset:7px 8px auto auto;width:6px;height:6px;margin:0;border-radius:50%;background:var(--warning,#fbbf24);font-size:0;line-height:0;pointer-events:none}
+.insight-grid{align-items:start}
+.insight-column{display:grid;gap:1rem;min-width:0;align-content:start}
+#insights .insight-card{padding:18px;margin:0;align-self:start}
+#insights .insight-card>h2{margin-bottom:12px}
+#insights .insight-card p{margin:.6rem 0}
+#insights .insight-card h3{margin:.5rem 0}
+.insight-facts{margin:.75rem 0;gap:.4rem 1rem}
+.insight-more{margin-top:.8rem;border-top:1px solid var(--line);padding-top:.7rem}
+.insight-more>summary{cursor:pointer;color:var(--muted);font-size:.9rem}
+.insight-more[open]>summary{margin-bottom:.75rem}
+.insight-torrent{padding:.65rem 0}
+.insight-torrent .torrent-name{display:block;width:100%;padding:0;border:0;background:transparent;color:var(--text);font-size:.9rem;line-height:1.4;text-align:left;box-shadow:none}
+.insight-torrent .torrent-name:hover{color:var(--accent)}
+.insight-torrent small{color:var(--muted)}
+#insights .insight-controls{gap:.75rem;margin:.75rem 0}
+#insights .insight-controls label{min-width:7rem;font-size:.85rem}
+.insights-content>.insight-card{margin-top:1rem!important}
+#insights [role="status"]:empty{display:none}
+
+.insight-facts dt,.insight-facts dd{margin:0;align-self:baseline}
+
+.insight-torrent .torrent-name{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+
+/* A compact, inspectable plot in the existing history card. */
+.insight-chart figcaption { margin-bottom:4px; }
+#insights .insight-chart-source { margin:0 0 8px; font-size:.75rem; }
+.insight-chart svg { height:174px; min-height:0; display:block; touch-action:pan-y; border-radius:6px; }
+.insight-chart svg[hidden] { display:none; }
+.insight-chart svg:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.history-axis line { stroke:var(--line); stroke-dasharray:3 5; }
+.history-axis text { fill:var(--muted); font-size:10px; }
+.history-series circle { fill:var(--accent); }
+.history-marker line { stroke:var(--muted); stroke-dasharray:3 4; opacity:.65; }
+.history-marker circle { fill:var(--surface); stroke:var(--accent); stroke-width:2; vector-effect:non-scaling-stroke; }
+.history-readout { display:block; min-height:2.5em; margin:8px 0 4px; font-size:.8rem; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.history-readout[hidden] { display:none; }
+.insight-chart > small { display:block; font-size:.7rem; }
+.insight-chart .table-wrap { max-height:240px; overflow:auto; }
+#insight-cycle { display:flex; align-items:center; gap:8px; min-height:38px; font-size:.8rem; }
+#insight-cycle::before { content:''; width:28px; height:16px; border-radius:12px; background:var(--line); box-shadow:inset 12px 0 0 -2px var(--muted); }
+#insight-cycle[aria-checked="true"]::before { background:var(--accent); box-shadow:inset -12px 0 0 -2px var(--surface); }
+@media(max-width:480px){.insight-chart svg{height:160px;}#insights .insight-controls label{flex:1 1 90px;min-width:0;}}
+
+/* History: choose a metric, see its value, inspect the curve. */
+#insights .insight-controls > label[hidden] { display:none; }
+#insights .insight-controls > label:has(#insight-account) { width:min(100%,320px); }
+.history-controls { margin-bottom:12px; }
+.history-metrics { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:3px; padding:3px; background:var(--surface); border:1px solid var(--line); border-radius:9px; }
+#insights .history-metrics button,#insights .history-periods button { min-width:0; border:1px solid transparent; background:transparent; color:var(--muted); padding:7px 4px; border-radius:6px; box-shadow:none; font-size:.75rem; font-weight:500; }
+.history-metrics button[aria-pressed="true"] { color:var(--text); background:var(--accent-bg,var(--surface)); border-color:color-mix(in srgb,var(--accent) 30%,var(--line)); }
+.history-metrics button:focus-visible,.history-periods button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.history-toolbar { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:18px; }
+.history-periods { display:flex; gap:2px; }
+.history-periods button { padding:5px 10px; font-variant-numeric:tabular-nums; }
+.history-periods button[aria-pressed="true"] { color:var(--text); border-color:var(--line); background:var(--surface); }
+.insight-chart .history-headline { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.history-headline > div { min-width:0; }
+.insight-chart .history-headline .history-metric-label { display:block; margin:0 0 3px; font-size:.8rem; font-weight:500; color:var(--muted); }
+.history-value { display:block; font-size:clamp(1.6rem,3vw,2.2rem); line-height:1.2; letter-spacing:-.04em; font-weight:650; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.history-source-badge { flex-shrink:0; max-width:44%; border:1px solid var(--line); border-radius:99px; padding:4px 8px; color:var(--muted); font-size:.65rem; text-align:center; }
+.insight-chart .history-line { stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round; }
+.insight-chart .history-area { fill:var(--accent); fill-opacity:.055; stroke:none; }
+.history-axis line { stroke-dasharray:2 6; opacity:.65; }
+.history-axis text { font-size:10px; }
+.history-range { display:flex; justify-content:space-between; gap:12px; color:var(--muted); margin-top:2px; font-size:.65rem; font-variant-numeric:tabular-nums; }
+.history-range small { font-size:inherit; }
+.history-range small:last-child { text-align:right; }
+.history-readout { min-height:2.5em; margin:12px 0 0; padding:9px 0 0; border-top:1px solid var(--line); font-size:.75rem; line-height:1.5; color:var(--muted); }
+.insight-chart details { margin-top:10px; }
+.insight-chart details > summary { cursor:pointer; width:fit-content; color:var(--muted); font-size:.75rem; padding-block:4px; }
+.insight-chart details[open] > summary { margin-bottom:8px; }
+#insights .insight-chart-source,#insights .history-gap-note { font-size:.75rem; line-height:1.5; margin:6px 0; }
+#insights #insight-cycle { padding:5px 8px; border-color:transparent; background:transparent; min-height:30px; font-size:.7rem; box-shadow:none; }
+#insight-cycle::before { width:24px; height:14px; }
+@media(max-width:480px){
+ #insights .history-metrics button{font-size:.68rem;padding:7px 1px;}
+ .history-headline{gap:8px;}
+ .history-toolbar{margin-bottom:14px;}
+ .history-source-badge{font-size:.6rem;padding:4px 6px;}
+}
+
+#insights .history-metrics button{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center;}
+
+/* Tracker accounts: one set of totals, with the selected history beside details. */
+#workspace #trackers .tracker-workspace{padding:0;overflow:hidden;margin-bottom:18px}
+.tracker-workspace-header{padding:22px 26px 18px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 24px;border-bottom:1px solid var(--line)}
+.tracker-workspace-header .heading{margin:0;gap:12px;grid-column:1}
+.tracker-workspace-header h2{margin:0;font-size:1.15rem}
+.tracker-workspace-header>p{grid-column:1;margin:4px 0 0;font-size:.82rem}
+.tracker-workspace-header .insight-controls{grid-column:2;grid-row:1 / 3;margin:0;align-self:center}
+.tracker-workspace-header .insight-controls label{min-width:160px;font-size:.72rem;color:var(--muted)}
+.tracker-workspace-header .insight-controls label[hidden]{display:none}
+#tracker-history-refresh{font-size:.75rem;min-height:30px;padding:5px 10px;margin-left:auto}
+.tracker-workspace>[role=status]{margin:0;padding:12px 26px;color:var(--muted)}
+.tracker-workspace>[role=status]:empty{display:none}
+.tracker-history-content{display:grid;grid-template-columns:minmax(235px,1fr) minmax(0,2fr)}
+.tracker-account-summary{padding:26px;border-right:1px solid var(--line);min-width:0}
+.tracker-account-summary>h3{margin:0 0 8px;font-size:.75rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.tracker-account-summary>p{font-size:.8rem;color:var(--muted)}
+.tracker-account-summary>.insight-facts{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 20px;margin:24px 0}
+.tracker-account-summary>.insight-facts dt{font-size:.7rem;letter-spacing:.04em;text-transform:uppercase;grid-row:auto;color:var(--muted)}
+.tracker-account-summary>.insight-facts dd{text-align:left;font-size:1.25rem;font-weight:650;margin-bottom:16px}
+/* Each pair occupies a column, with the label above its value. */
+.tracker-account-summary>.insight-facts dt:nth-of-type(odd){grid-column:1}
+.tracker-account-summary>.insight-facts dt:nth-of-type(even){grid-column:2}
+.tracker-account-summary>.insight-facts dd:nth-of-type(odd){grid-column:1}
+.tracker-account-summary>.insight-facts dd:nth-of-type(even){grid-column:2}
+.tracker-account-summary>.insight-facts dt:nth-of-type(2){grid-row:1}.tracker-account-summary>.insight-facts dd:nth-of-type(2){grid-row:2}
+.tracker-account-summary>.insight-facts dt:nth-of-type(4){grid-row:3}.tracker-account-summary>.insight-facts dd:nth-of-type(4){grid-row:4}
+.tracker-account-summary>.insight-facts dt:nth-of-type(6){grid-row:5}.tracker-account-summary>.insight-facts dd:nth-of-type(6){grid-row:6}
+.tracker-chart{padding:26px;min-width:0}
+#trackers .history-headline[hidden]{display:none}
+#trackers .history-metrics{grid-template-columns:repeat(5,minmax(0,1fr)) 64px;background:transparent;border:0;border-radius:0;gap:5px;padding:0}
+#trackers .history-metrics button{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:12px;min-width:0;padding:12px 8px 16px;border:0;border-bottom:2px solid transparent;border-radius:6px 6px 0 0;background:transparent;box-shadow:none;white-space:normal;text-align:left;color:var(--muted)}
+#trackers .history-metrics button[aria-pressed=true]{background:color-mix(in srgb,var(--metric-color) 9%,transparent);border-bottom-color:var(--metric-color)}
+#trackers .history-metrics button:hover{background:color-mix(in srgb,var(--metric-color) 6%,transparent)}
+#trackers .metric-name{font-size:.7rem;line-height:1.35}
+#trackers .metric-total{font-size:clamp(.95rem,1.5vw,1.3rem);line-height:1.2;color:var(--metric-color);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#trackers .history-metrics button[data-metric=all]{align-items:center;--metric-color:var(--accent)}
+#trackers .history-toolbar{margin:12px 0 22px}
+#trackers .history-periods button{font-size:.75rem;min-height:30px;padding:5px 9px;background:transparent;border-color:transparent;color:var(--muted)}
+#trackers .history-periods button[aria-pressed=true]{color:var(--text);border-color:var(--line)}
+#trackers #insight-cycle{font-size:.7rem;padding:4px 6px;min-height:30px;border:0;background:transparent;box-shadow:none}
+#trackers .insight-chart svg{height:174px}
+#trackers .history-line{stroke:var(--history-color);stroke-width:2.6}
+#trackers .history-area{fill:var(--history-color);fill-opacity:.07}
+#trackers .history-marker circle{stroke:var(--history-color)}
+#trackers .tracker-scale-note{font-size:.72rem;color:var(--muted);margin:14px 0 0;line-height:1.5}
+#trackers .history-readout{min-height:3em}
+#trackers .history-combined .history-readout{min-height:4.5em}
+.tracker-secondary{margin:16px 0;border:1px solid var(--line);border-radius:12px;padding:16px 20px;background:var(--surface)}
+.tracker-secondary>summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--text)}
+.tracker-secondary[open]>summary{margin-bottom:20px}
+#trackers .tracker-secondary #tracker-overview{margin:0}
+#trackers .tracker-secondary .workspace-card{margin-bottom:0}
+#insights .insight-grid{grid-template-columns:minmax(230px,.8fr) minmax(0,1.4fr)}
+#insights .insights-content{max-width:1300px}
+@media(min-width:1500px){.tracker-chart{padding:28px 34px}.tracker-account-summary{padding:28px 30px}}
+@media(max-width:1050px){.tracker-history-content{grid-template-columns:minmax(200px,.7fr) minmax(0,1.5fr)}.tracker-chart{padding:20px 16px}.tracker-account-summary{padding:22px 18px}#trackers .history-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}#trackers .metric-total{font-size:1.15rem}#trackers .history-metrics button{gap:6px;padding:10px}}
+@media(max-width:700px){.tracker-workspace-header{padding:18px;grid-template-columns:minmax(0,1fr)}.tracker-workspace-header .insight-controls{grid-column:1;grid-row:auto;width:100%;margin-top:12px}.tracker-workspace-header .insight-controls label{width:100%}.tracker-history-content{display:flex;flex-direction:column}.tracker-chart{order:-1;padding:18px}.tracker-account-summary{border-right:0;border-top:1px solid var(--line);padding:20px}.tracker-account-summary>.insight-facts{margin:18px 0}.tracker-secondary{padding:14px}#insights .insight-grid{grid-template-columns:minmax(0,1fr)}#trackers .insight-chart svg{height:174px}#trackers .history-metrics button{padding:10px 6px}#trackers .metric-total{font-size:1.05rem}}
+
+#insights>.heading:has(>h1:only-child){display:none}
+#insights .insight-card p>span.muted{display:block;margin-bottom:4px;font-size:.8rem}
+:root[data-appearance-mode=light]{--tracker-ratio:#087952;--tracker-upload:#a33170;--tracker-download:#6940a5;--tracker-buffer:#2468a7;--tracker-bonus:#826a08}
+@media(max-width:700px){#trackers .history-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}#trackers .metric-total{white-space:nowrap;font-size:1rem}#trackers .history-metrics button{gap:5px;min-height:70px}}
+
+/* Physical client counters and tracker credit are distinct selectable series. */
+#trackers .history-metrics{grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}
+#trackers .history-metrics button{gap:6px;min-height:94px}
+#trackers .history-metrics button[data-metric=all]{align-items:flex-start}
+#trackers .metric-name{min-height:2.7em}
+#trackers .metric-scope{color:var(--muted);font-size:.65rem;line-height:1.3}
+#trackers .tracker-change-note{font-size:.72rem;color:var(--muted);margin:10px 0 0;line-height:1.5}
+:root[data-appearance-mode=light]{--tracker-real-upload:#2468a7;--tracker-real-download:#92530c}
+@media(min-width:1750px){#trackers .history-metrics{grid-template-columns:repeat(7,minmax(0,1fr)) 60px}}
+@media(max-width:700px){#trackers .history-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}#trackers .history-metrics button{min-height:87px;padding:8px 7px}#trackers .metric-name{min-height:0}}

@@ -1,0 +1,1 @@
+"""MediaUpload standalone lab."""

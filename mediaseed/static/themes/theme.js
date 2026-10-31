@@ -3,9 +3,10 @@
   const names = {
     'midnight-glass': 'Midnight Glass', 'soft-orbit': 'Soft Orbit',
     'precision-terminal': 'Precision Terminal', 'floating-layers': 'Floating Layers',
-    'edge-signal': 'Edge Signal', light: 'Light', classic: 'MediaHub Classic',
+    'duck-pond': 'Duck Pond', 'edge-signal': 'Edge Signal', light: 'Light', classic: 'MediaHub Classic',
   };
   const palettes = {
+    'duck-pond': ['#0b211f','#142f2b','#1c3a34','#3a5a4c','#f6f4e7','#b6cabc','#f6ce73','#3c3823','#14291e'],
     'midnight-glass': ['#0b1821','#132530','#1b303e','#29404e','#e9f0f6','#a6b9c9','#35d7f6','#103b4d','#03151e'],
     'soft-orbit': ['#101a2d','#1b2d49','#294163','#3b5275','#edf3ff','#b1c2dd','#99b8ff','#263e65','#06172e'],
     light: ['#eef3f6','#ffffff','#e1ebf1','#c8d7e1','#162b3a','#526b7b','#087ea3','#d9edf3','#ffffff'],
@@ -127,6 +128,7 @@
       extensionLink.textContent=da?'Installationsvejledning':'Installation guide';
     }
 
+    for(const option of select.options)if(option.value==='duck-pond')option.textContent=root.lang==='da'?'Andedammen':'Duck Pond';
     caption.textContent = root.lang === 'da' ? 'Tema' : 'Theme';
     follow.textContent = root.lang === 'da' ? 'F\u00f8lg MediaHub' : 'Follow MediaHub';
     inheritedName.textContent = root.dataset.themeSource === 'override' ? (root.lang === 'da' ? 'Kun denne app' : 'This app only') : (root.lang === 'da' ? 'Fra MediaHub' : 'From MediaHub');

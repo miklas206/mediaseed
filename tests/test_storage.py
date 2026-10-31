@@ -58,6 +58,10 @@ def test_media_capacity_folder_browsing_and_both_add_modes(tmp_path, monkeypatch
         assert parse_qs(calls[-1].content.decode())["savepath"] == [
             "/downloads/media/movies/" + folder.name
         ]
+        fields = parse_qs(calls[-1].content.decode())
+        assert fields["downloadPath"] == [fields["savepath"][0] + "/.incomplete"]
+        assert fields["useDownloadPath"] == ["true"] and fields["autoTMM"] == ["false"]
+        assert (folder / ".incomplete").is_dir()
         response = client.post(
             "/api/torrents/upload",
             params={"filename": "synthetic.torrent", **selection},
@@ -66,6 +70,7 @@ def test_media_capacity_folder_browsing_and_both_add_modes(tmp_path, monkeypatch
         )
         assert response.status_code == 200
         assert ("/downloads/media/movies/" + folder.name).encode() in calls[-1].content
+        assert ("/downloads/media/movies/" + folder.name + "/.incomplete").encode() in calls[-1].content
         count = len(calls)
         for location, relative in [
             ("movies", "../outside"),

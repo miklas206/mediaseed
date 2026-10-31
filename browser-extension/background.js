@@ -1,146 +1,182 @@
-const api = globalThis.browser || chrome;
-const MS = MediaSeedExtension;
-let busy = false;
-const temporary = api.storage.session; // Never fall back to persistent storage for private links.
-const volatile = new Map();
-async function pendingPut(item) {
-  const entries = temporary ? Object.entries(await temporary.get(null)) : [...volatile.entries()];
-  const expired = entries.filter(([, value], index) => value.expires < Date.now() || index < entries.length - 19).map(([key]) => key);
-  if (temporary) await temporary.remove(expired); else expired.forEach(key => volatile.delete(key));
-  const id = crypto.randomUUID(), value = {item, expires: Date.now() + 10 * 60 * 1000};
-  if (temporary) await temporary.set({[id]: value}); else volatile.set(id, value);
-  return id;
-}
-async function pendingGet(id) {
-  const value = temporary ? (await temporary.get(id))[id] : volatile.get(id);
-  if (!value || value.expires < Date.now()) throw Error(t("The addition expired. Choose the link or file again."));
-  return value.item;
-}
-async function review(item) {
-  const id = await pendingPut(item);
-  await api.tabs.create({url: api.runtime.getURL('popup.html') + '?pending=' + id});
-}
-async function settings() { return {origin: '', sites: [], language: 'da', ...await api.storage.local.get(['origin', 'sites', 'defaults', 'language'])}; }
-async function seedTab(origin) {
-  const all = await api.tabs.query({});
-  let tab = all.find(t => { try { return new URL(t.url).origin === origin; } catch { return false; } });
-  if (!tab) tab = await api.tabs.create({url: origin + '/', active: false});
-  for (let i = 0; i < 80; i++) {
-    const current = await api.tabs.get(tab.id);
-    if (current.status === 'complete') return current;
-    await new Promise(resolve => setTimeout(resolve, 250));
-  }
-  throw Error(t("MediaSeed is not responding. Open the address and check the connection/certificate."));
-}
-async function send(item) {
-  if (busy) throw Error(t("An addition is already in progress. Wait for the response."));
-  busy = true;
-  try {
-    const config = await settings(), origin = MS.origin(config.origin); setLanguage(config.language);
-    if (!await api.permissions.contains({origins: [MS.pattern(origin)]})) throw Error(t("Save the MediaSeed address and grant access first."));
-    if (!['check', 'magnet', 'file', 'link', 'rss'].includes(item.kind)) throw Error(t("Unknown source."));
-    const options = MS.defaults({...config.defaults, ...Object.fromEntries(['ratio', 'start', 'cleanup'].filter(k => item[k] !== undefined).map(k => [k, item[k]]))});
-    item = {...item, ...options};
-    if (item.kind === 'rss') item.url = MS.webURL(item.url).href;
-    if (item.kind === 'magnet') item.magnet = MS.magnet(item.magnet);
-    if (item.kind === 'link') {
-      const u = MS.webURL(item.url);
-      const source = item.sourceTab ? await api.tabs.get(item.sourceTab).catch(() => null) : null;
-      let data;
-      if (source?.url && new URL(source.url).origin === u.origin) {
-        const results = await api.scripting.executeScript({target: {tabId: source.id}, func: mediaSeedReadFile, args: [u.href]});
-        data = results[0]?.result;
-      } else {
-        if (!await api.permissions.contains({origins: [MS.pattern(u.origin)]})) throw Error(t("Grant access to the torrent file's website in the Add window first."));
-        data = await mediaSeedReadFile(u.href, false);
-      }
-      if (!data) throw Error(t("The torrent file could not be downloaded."));
-      item = {...item, ...data, kind: 'file'};
-    }
-    if (item.kind === 'file') MS.file(item.name, MS.decode(item.base64));
-    const tab = await seedTab(origin);
-    const results = await api.scripting.executeScript({target: {tabId: tab.id}, func: mediaSeedBridge, args: [origin, item]});
-    const result = results[0]?.result;
-    if (!result) throw Error(t("MediaSeed did not respond. Check the list before trying again."));
-    if (result.login || result.opened) await api.tabs.update(tab.id, {active: true});
-    if (result.language) { setLanguage(result.language); await api.storage.local.set({language: result.language}); await api.contextMenus.update?.('mediaseed-add', {title: t('Add to MediaSeed')}); }
-    if (result.error) throw Error(t(result.error));
-    return result;
-  } finally { busy = false; }
-}
-function resultText(result) {
-  return result.opened ? t("Opened in MediaSeed for review.") : result.cleanupPending ? t("Added paused · preparing cleanup before the selected start.") : result.pending ? t("Added · waiting for metadata in MediaSeed.") : result.stopped ? t("Added paused.") : t("Added · start requested in MediaSeed.");
+const api = globalThis.browser || chrome, MS = MediaSeedExtension;
+const MAX_AGE = 15 * 60 * 1000;
+let working = false, delivering = false;
+// Private source links and bytes exist only in browser-session memory.
+let volatilePending = null, volatileStatus = null;
+async function state() { return api.storage.session ? api.storage.session.get(['pending', 'status']) : {pending: volatilePending, status: volatileStatus}; }
+async function savePending(pending) {
+  if (api.storage.session) { if (pending) await api.storage.session.set({pending}); else await api.storage.session.remove('pending'); }
+  else volatilePending = pending;
 }
 async function report(text, error = false) {
-  text = t(String(text)).replace(/(?:https?:\/\/|magnet:\?)[^\s"'<>]+/gi, '[adresse]');
-  await api.storage.local.set({lastResult: {text, error, at: Date.now()}});
-  await api.action?.setBadgeBackgroundColor({color: error ? '#b83e58' : '#147d65'});
-  await api.action?.setBadgeText({text: error ? '!' : 'OK'});
+  text = String(text).replace(/(?:https?:\/\/|magnet:\?)[^\s"'<>]+/gi, '[adresse]');
+  const status = {text, error};
+  if (api.storage.session) await api.storage.session.set({status}); else volatileStatus = status;
+  await api.action?.setBadgeText({text: error ? '!' : ''});
+  await api.action?.setBadgeBackgroundColor({color: '#b83e58'});
   await api.action?.setTitle({title: 'MediaSeed · ' + text});
 }
-async function direct(item, tab) {
-  let result;
-  try {
-    if (!(await settings()).origin) { await review(item); return {ok: true, setup: true}; }
-    await api.action?.setBadgeText({text: '…'});
-    result = await send(item);
-  } catch (error) {
-    await report(error.message || t("The addition failed."), true).catch(() => {});
-    // Preserve the draft for a deliberate retry after setup/login; never retry POST.
-    await review(item);
-    return {error: error.message, reviewed: true};
+async function setup() {
+  // Setup belongs in the toolbar popup, never in a separate extension tab.
+  // Browsers that cannot open it programmatically retain the pending source.
+  if (api.action?.openPopup) {
+    try { await api.action.openPopup(); } catch { await report('Klik på MediaSeed-ikonet og gem adressen én gang. Linket venter.', true); }
+  } else await report('Klik på MediaSeed-ikonet og gem adressen én gang. Linket venter.', true);
+}
+async function destination() {
+  const config = await api.storage.local.get('origin');
+  if (!config.origin) {
+    // Reuse only a recognizable app tab on an already granted host.
+    // Reading tabs never requests broad browser history access.
+    const candidates = [];
+    for (const tab of await api.tabs.query({})) {
+      if (!/MediaSeed/i.test(tab.title || '')) continue;
+      let origin; try { origin = MS.origin(new URL(tab.url).origin); } catch { continue; }
+      if (!MS.selectSeedTab([tab], origin) || !await api.permissions.contains({origins: [MS.pattern(origin)]})) continue;
+      const result = await api.scripting.executeScript({target: {tabId: tab.id}, func: () => !!(document.querySelector('#workspace') && document.querySelector('#add-torrent'))}).catch(() => []);
+      if (result[0]?.result === true) candidates.push(origin);
+    }
+    const origins = [...new Set(candidates)];
+    if (origins.length !== 1) throw Error('Gem din MediaSeed-adresse i udvidelsen først.');
+    config.origin = origins[0]; await api.storage.local.set({origin: config.origin});
   }
-  // Feedback failure after POST must never turn a successful import into a retry.
-  await report(resultText(result)).catch(() => {});
-  if (tab?.id) await api.scripting.executeScript({target: {tabId: tab.id}, func: mediaSeedToast, args: [resultText(result)]}).catch(() => {});
-  return result;
+  const origin = MS.origin(config.origin);
+  if (!await api.permissions.contains({origins: [MS.pattern(origin)]})) throw Error('Gem adressen igen for at give adgang til MediaSeed.');
+  return origin;
 }
-async function inject(tab) {
-  const config = await settings();
-  let origin; try { origin = new URL(tab.url).origin; } catch { return; }
-  if (origin === config.origin || !config.sites.includes(origin)) return;
-  if (await api.permissions.contains({origins: [MS.pattern(origin)]})) await api.scripting.executeScript({target: {tabId: tab.id}, files: ['common.js', 'capture.js']});
+async function openDestination(origin, preferredId) {
+  const existing = MS.selectSeedTab(await api.tabs.query({}), origin, preferredId);
+  const tab = existing ? await api.tabs.update(existing.id, {active: true}) : await api.tabs.create({url: origin + '/', active: true});
+  if (tab.windowId !== undefined) await api.windows?.update(tab.windowId, {focused: true});
+  return tab;
 }
-api.tabs.onUpdated.addListener((id, info, tab) => { if (info.status === 'complete') inject(tab).catch(() => {}); });
-api.runtime.onInstalled.addListener(async () => {
-  const config = await settings(); setLanguage(config.language || 'da');
-  await api.contextMenus.removeAll();
-  api.contextMenus.create({id: 'mediaseed-review', title: t('Open in MediaSeed'), contexts: ['link']});
-  api.contextMenus.create({id: 'mediaseed-rss', title: t('Open RSS feed in MediaSeed'), contexts: ['link']});
-  api.contextMenus.create({id: 'mediaseed-add', title: t("Add to MediaSeed"), contexts: ['link']});
-});
-api.contextMenus.onClicked.addListener((info, tab) => {
-  if (!['mediaseed-add','mediaseed-review','mediaseed-rss'].includes(info.menuItemId)) return;
+async function deliver(tabId) {
+  if (delivering) return;
+  delivering = true;
   try {
-    const item = info.linkUrl?.startsWith('magnet:') ? {kind: 'magnet', magnet: MS.magnet(info.linkUrl)} : {kind: 'link', url: MS.webURL(info.linkUrl).href, sourceTab: tab?.id};
-    if(info.menuItemId==='mediaseed-review')item.mode='dialog';
-    if(info.menuItemId==='mediaseed-rss'){item.kind='rss';item.url=MS.webURL(info.linkUrl).href;item.mode='dialog';}
-    direct(item, tab).catch(() => {});
-  } catch { review({kind: 'invalid'}).catch(() => {}); }
+    const {pending} = await state();
+    if (!pending || pending.tabId !== tabId) return;
+    if (Date.now() - pending.created >= MAX_AGE) { await savePending(null); await report('Linket udløb efter 15 minutter. Send det igen.', true); return; }
+    // Re-check the configured origin and its current grant after login/navigation.
+    const origin = await destination();
+    if (pending.origin !== origin) throw Error('MediaSeed-adressen er ændret. Ryd det ventende link og send igen.');
+    const tab = await api.tabs.get(tabId);
+    if (tab.status !== 'complete' || new URL(tab.url).origin !== origin) return;
+    const results = await api.scripting.executeScript({target: {tabId}, func: mediaSeedBridge, args: [origin, pending]});
+    const result = results[0]?.result;
+    if (result?.opened) {
+      // Never repeat delivery because a badge/status update failed afterwards.
+      await savePending(null);
+      await report(pending.kind === 'rss' ? 'RSS-linket er klar i MediaSeed. Vælg indstillinger og gem feedet.' : 'Torrenten er klar i MediaSeed. Vælg mappe og indstillinger, og tryk Start eller Tilføj på pause.').catch(() => {});
+      return {ok: true, opened: true};
+    }
+    await report(result?.error || 'Åbn MediaSeed og tryk Fortsæt i udvidelsen.', !result?.login);
+    return {waiting: true, login: !!result?.login};
+  } finally { delivering = false; }
+}
+async function begin(value, sourceTab) {
+  if (working || delivering) throw Error('En overførsel er allerede i gang.');
+  working = true;
+  try {
+    const previous = (await state()).pending;
+    if (previous && Date.now() - previous.created < MAX_AGE) {
+      if (previous.transferId === value?.transferId) {
+        const origin = await destination();
+        if (previous.origin && previous.origin !== origin) throw Error('Adressen er ændret. Ryd linket og send det igen.');
+        return await prepareAndOpen(previous, origin, previous.sourceTab);
+      }
+      throw Error('Et link venter allerede. Tryk Fortsæt eller Ryd i udvidelsen.');
+    }
+    await savePending(null);
+    let item = typeof value === 'string' ? MS.sourceLink(value) : value;
+    if (item.kind === 'file') MS.file(item.name, MS.decode(item.base64));
+    else if (!['link', 'magnet', 'rss'].includes(item.kind)) throw Error('Ukendt overførsel.');
+    item = {...item, transferId: /^[a-f0-9-]{36}$/i.test(item.transferId || '') ? item.transferId : crypto.randomUUID(), created: Date.now(), sourceTab: sourceTab?.id};
+    // Keep the selected source while the user completes first-time setup.
+    await savePending(item);
+    let origin;
+    try { origin = await destination(); }
+    catch { await report('Gem din MediaSeed-adresse for at fortsætte.'); await setup(); return {setup: true}; }
+    return await prepareAndOpen(item, origin, sourceTab?.id);
+  } finally { working = false; }
+}
+async function prepareAndOpen(item, origin, sourceId) {
+  if (item.kind === 'link') {
+    const url = MS.webURL(item.url);
+    const source = sourceId ? await api.tabs.get(sourceId).catch(() => null) : null;
+    await report('Henter torrentfilen…');
+    let file;
+    if (source?.url && new URL(source.url).origin === url.origin) {
+      file = (await api.scripting.executeScript({target: {tabId: source.id}, func: mediaSeedReadFile, args: [url.href]}))[0]?.result;
+    } else {
+      if (!await api.permissions.contains({origins: [MS.pattern(url.origin)]})) throw Error('Giv adgang til trackerens hjemmeside i udvidelsen, og tryk Fortsæt.');
+      file = await mediaSeedReadFile(url.href, false);
+    }
+    if (!file) throw Error('Torrentfilen kunne ikke hentes. Kontrollér dit tracker-login.');
+    MS.file(file.name, MS.decode(file.base64));
+    item = {kind: 'file', transferId: item.transferId, created: item.created, ...file};
+  }
+  const tab = await openDestination(origin, item.tabId);
+  item = {...item, origin, tabId: tab.id};
+  await savePending(item);
+  await report('Åbner MediaSeed. Log ind dér, hvis du bliver bedt om det.');
+  return await deliver(tab.id) || {waiting: true};
+}
+async function resume() {
+  if (working || delivering) throw Error('Vent, til overførslen er færdig.');
+  working = true;
+  try {
+    const {pending} = await state();
+    if (!pending) return {ok: true};
+    if (Date.now() - pending.created >= MAX_AGE) { await savePending(null); throw Error('Linket er udløbet. Send det igen.'); }
+    const origin = await destination();
+    if (pending.origin && pending.origin !== origin) throw Error('Adressen er ændret. Ryd linket og send det igen.');
+    return await prepareAndOpen(pending, origin, pending.sourceTab);
+  } finally { working = false; }
+}
+api.runtime.onInstalled.addListener(async () => {
+  await api.contextMenus.removeAll();
+  api.contextMenus.create({id: 'mediaseed-add', title: 'Send til MediaSeed', contexts: ['link']});
+});
+// Serialize rapid context-menu sends so they append to the same app dialog.
+let contextSends = Promise.resolve(), contextCount = 0;
+function queueContext(info, tab) {
+  if (info.menuItemId !== 'mediaseed-add') return;
+  if (contextCount >= 100) { void report('Vent, til de valgte torrentlinks er overført.', true); return; }
+  contextCount++;
+  contextSends = contextSends.then(() => begin(info.linkUrl, tab))
+    .catch(error => report(error.message, true).catch(() => {}))
+    .finally(() => { contextCount--; });
+}
+api.contextMenus.onClicked.addListener(queueContext);
+api.tabs.onUpdated.addListener((id, change) => {
+  if (change.status === 'complete') deliver(id).catch(() => report('Linket venter. Åbn udvidelsen og tryk Fortsæt.', true).catch(() => {}));
 });
 async function handle(message, sender) {
-  if (message?.type === 'capture') {
-    const config = await settings();
-    const source = new URL(sender.url).origin;
-    if (!sender.tab || sender.frameId !== 0 || source === config.origin || !config.sites.includes(source)) throw Error(t("This website is not enabled."));
-    if (!await api.permissions.contains({origins: [MS.pattern(source)]})) throw Error(t("Website access removed."));
-    const item = message.url.startsWith('magnet:') ? {kind: 'magnet', magnet: MS.magnet(message.url)} : {kind: 'link', url: MS.webURL(message.url).href, sourceTab: sender.tab.id};
-    if (!MS.capturable(message.url, source)) throw Error(t("Only torrent links can be captured automatically."));
-    return await direct(item, sender.tab);
+  if (!sender.url || ![api.runtime.getURL('popup.html'), api.runtime.getURL('popup.html') + '#batch'].includes(sender.url) || (sender.id && sender.id !== api.runtime.id)) throw Error('Åbn udvidelsens eget vindue.');
+  if (message.type === 'state') {
+    const current = await state();
+    const pending = current.pending;
+    return {status: current.status, pending: pending ? {kind: pending.kind, name: pending.name, created: pending.created, sourceOrigin: pending.kind === 'link' ? new URL(pending.url).origin : null} : null};
   }
-  // Only our own extension pages may configure, read imports or send API requests.
-  if (sender.tab && !sender.url?.startsWith(api.runtime.getURL(''))) throw Error(t("This action requires the extension's own window."));
-  if (!sender.url?.startsWith(api.runtime.getURL(''))) throw Error(t("Unknown sender."));
-  if (message.type === 'pending') return {item: await pendingGet(message.id)};
-  if (message.type === 'inject') { const tab = await api.tabs.get(message.tabId); await inject(tab); return {ok: true}; }
-  if (message.type === 'send') {
-    const result = await send(message.item);
-    if (message.pending && result.ok) { if (temporary) await temporary.remove(message.pending).catch(() => {}); else volatile.delete(message.pending); }
-    if (result.ok) await report(resultText(result)).catch(() => {});
-    return result;
+  if (message.type === 'batch-window') {
+    await openDestination(await destination()); return {ok: true};
   }
-  throw Error(t("Unknown action."));
+  if (message.type === 'send-file') return begin({kind: 'file', name: message.name, base64: message.base64, transferId: message.transferId});
+  if (message.type === 'send-link') {
+    const item = MS.sourceLink(message.url);
+    if (item.kind !== 'link') throw Error('Brug torrent-downloadlinks her. Send RSS og magnetlinks via højreklik.');
+    return begin({...item, transferId: message.transferId});
+  }
+  if (message.type === 'resume') return resume();
+  if (message.type === 'clear') {
+    if (working || delivering) throw Error('Vent, til overførslen er færdig.');
+    await savePending(null); await report('Ventende link ryddet. Ingen download er startet.'); return {ok: true};
+  }
+  if (message.type === 'open') { await openDestination(await destination()); return {ok: true}; }
+  throw Error('Ukendt handling.');
 }
-api.runtime.onMessage.addListener((message, sender, respond) => {
-  handle(message, sender).then(respond, error => respond({error: error.message || t("The action failed.")})); return true;
+api.runtime.onMessage.addListener((message, sender, reply) => {
+  handle(message, sender).then(reply).catch(async error => { await report(error.message, true).catch(() => {}); reply({error: error.message}); });
+  return true;
 });

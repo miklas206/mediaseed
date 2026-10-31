@@ -14,6 +14,17 @@ MAX_ATTEMPTS = 5
 DELAYS = (300, 900, 3600, 21600, 86400)
 
 
+def title_queries(name):
+    """Search release titles without requiring the client's technical suffix."""
+    normalized = re.sub(r"\s+", " ", re.sub(r"[._()\[\]{}]+", " ", name)).strip()
+    marker = re.search(r"\b(S\d{1,3}(?:E\d{1,3})?|(?:19|20)\d{2}|\d{3,4}p)\b", normalized, re.IGNORECASE)
+    if not marker or not normalized[:marker.start()].strip():
+        return []
+    title = normalized[:marker.start()].strip()
+    specific = normalized[:marker.end()].strip()
+    return list(dict.fromkeys([specific, title]))
+
+
 class Enrichment:
     def __init__(self, covers):
         self.covers = covers
@@ -45,6 +56,27 @@ class Enrichment:
     def save(self, identifier, account, state):
         with self.connect() as db:
             db.execute("INSERT OR REPLACE INTO jobs VALUES (?,?,?,?)", (identifier, self.scope(account), json.dumps(state), time.time()))
+
+    def request_refresh(self, identifier, accounts):
+        """Explicit user retry; preserve cached data and rate-limit across restarts."""
+        now = time.time()
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            states = []
+            for account in accounts:
+                scope = self.scope(account)
+                row = db.execute("SELECT state FROM jobs WHERE hash=? AND scope=?", (identifier, scope)).fetchone()
+                state = json.loads(row[0]) if row else {}
+                if now - state.get("manual_at", -300) < 300:
+                    return False
+                states.append((scope, state))
+            for scope, state in states:
+                for stage in ("search", "fallback", "detail", "image", "refresh", "variant", "page"):
+                    state[stage] = state[stage + "_at"] = 0
+                state.update(manual_at=now, cursor=None, detail_read=False, complete=False, force_image=True,
+                             matched=bool(state.get("record_id")))
+                db.execute("INSERT OR REPLACE INTO jobs VALUES (?,?,?,?)", (identifier, scope, json.dumps(state), now))
+        return True
 
     def due(self, state, stage):
         return state.get(stage, 0) < MAX_ATTEMPTS and time.time() >= state.get(stage + "_at", 0)
@@ -85,15 +117,24 @@ class Enrichment:
                             state["has_media_info"] = state.get("has_media_info", False) or bool(saved.get("media_info"))
                         state["seeded"] = True
                         self.save(identifier, account, state)
-                    if not state.get("matched") and self.due(state, "search") and allowance:
+                    if not state.get("matched") and allowance:
                         name = str(torrent.get("name", ""))[:200]
                         release = re.sub(r"\.(?:mkv|mp4|m4v|avi|mov|wmv|webm|m2ts|ts|iso|flac|mp3|m4a|ogg|wav)$", "", name, flags=re.IGNORECASE)
                         variants = list(dict.fromkeys([release, name, re.sub(r"[._]+", " ", release).strip(), re.sub(r"[._]+", " ", name).strip()]))
-                        while allowance and self.due(state, "search"):
-                            params = {"name": variants[state.get("variant", 0) % len(variants)], "perPage": 50}
-                            if state.get("cursor"):
+                        fallback = title_queries(release)
+                        while allowance:
+                            if self.due(state, "search"):
+                                stage = "search"
+                                query = variants[state.get("variant", 0) % len(variants)]
+                            elif state.get("fallback", 0) < len(fallback) and self.due(state, "fallback"):
+                                stage = "fallback"
+                                query = fallback[state.get("fallback", 0)]
+                            else:
+                                break
+                            params = {"name": query, "perPage": 50}
+                            if stage == "search" and state.get("cursor"):
                                 params["cursor"] = state["cursor"]
-                            self.attempted(identifier, account, state, "search")
+                            self.attempted(identifier, account, state, stage)
                             allowance -= 1
                             budget -= 1
                             data = await self.covers.tracker_read(account, "/api/torrents/filter", params)
@@ -109,11 +150,12 @@ class Enrichment:
                                 state["matched"] = bool(state.get("record_id") or state.get("complete"))
                                 self.save(identifier, account, state)
                                 break
-                            cursor = self.next_cursor(data)
-                            if cursor and state.get("page", 0) < 2:
-                                state.update(cursor=cursor, page=state.get("page", 0) + 1, search_at=0)
-                            else:
-                                state.update(cursor=None, page=0, variant=state.get("variant", 0) + 1)
+                            if stage == "search":
+                                cursor = self.next_cursor(data)
+                                if cursor and state.get("page", 0) < 2:
+                                    state.update(cursor=cursor, page=state.get("page", 0) + 1, search_at=0)
+                                else:
+                                    state.update(cursor=None, page=0, variant=state.get("variant", 0) + 1)
                             self.save(identifier, account, state)
 
                     if state.get("record_id") and (not state.get("complete") or not state.get("detail_read")) and self.due(state, "detail") and allowance:
@@ -148,7 +190,7 @@ class Enrichment:
                 # do not cause another authenticated tracker lookup.
                 poster = poster_url(state.get("poster"))
                 if poster and self.due(state, "image"):
-                    if path.is_file() and time.time() - path.stat().st_mtime < 86400:
+                    if path.is_file() and time.time() - path.stat().st_mtime < 86400 and not state.get("force_image"):
                         state["image_at"] = path.stat().st_mtime + 86400
                         self.save(identifier, account, state)
                     elif budget:
@@ -157,7 +199,7 @@ class Enrichment:
                         try:
                             await self.covers.download(poster, path)
                             if path.is_file() and time.time() - path.stat().st_mtime < 60:
-                                state.update(image=0, image_at=time.time() + 86400)
+                                state.update(image=0, image_at=time.time() + 86400, force_image=False)
                                 self.save(identifier, account, state)
                         except Exception as error:  # noqa: BLE001 - retain independent image retry
                             logging.getLogger(__name__).warning("Cover recovery deferred (%s)", type(error).__name__)

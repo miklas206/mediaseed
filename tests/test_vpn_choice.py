@@ -16,6 +16,7 @@ def integration(tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIASEED_VPN_URL", "http://mediavpn")
     monkeypatch.setenv("MEDIASEED_VPN_TOKEN_FILE", str(token))
     state = {"enabled": True, "profileId": "a" * 24, "ready": True, "downloadsEnabled": True, "country": "Sweden", "checkedAt": time.time(), "profiles": [{"id": "a" * 24, "name": "Test VPN"}]}
+    state["torrentCapabilities"] = ["destination-incomplete"]
     calls = []
     torrents = []
     original = httpx.AsyncClient
@@ -42,7 +43,7 @@ def integration(tmp_path, monkeypatch):
             torrents.append({"hash":source_hashes(content=request.content)[0],"tags":request.url.params.get("tags", ""),"progress":0,"state":"stoppedDL"})
         return httpx.Response(200, json={"status": 204, "body": base64.b64encode(b"").decode()})
 
-    monkeypatch.setattr(module.httpx, "AsyncClient", lambda **kwargs: original(**kwargs, transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr(module.httpx, "AsyncClient", lambda **kwargs: original(**{**kwargs, "transport": httpx.MockTransport(handler)}))
     return state, calls
 
 

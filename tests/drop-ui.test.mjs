@@ -44,6 +44,7 @@ function setup() {
   const body = create(); body.classList.add('signed-in');
   const context = vm.createContext({document: {querySelector: find, querySelectorAll: () => [], createElement: create, body,
     addEventListener(type, fn) {if (!listeners.has(type)) listeners.set(type, []); listeners.get(type).push(fn);}},
+    URLSearchParams,
     Option: function(text, value) {this.textContent = text; this.value = value;},
     MediaAppTheme: {setOverrideHandler() {}, applyIdentity() {}}, window: {addEventListener() {}},
     setInterval() {}, setTimeout() {}, clearTimeout() {},
@@ -54,7 +55,7 @@ function setup() {
       return {ok: true, json: async () => ({needsSetup: true})};
     },
   });
-  vm.runInContext(readFileSync(new URL('../mediaseed/static/i18n.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/rich-ui.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
+  vm.runInContext(readFileSync(new URL('../mediaseed/static/i18n.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/torrent-controls.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/rich-ui.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
   const submit = form.onsubmit;
   form.onsubmit = async event => {if (!vm.runInContext("addStorageReady", context)) await context.loadAddStorage(); return submit(event);};
   const refresh = context.refresh;
@@ -120,8 +121,30 @@ test('page drop opens a populated dialog, preserves its draft, and uploads only 
   await form.onsubmit({preventDefault() {}});
   assert.equal(uploads.length, 2); assert.equal(uploads[1].body, replacement);
   assert.match(uploads[1].url, /filename=Other.TORRENT&ratio=1&start=false&location=local&folder=$/);
-  assert.equal(find('#add-torrent').open, true);
+  assert.equal(find('#add-torrent').open, false);
 });
+
+for (const source of ['file', 'magnet']) for (const action of ['start', 'pause']) {
+  test(`${source} ${action} closes the dialog before the request completes`, async () => {
+    const {find, context, drag, form} = setup();
+    if (source === 'file') drag('drop', [torrent()]); else context.openAdd();
+    await context.loadAddStorage();
+    const original = context.fetch;
+    let release;
+    context.fetch = (url, options) => url.startsWith('/api/torrents')
+      ? new Promise(resolve => {release = () => resolve({ok: true, json: async () => ({startRequested: action === 'start'})});})
+      : original(url, options);
+    const submitted = form.onsubmit({preventDefault() {}, submitter: {value: action}});
+    assert.equal(find('#add-torrent').open, false);
+    assert.equal(vm.runInContext('addingTorrent', context), true);
+    assert.equal(find('#new-torrent').disabled, true);
+    context.openAdd();
+    assert.equal(find('#add-torrent').open, false);
+    release(); await submitted;
+    assert.equal(vm.runInContext('addingTorrent', context), false);
+    assert.equal(Boolean(find('#new-torrent').disabled), false);
+  });
+}
 
 test('start button submits the explicit start choice; pause remains available without VPN', async () => {
   const {find, context, drag, form, uploads} = setup();
@@ -229,6 +252,18 @@ test('folder selection survives upload', async () => {
   assert.equal(find('#add-folder-path').textContent, '/Danske film');
 });
 
+test('finishing an addition releases its controls without waiting for list refresh', async () => {
+  const {context, drag, form, find} = setup();
+  drag('drop', [torrent()]);
+  let refreshed = 0;
+  context.refreshTorrents = () => {refreshed++; return new Promise(() => {});};
+  await form.onsubmit({preventDefault() {}, submitter: {value: 'pause'}});
+  assert.equal(refreshed, 1);
+  assert.equal(vm.runInContext('addingTorrent', context), false);
+  assert.equal(Boolean(find('#new-torrent').disabled), false);
+  assert.equal(find('#add-torrent').open, false);
+});
+
 
 test('download destination controls belong to the add dialog, not a hidden feed form', () => {
   const html = readFileSync(new URL('../mediaseed/static/index.html', import.meta.url), 'utf8');
@@ -253,12 +288,12 @@ test('file picker accumulates selections and ignores duplicates', async () => {
   assert.equal(uploads.length, 3, 'successful files cannot be re-uploaded');
 });
 
-test('one rejection does not stop a batch and retry sends only unsuccessful files', async () => {
-  const {context, drag, form, uploads} = setup();
+test('one rejection does not stop a batch and reopening preserves only unsuccessful retries', async () => {
+  const {find, context, drag, form, uploads} = setup();
   const original = context.fetch; let reject = true;
   context.fetch = async (url, options) => {
     const response = await original(url, options);
-    if (url.includes('filename=Bad.torrent') && reject) return {ok:false,json:async()=>({detail:'Invalid torrent file'})};
+    if (url.includes('filename=Bad.torrent') && reject) return {ok:false,status:422,json:async()=>({detail:'Invalid torrent file'})};
     return response;
   };
   drag('drop', [torrent('Good.torrent'), torrent('Bad.torrent'), torrent('Last.torrent')]);
@@ -266,6 +301,11 @@ test('one rejection does not stop a batch and retry sends only unsuccessful file
   assert.equal(uploads.length, 3);
   assert.equal(vm.runInContext('torrentFiles.filter(item => item.state === "added").length', context), 2);
   assert.equal(vm.runInContext('torrentFiles.filter(item => item.state === "error").length', context), 1);
+  assert.equal(context.MediaAppI18n.t(vm.runInContext('torrentFiles.find(item => item.state === "error").message', context)), context.MediaAppI18n.t('The file is not a valid torrent file.'));
+  assert.equal(find('#add-torrent').open, false);
+  context.openAdd();
+  assert.equal(find('#add-torrent').open, true);
+  assert.equal(vm.runInContext('torrentFiles.length', context), 3);
   reject = false;
   await form.onsubmit({preventDefault() {},submitter:{value:'pause'}});
   assert.equal(uploads.length, 4); assert.match(uploads[3].url, /filename=Bad.torrent/);
@@ -298,6 +338,20 @@ test('lost acknowledgement is not retried automatically and does not stop later 
   assert.equal(vm.runInContext('torrentFiles[1].state',context),'added');
 });
 
+test('ratio display and sorting retain verified credit while stale reads fail goal checks', () => {
+  const {context}=setup();
+  assert.equal(context.seedCreditRatio({credited_ratio:.16,ratio:.32}),.16);
+  const stale={hash:'a',credited_ratio:0,ratio:.32,credit_observation_stale:true,last_credited_ratio:.16,ratio_limit:1};
+  assert.equal(context.seedCreditRatio(stale),.16);
+  assert.match(context.seedSeeding(stale),/0[.,]16/);
+  assert.equal(context.seedCreditRatio({...stale,last_credited_ratio:null}),undefined);
+  assert.equal(context.seedCreditRatio({credited_ratio:0,ratio:0}),0);
+  const sorted=context.sortTorrentRows([stale,{hash:'b',credited_ratio:.1}],'ratio','desc');
+  assert.equal(sorted[0].hash,'a');
+  // A new accepted denominator may legitimately lower a downloading torrent's ratio.
+  assert.equal(context.seedCreditRatio({credited_ratio:.08,last_credited_ratio:.16}),.08);
+});
+
 test('seeding progress follows cleanup ratio, time and AND/OR goals instead of the stop limit', () => {
   const {context}=setup();
   const row={progress:1,ratio_limit:1,credited_ratio:1.3,seeding_time:24*3600,cleanup:{mode:'ratio',ratio:3,hours:48}};
@@ -325,4 +379,37 @@ test('seeding progress follows cleanup ratio, time and AND/OR goals instead of t
   for(const [state,tone] of [['uploading','seeding'],['downloading','downloading'],['stalledUP','waiting'],['pausedUP','paused'],['checkingUP','checking'],['missingFiles','error']]) {
     assert.equal(context.seedProgressTone({state,progress:state==='downloading'?.5:1}),tone);
   }
+});
+
+test('ratio and active-time meters keep separate percentages for the reported 3-or-72h goals', () => {
+  const {context}=setup();
+  const row={progress:1,credited_ratio:.23,ratio_limit:1,seeding_time:55.84*3600,cleanup:{mode:'either',ratio:3,hours:72}};
+  let goal=context.seedCleanupProgress(row);
+  assert.equal(Math.round(goal.ratioFraction*100),8);
+  assert.equal(Math.round(goal.timeFraction*100),78);
+  assert.equal(Math.round(goal.fraction*100),78);
+  row.credited_ratio=.35;row.seeding_time=31.69*3600;
+  goal=context.seedCleanupProgress(row);
+  assert.equal(Math.round(goal.ratioFraction*100),12);
+  assert.equal(Math.round(goal.timeFraction*100),44);
+  row.cleanup.mode='both';goal=context.seedCleanupProgress(row);
+  assert.equal(goal.fraction,goal.ratioFraction);
+  row.credited_ratio=4;goal=context.seedCleanupProgress(row);
+  assert.equal(goal.ratioFraction,1);
+  assert.equal(goal.fraction,goal.timeFraction);
+  row.cleanup.mode='ratio';goal=context.seedCleanupProgress(row);
+  assert.equal(goal.timeFraction,undefined);
+  row.cleanup.mode='time';goal=context.seedCleanupProgress(row);
+  assert.equal(goal.ratioFraction,undefined);
+});
+
+test('unknown or stale credit never becomes a fabricated ratio-meter percentage', () => {
+  const {context}=setup();
+  const row={credited_ratio:0,credit_observation_stale:true,last_credited_ratio:null,seeding_time:10*3600,cleanup:{mode:'either',ratio:3,hours:72}};
+  let goal=context.seedCleanupProgress(row);
+  assert.equal(goal.ratioFraction,undefined);
+  assert.equal(Math.round(goal.timeFraction*100),14);
+  row.last_credited_ratio=.3;goal=context.seedCleanupProgress(row);
+  assert.ok(Math.abs(goal.ratioFraction-.1)<1e-9);
+  assert.equal(row.credited_ratio,0); // Safety-sensitive backend input remains untouched.
 });

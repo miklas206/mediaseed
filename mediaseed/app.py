@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from mediaseed.appearance import install_theme_preferences, navigation_override, theme_override
-from mediaseed.cleanup import CleanupManager, CleanupPolicy, cleanup_identity
+from mediaseed.cleanup import CleanupManager, CleanupPolicy, CleanupUpdate, cleanup_identity
 from mediaseed.features import add_stopped, install_features, queue_summary
 from mediaseed.tracker_credit import TrackerCredit
 from mediaseed.storage import Storage
@@ -101,7 +101,10 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
     if downloads.resolve() != downloads:
         raise ValueError("Downloads directory must not contain symlink components")
     storage_catalog = Storage(downloads)
+    from mediaseed.native_move_progress import NativeMoveProgress
+    native_move_progress = NativeMoveProgress(storage_catalog)
     move_manager = None
+    conversion_manager = None
     base = (base_url or os.environ.get("MEDIASEED_BASE_URL", "http://127.0.0.1:18800")).rstrip("/")
     parsed = urlsplit(base)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.path or parsed.username:
@@ -151,8 +154,11 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             raise HTTPException(409, "MediaVPN integration is not configured")
         try:
             token = Path(vpn_token_file).read_text().strip()
-            response = await vpn_pool.request(method, "/api/integration/" + path, json=payload if content is None else None, content=content, headers={"X-MediaSeed-Key": token})
+            response = await vpn_pool.request(method, "/api/integration/" + path, coalesce=method == "GET" and path == "status", json=payload if content is None else None, content=content, headers={"X-MediaSeed-Key": token})
             if response.status_code >= 400:
+                storage_error = "The destination's .incomplete folder is unavailable, read-only or on another filesystem"
+                if response.status_code == 409 and response.json().get("detail") == storage_error:
+                    raise HTTPException(409, storage_error)
                 raise HTTPException(response.status_code if response.status_code in {409, 413, 422} else 503, "MediaVPN could not verify the operation")
             return response.json()
         except (httpx.HTTPError, OSError, ValueError):
@@ -234,7 +240,9 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @asynccontextmanager
     async def lifespan(app):
-        workers = [asyncio.create_task(cleanup.run()), asyncio.create_task(credit.run()), asyncio.create_task(move_manager.run())]
+        app.state.native_uploader.start()
+        workers = [asyncio.create_task(cleanup.run()), asyncio.create_task(credit.run()), asyncio.create_task(move_manager.run()), asyncio.create_task(conversion_manager.run())]
+        workers.append(asyncio.create_task(app.state.upload_seeding.run()))
         if vpn_url:
             workers += [asyncio.create_task(background()), asyncio.create_task(reconcile_disconnect())]
         yield
@@ -243,6 +251,11 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         for worker in workers:
             with suppress(asyncio.CancelledError):
                 await worker
+        if hasattr(app.state,"tracker_reads"):
+            await app.state.tracker_reads.close()
+        await app.state.native_uploader.stop()
+        if hasattr(app.state,"uploader_bridge"):
+            await app.state.uploader_bridge.close()
         await hub_pool.close()
         await vpn_pool.close()
 
@@ -260,9 +273,9 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             except HTTPException as error:
                 return JSONResponse({"detail": error.detail}, status_code=error.status_code)
         if hub_url and request.url.hostname not in {urlsplit(value).hostname for value in origins}:
-            return Response(status_code=400)
+            return JSONResponse({"detail": "Request address not allowed. Open MediaSeed using its configured address."}, status_code=400)
         if request.method not in {"GET", "HEAD", "OPTIONS"} and origin and origin not in origins:
-            return Response(status_code=403)
+            return JSONResponse({"detail": "Request origin not allowed. Reload MediaSeed using its configured address."}, status_code=403)
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -353,12 +366,22 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         return await credit.request(path, method, payload, files)
 
     async def raw_qbit(path, method="GET", payload=None, files=None):
+        if method == "POST" and conversion_manager is not None:
+            conversion_manager.guard(path, payload)
         if method == "POST" and move_manager is not None:
             move_manager.guard(path, payload)
+        if path == "/api/v2/torrents/add" and method == "POST":
+            destination = (payload or {}).get("savepath", "/downloads")
+            payload = {**(payload or {}), "downloadPath": storage_catalog.incomplete(destination),
+                       "useDownloadPath": "true", "autoTMM": "false"}
         if vpn_url:
             selection = vpn_selection()
             if selection["provider"] != "mediavpn" or selection["disconnect_pending"]:
                 raise HTTPException(409, "Choose MediaVPN under VPN in MediaSeed first. Downloads are blocked.")
+            if path == "/api/v2/torrents/add" and method == "POST":
+                capabilities = (await vpn_request("status")).get("torrentCapabilities", [])
+                if "destination-incomplete" not in capabilities:
+                    raise HTTPException(409, "Update MediaVPN to support destination-local .incomplete folders before adding downloads")
             if files:
                 query = urlencode({"ratio": float(payload.get("ratioLimit", 1)), "savepath": payload.get("savepath", "/downloads"), "category": payload.get("category", ""), "start": "true" if payload.get("stopped") == "false" else "false", "tags": payload.get("tags", "")})
                 result = await vpn_request("upload?" + query, "POST", content=files["torrents"][1])
@@ -388,7 +411,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/healthz")
     def health():
-        return {"status": "healthy", "version": "0.1.38"}
+        return {"status": "healthy", "version": "0.1.39"}
 
     @app.get("/api/auth/status")
     async def status(request: Request):
@@ -494,23 +517,39 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             if not isinstance(rows, list):
                 raise ValueError()
             result = []
+            native_moves = await asyncio.to_thread(native_move_progress.snapshot, rows[:500])
             swarm_samples = app.state.swarm.snapshot(rows[:500])
             credits = credit.observe_many(rows[:500])
             cleanup_rules = {identifier: rule for rule in cleanup.records() for identifier in rule["hashes"]}
             for row, credited in zip(rows[:500], credits):
                 public = {key: value for key, value in row.items() if key in allowed}
                 identifier = str(row.get("hash", ""))
+                if identifier in native_moves:
+                    public["nativeMove"] = native_moves[identifier]
                 sample = swarm_samples.get(identifier.lower())
                 if sample is not None:
                     public["swarm"] = sample
                 rule = cleanup_rules.get(identifier.lower())
                 public["cleanup"] = ({key: rule[key] for key in ("mode", "hours", "ratio", "delete_files", "status")}
                                      if rule and cleanup_identity(rule, row) else {"mode": "never", "status": "disabled"})
+                for key, length in (("infohash_v1", 40), ("infohash_v2", 64)):
+                    value = row.get(key)
+                    if isinstance(value, str) and re.fullmatch(r"[a-fA-F0-9]{" + str(length) + r"}", value):
+                        public[key] = value.lower()
+                try:
+                    tracker_host = urlsplit(row.get("tracker", "")).hostname
+                except (ValueError, TypeError, AttributeError):
+                    tracker_host = None
+                public["tracker_provider"] = "nordicbytes" if tracker_host in {
+                    "t.nordicbytes.org", "t.nordicswarm.org", "t.polarswarm.org", "nordicbytes.org"
+                } else None
                 if re.fullmatch(r"[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", identifier):
                     public.update(credited)
                     cached = data / "cover-cache" / (hashlib.sha256(identifier.lower().encode()).hexdigest() + ".img")
                     if cached.is_file():
                         public["cover"] = "/api/covers/" + identifier.lower()
+                if not public.get("tracker_name") and public["tracker_provider"] == "nordicbytes":
+                    public["tracker_name"] = "NordicBytes"
                 result.append(public)
             return result
         except (ValueError, AttributeError):
@@ -664,7 +703,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
         return result
 
     @app.post("/api/torrents/upload")
-    async def upload(request: Request, filename: str = Query(min_length=1, max_length=255), ratio: float = Query(default=1, ge=1, le=1000, allow_inf_nan=False), start: bool = Query(default=False), cleanup_mode: Literal["never", "time", "ratio", "both", "either"] = "never", cleanup_hours: float = Query(default=49, ge=1/60, le=87600, allow_inf_nan=False), cleanup_ratio: float = Query(default=1, ge=1, le=1000, allow_inf_nan=False), cleanup_delete_files: bool = False, location: str = Query(default="local", max_length=64), folder: str = Query(default="", max_length=1000), session=Depends(authorized)):
+    async def upload(request: Request, filename: str = Query(min_length=1, max_length=255), ratio: float = Query(default=1, ge=1, le=1000, allow_inf_nan=False), start: bool = Query(default=False), cleanup_mode: Literal["never", "time", "ratio", "both", "either"] = "never", cleanup_hours: float = Query(default=50, ge=1/60, le=87600, allow_inf_nan=False), cleanup_ratio: float = Query(default=1, ge=1, le=1000, allow_inf_nan=False), cleanup_delete_files: bool = False, location: str = Query(default="local", max_length=64), folder: str = Query(default="", max_length=1000), session=Depends(authorized)):
         savepath = storage_catalog.destination(location, folder)
         if not filename.lower().endswith(".torrent"):
             raise HTTPException(422, "Choose a .torrent file")
@@ -729,20 +768,29 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             return {"completed": True}
         if action not in {"stop", "remove"}:
             raise HTTPException(409, "Starting downloads is disabled until the VPN gate is implemented")
-        if not body.confirm_early:
+        from mediaseed.download_pause import incomplete_download, cancel_pending_start
+        download_pause = action == 'stop' and not body.confirm_early and await incomplete_download(qbit, body.torrent_hash)
+        if not body.confirm_early and not download_pause:
             properties = await qbit("/api/v2/torrents/properties", payload={"hash": body.torrent_hash})
             try:
                 observed = properties.json()
                 credited = credit.observe({"hash": body.torrent_hash, "uploaded": observed.get("total_uploaded"), "downloaded": observed.get("total_downloaded"), "ratio": observed.get("share_ratio"), "added_on": observed.get("addition_date")})
-                if float(credited.get("credited_ratio", observed.get("share_ratio", 0))) < float(credited.get("ratio_limit", 1)) and int(credited.get("seeding_time", observed.get("seeding_time", 0))) < 49 * 3600:
-                    raise HTTPException(409, "Early stop: credited ratio is below the selected goal and seeding time is below 49 hours. Explicit confirmation required.")
+                if float(credited.get("credited_ratio", observed.get("share_ratio", 0))) < float(credited.get("ratio_limit", 1)) and int(credited.get("seeding_time", observed.get("seeding_time", 0))) < 50 * 3600:
+                    raise HTTPException(409, "Early stop: credited ratio is below the selected goal and seeding time is below 50 hours. Explicit confirmation required.")
             except (ValueError, AttributeError, TypeError):
                 raise HTTPException(503, "Cannot verify seeding progress") from None
         path = "delete" if action == "remove" else "stop"
         async with cleanup.lock:
-            await qbit("/api/v2/torrents/" + path, "POST", {"hashes": body.torrent_hash, "deleteFiles": "true" if action == "remove" and body.delete_files else "false"})
+            payload = {"hashes": body.torrent_hash}
+            if action == "remove":
+                payload["deleteFiles"] = "true" if body.delete_files else "false"
+            response = await qbit("/api/v2/torrents/" + path, "POST", payload)
+            if response.status_code not in {200, 204}:
+                raise HTTPException(503, "Torrent client did not accept the action")
             if action == "remove":
                 cleanup.forget(body.torrent_hash)
+            elif action == "stop":
+                cancel_pending_start(cleanup, body.torrent_hash)
         return {"accepted": True} if action == "remove" else {"completed": True}
 
     @app.get("/api/torrents/{torrent_hash}/presence")
@@ -766,6 +814,18 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
     cleanup = CleanupManager(database, qbit, vpn_status, credit=credit)
     credit.cleanup = cleanup.public
 
+    @app.get("/api/torrents/{identifier}/cleanup")
+    async def inspect_cleanup(identifier: str, session=Depends(authorized)):
+        if not re.fullmatch(r"[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", identifier):
+            raise HTTPException(422, "Invalid torrent hash")
+        return await cleanup.inspect(identifier.lower())
+
+    @app.put("/api/torrents/{identifier}/cleanup")
+    async def update_cleanup(identifier: str, body: CleanupUpdate, session=Depends(authorized)):
+        if not re.fullmatch(r"[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", identifier):
+            raise HTTPException(422, "Invalid torrent hash")
+        return await cleanup.update(identifier.lower(), body)
+
     @app.post("/api/torrents/{identifier}/cleanup/cancel")
     async def cancel_cleanup(identifier: str, session=Depends(authorized)):
         if not re.fullmatch(r"[a-fA-F0-9]{40}|[a-fA-F0-9]{64}", identifier):
@@ -784,7 +844,14 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     move_manager = install_moves(app, authorized, database, qbit, storage_catalog, cleanup, credit, move_capable)
 
+    from mediaseed.conversion import install_conversions
+    conversion_manager = install_conversions(app, authorized, database, qbit, storage_catalog, cleanup,
+                                             os.environ.get("MEDIASEED_CONVERSION_QUEUE"))
+
     background = install_features(app, authorized, database, qbit, vpn_status=vpn_status, data_dir=data, cleanup=cleanup, credit=credit, storage=storage_catalog)
+
+    from mediaseed.uploader_bridge import install_uploader
+    install_uploader(app,authorized,database,conversion_manager,storage_catalog,qbit,data,vpn_status=vpn_status)
 
     @app.get("/")
     def home():

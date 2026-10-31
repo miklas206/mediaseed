@@ -1,26 +1,57 @@
 /* MediaSeed workspace. Data stays on the existing authenticated APIs. */
 function seedPoster(row, large = false) {
   const holder = element('span', undefined, 'seed-poster' + (large ? ' large' : ''));
-  holder.setAttribute('aria-hidden', 'true'); holder.textContent = '↓';
+  holder.setAttribute('aria-hidden', 'true'); holder.dataset.tone = seedProgressTone(row);
+  holder.textContent = /error|missing/i.test(row.state) ? '!' : /checking|moving/i.test(row.state) ? '↻' : /paused|stopped/i.test(row.state) ? 'Ⅱ' : Number(row.progress) >= 1 ? '↑' : '↓';
   if (row.cover && /^\/api\/covers\/[a-f0-9]{40,64}$/.test(row.cover)) {
     const image = document.createElement('img'); image.src = row.cover; image.alt = ''; image.loading = 'lazy';
     image.onerror = () => image.remove(); holder.append(image);
   }
   return holder;
 }
-function seedBadges(row) {
-  const wrap = element('span', undefined, 'seed-badges'), benefits = row.tracker_benefits;
-  if (benefits) {
-    for (const [visible, text, tone] of [[benefits.freeleech > 0, `${benefits.freeleech}% Freeleech`, 'free'],
-      [benefits.doubleUpload, t('Double upload'), 'double'], [benefits.featured, 'Featured', ''], [benefits.internal, 'Internal', '']]) {
-      if (visible) wrap.append(element('span', text, 'seed-badge ' + tone));
+function seedBadges(row, preview = false) {
+  const wrap = element('span', undefined, 'seed-badges');
+  if (!preview && row.own_upload === true) {
+    const badge = element('span', t('Your own upload'), 'seed-badge');
+    badge.title = t('Uploader confirmed against your linked tracker account');
+    wrap.append(badge);
+  }
+  const history = row.download_history;
+  const observations = preview ? [row.tracker_benefits || {}] : (history?.observations || []);
+  const variants = [
+    ['globalFreeleech', value => value === true, 'Global freeleech', 'free'],
+    ['freeleech', value => value > 0, null, 'free'],
+    ['doubleUpload', value => value === true, t('Double upload'), 'double'],
+    ['green', value => value === true, 'Green · 0.5×', 'green'],
+    ['featured', value => value === true, 'Featured', ''],
+    ['internal', value => value === true, 'Internal', '']
+  ];
+  for (const [key, visible, text, tone] of variants) {
+    const values = [...new Set(observations.map(item => item[key]).filter(visible))];
+    for (const value of values) {
+      const badge = element('span', text || `${value}% Freeleech`, 'seed-badge ' + tone);
+      if (!preview) {
+        const bytes = observations.filter(item => item[key] === value).reduce((sum, item) => sum + item.bytes, 0);
+        badge.title = t(bytes < history.downloaded || history.unknownBytes > 0 ? 'Recorded for part of the download; remaining history may be unknown' : 'Recorded while downloading');
+      }
+      wrap.append(badge);
     }
   }
-  if (row.green_active) wrap.append(element('span', 'Green · 0.5×', 'seed-badge green'));
+  if (!wrap.children.length && !preview) {
+    const known = history?.downloaded > 0 && !history.unknownBytes &&
+      observations.reduce((sum, item) => sum + item.bytes, 0) >= history.downloaded &&
+      observations.every(item => item.globalFreeleech === false && item.freeleech === 0 && item.doubleUpload === false && typeof item.green === 'boolean');
+    wrap.append(element('span', t(known ? 'Standard' : 'Download history unknown'), 'seed-badge'));
+  }
   return wrap;
 }
+function seedTracker(row) {
+  // Tracker identity is known from its announce host before API metadata matches.
+  return row.tracker_name || row.tracker_benefits?.tracker ||
+    (row.tracker_provider === 'nordicbytes' ? 'NordicBytes' : t('Tracker unknown'));
+}
 function seedSource(row) {
-  if (row.category === 'MediaSeed-Ratio') return t('Build ratio');
+  if (row.category === 'MediaSeed-Ratio') return t('Earlier automatic downloads');
   return String(row.category || '').startsWith('MediaSeed-RSS-') ? t('RSS') : t('Manual torrent');
 }
 function seedEta(value) {
@@ -51,19 +82,87 @@ function seedCleanupProgress(row) {
   if (ratioGoal) fractions.push(Number.isFinite(ratio) ? ratio / ratioGoal : 0);
   if (hoursGoal) fractions.push(hours / hoursGoal);
   const fraction = fractions.length ? Math.max(0, Math.min(1, policy.mode === 'both' ? Math.min(...fractions) : Math.max(...fractions))) : undefined;
-  return {ratio, ratioGoal, hours, hoursGoal, fraction};
+  const ratioFraction = ratioGoal && Number.isFinite(ratio) ? Math.max(0, Math.min(1, ratio / ratioGoal)) : undefined;
+  const timeFraction = hoursGoal ? Math.max(0, Math.min(1, hours / hoursGoal)) : undefined;
+  return {ratio, ratioGoal, hours, hoursGoal, fraction, ratioFraction, timeFraction};
+}
+// Keep the native meter and its measured value; motion only indicates live transfer.
+function seedProgressTrack(bar, row) {
+  const track = element('span', undefined, 'seed-progress-track');
+  const tone = seedProgressTone(row);
+  const rate = Number(row.progress) >= 1 ? row.upspeed : row.dlspeed;
+  track.dataset.tone = tone;
+  track.dataset.moving = String(['downloading', 'seeding'].includes(tone) && typeof rate === 'number' && Number.isFinite(rate) && rate > 0 && bar.value > 0 && bar.dataset.unknown !== 'true');
+  track.style.setProperty('--progress-value', String(bar.value));
+  track.append(bar);
+  return track;
+}
+function seedGoalSummary(label, fraction, kind, strong = false) {
+  const group = element('div', undefined, 'seed-progress-goal');
+  group.dataset.goal = kind;
+  const heading = element('div', undefined, 'seed-goal-heading');
+  const percent = Number.isFinite(fraction) ? `${Math.round(fraction * 100)}%` : t('Unknown');
+  heading.append(element(strong ? 'strong' : 'small', label), element('small', percent, 'seed-goal-percent'));
+  group.append(heading);
+  return group;
 }
 function seedSeeding(row) {
   const goal = seedCleanupProgress(row);
   const ratio = Number.isFinite(goal.ratio) ? trackerNumber(goal.ratio) : t('Unknown');
   return `${t('Ratio')} ${ratio}${goal.ratioGoal ? ' / ' + trackerNumber(goal.ratioGoal) : ''}`;
 }
+function seedNativeMoveProgress(target, row) {
+  const move = row.nativeMove || {}, active = move.phase === 'active';
+  const label = active ? t('Active move') : move.phase === 'queued' ? t('Queued move') : move.phase === 'observing' ? t('Measuring move progress…') : t('Moving files · progress unavailable');
+  const known = active && typeof move.fraction === 'number' && Number.isFinite(move.fraction);
+  const fraction = known ? Math.max(0, Math.min(.999, move.fraction)) : 0;
+  const caption = known ? `≈ ${Math.floor(fraction * 100)}% · ${label}` : label;
+  const meter = element('progress'); meter.max = 1; meter.value = fraction;
+  meter.dataset.unknown = String(!known);
+  meter.setAttribute('aria-label', t('Estimated move progress'));
+  meter.setAttribute('aria-valuetext', caption);
+  target.append(element('strong', caption), seedProgressTrack(meter, row));
+  const details = active && known ? `${trackerBytes(move.writtenBytes)} / ${trackerBytes(move.totalBytes)}${move.speedBps > 0 ? ' · ' + trackerBytes(move.speedBps) + '/s' : ''}` : move.phase === 'queued' ? t('Waiting for the active move to finish') : t('Waiting for a fresh filesystem measurement');
+  target.append(element('small', details, 'seed-goal-caption'));
+  if (active && move.currentFile) target.append(element('small', move.currentFile, 'seed-goal-caption'));
+  if (active) target.append(element('small', t('Estimated from written destination data. Completion is confirmed by the torrent client.'), 'seed-goal-caption'));
+}
 function seedProgressTone(row) {
   if (/error|missing/i.test(row.state)) return 'error';
   if (/stopped|paused/i.test(row.state)) return 'paused';
+  if (row.state === 'moving' && row.nativeMove?.phase === 'queued') return 'waiting';
   if (/checking|moving/i.test(row.state)) return 'checking';
   if (/queued|stalled|meta/i.test(row.state)) return 'waiting';
   return Number(row.progress) >= 1 ? 'seeding' : 'downloading';
+}
+function seedTorrentStatus(row) {
+  if (row.state === 'moving' && row.nativeMove?.phase === 'queued') return {label:t('Queued move'),reason:t('Waiting for the active move to finish')};
+  if (row.state === 'moving' && row.nativeMove?.phase === 'active') return {label:t('Active move'),reason:t('Destination writes were observed for this move. Other moves wait in the client queue.')};
+  const descriptions = {
+    downloading:'Receiving files from connected peers.', forcedDL:'Receiving files with forced download enabled.',
+    metaDL:'Waiting for torrent metadata before the files can be downloaded.', forcedMetaDL:'Waiting for torrent metadata before the files can be downloaded.',
+    stalledDL:'The download is waiting for peers that can share the missing pieces.',
+    queuedDL:'The torrent is waiting for an available download slot.',
+    uploading:'Download complete. Sharing the files with other peers.', forcedUP:'Download complete. Sharing the files with forced seeding enabled.',
+    stalledUP:'Download complete. Waiting for peers that need these files.', queuedUP:'The torrent is waiting for an available seeding slot.',
+    checkingDL:'Checking the existing files. Starting missing downloads is a separate action.', checkingUP:'Checking the existing files. Starting missing downloads is a separate action.', checkingResumeData:'Checking saved torrent information before continuing.',
+    moving:'The torrent client is moving the files to their selected destination.',
+    pausedDL:'The download is paused. Use Start when you want it to continue.', stoppedDL:'The download is paused. Use Start when you want it to continue.',
+    pausedUP:'Seeding is paused. The downloaded files are kept.', stoppedUP:'Seeding is paused. The downloaded files are kept.',
+    error:'The torrent client reported an error. Open Details to check it.', missingFiles:'The client cannot find the expected files. Check the download folder and storage before checking files.'
+  };
+  const goal=seedCleanupProgress(row);
+  const waitingCleanup=Number(row.progress)>=1 && row.cleanup?.status==='active' && !row.credit_observation_stale && goal.fraction===1 && ['uploading','forcedUP'].includes(row.state) && typeof row.upspeed==='number' && Number.isFinite(row.upspeed) && row.upspeed>0;
+  return {label:waitingCleanup?t('Goal reached · still uploading'):torrentStatus(row.state),reason:t(waitingCleanup?'The cleanup goal is reached. Cleanup waits while connected peers are downloading or upload is still active.':descriptions[row.state]||'The torrent state is unknown. Refresh the list to check it.')};
+}
+function seedStatusView(row) {
+  const status=seedTorrentStatus(row),view=element('details',undefined,'seed-status');
+  const summary=element('summary',undefined,'torrent-state');
+  summary.append(element('span',status.label,'seed-state-live'),element('span',t('Awaiting update'),'seed-state-stale'));
+  summary.title=t('Show status explanation');
+  const panel=element('div',undefined,'seed-status-popover');
+  panel.append(element('p',status.reason),element('p',t('This is the last known state. Waiting for fresh torrent data.'),'seed-status-stale-note'));
+  view.append(summary,panel);return view;
 }
 function seedPeerCount(value) {
   return Number.isSafeInteger(value) && value >= 0 ? trackerNumber(value) : '?';
@@ -104,10 +203,10 @@ function seedSwarmView(row) {
   return view;
 }
 function seedTorrent(row, index) {
-  const item = element('article', undefined, 'torrent seed-rich-row'); item.dataset.state = state(row); item.dataset.hash = row.hash;
+  const item = element('article', undefined, 'torrent seed-rich-row'); item.dataset.state = state(row); item.dataset.tone = seedProgressTone(row); item.dataset.hash = row.hash;
   const identity = element('div', undefined, 'seed-identity');
   const heading = command(row.name, () => showDetails(row)); heading.className = 'torrent-name'; heading.title = row.name;
-  const info = element('small', `${trackerBytes(row.size)} · ${row.tracker_name || row.tracker_benefits?.tracker || t('Tracker unknown')} · ${seedSource(row)}`, 'seed-subline');
+  const info = element('small', `${trackerBytes(row.size)} · ${seedTracker(row)} · ${seedSource(row)}`, 'seed-subline');
   identity.append(heading, info, seedBadges(row));
   const uploaded=row.account_credited_uploaded??row.credited_uploaded;identity.append(element('small',t('Estimated credited upload')+': '+(typeof uploaded==='number'?'≈ '+trackerBytes(uploaded):t('Unknown')),'seed-upload-credit'));
   const sortKey = document.querySelector('#sort').value;
@@ -120,37 +219,60 @@ function seedTorrent(row, index) {
   };
   if (hints[sortKey]) identity.append(element('small', `${t(hints[sortKey][0])}: ${hints[sortKey][1]}`, 'seed-subline'));
   const transfer = element('div', undefined, 'seed-progress-cell');
-  const complete = Number(row.progress) >= 1, goal = seedCleanupProgress(row);
-  const progress = element('progress'); progress.max = 1;
-  progress.value = complete ? (goal.fraction ?? 0) : Math.max(0, Math.min(1, Number(row.progress) || 0));
-  progress.dataset.tone = seedProgressTone(row);
-  progress.setAttribute('aria-label', t(complete ? 'Seeding progress' : 'Download progress'));
-  const percent = complete && goal.fraction === undefined ? t('No cleanup goal') : `${Math.round(progress.value * 100)}%`;
-  progress.setAttribute('aria-valuetext', complete ? `${seedSeeding(row)} · ${percent}` : percent);
+  const checking = /^checking/.test(row.state || '');
+  const complete = !checking && Number(row.progress) >= 1, goal = seedCleanupProgress(row);
   if (row.credit_observation_stale) transfer.title = t('Showing the last verified ratio while waiting for a fresh measurement.');
-  const label = element('strong', complete ? seedSeeding(row) : `${percent} · ${seedEta(row.eta)}`);
-  transfer.append(label, progress);
-  if (complete) {
+  if (row.state === 'moving') {
+    seedNativeMoveProgress(transfer, row);
+  } else if (complete) {
     const hours = trackerNumber(goal.hours) + (goal.hoursGoal ? ' / ' + trackerNumber(goal.hoursGoal) : '');
-    transfer.append(element('small', `${t('Active seeding')} ${hours} h`));
-    transfer.append(element('small', goal.fraction === undefined ? percent : `${t('Cleanup goal')} · ${percent}${['both', 'either'].includes(row.cleanup?.mode) ? ' · ' + t(row.cleanup.mode === 'both' ? 'Both goals required' : 'Either goal required') : ''}`, 'seed-goal-caption'));
-  } else transfer.append(element('small', `${trackerBytes(row.completed ?? Number(row.size || 0) * progress.value)} / ${trackerBytes(row.size)}`));
+    const timeLabel = `${t('Active seeding')} ${hours} h`;
+    const goals = [
+      {kind: 'ratio', label: seedSeeding(row), fraction: goal.ratioFraction, targeted: !!goal.ratioGoal},
+      {kind: 'time', label: timeLabel, fraction: goal.timeFraction, targeted: !!goal.hoursGoal},
+    ].sort((a, b) => Number(b.targeted) - Number(a.targeted) || (b.fraction ?? -1) - (a.fraction ?? -1));
+    for (const [index, entry] of goals.entries()) {
+      transfer.append(entry.targeted ? seedGoalSummary(entry.label, entry.fraction, entry.kind, index === 0) : element(index === 0 ? 'strong' : 'small', entry.label));
+    }
+    // Visual progress follows the leading goal; cleanup still uses the configured AND/OR rule.
+    const leading = goals.find(entry => entry.targeted);
+    const fraction = leading ? leading.fraction ?? 0 : 1;
+    const progressLabel = leading ? t(leading.kind === 'ratio' ? 'Ratio goal progress' : 'Active seeding time goal progress') : t('Download progress');
+    const caption = !leading ? t('No cleanup goal') : `${progressLabel} · ${leading.fraction === undefined ? t('Unknown') : Math.round(fraction * 100) + '%'}${['both', 'either'].includes(row.cleanup?.mode) ? ' · ' + t(row.cleanup.mode === 'both' ? 'Both goals required' : 'Either goal required') : ''}`;
+    const progress = element('progress'); progress.max = 1; progress.value = fraction;
+    progress.dataset.tone = seedProgressTone(row); progress.dataset.goal = 'overall';
+    progress.dataset.follows = leading?.kind || 'download';
+    progress.setAttribute('aria-label', progressLabel);
+    progress.setAttribute('aria-valuetext', !leading ? `100% · ${caption}` : caption);
+    transfer.append(seedProgressTrack(progress, row), element('small', caption, 'seed-goal-caption'));
+    if (row.credit_observation_stale) transfer.append(element('small', t('Ratio awaiting a fresh measurement'), 'seed-goal-caption'));
+  } else {
+    const progress = element('progress'); progress.max = 1;
+    const measured = checking && typeof row.recheck_progress === 'number' && Number.isFinite(row.recheck_progress) ? row.recheck_progress : row.progress;
+    progress.value = Math.max(0, Math.min(1, Number(measured) || 0));
+    progress.dataset.tone = seedProgressTone(row);
+    progress.setAttribute('aria-label', t(checking ? 'Checking files' : 'Download progress'));
+    const percent = `${Math.round(progress.value * 100)}%`;
+    const caption = `${percent} · ${checking ? t('Checking files') : row.state === 'moving' ? t('Moving files') : seedEta(row.eta)}`;
+    progress.setAttribute('aria-valuetext', caption);
+    transfer.append(element('strong', caption), seedProgressTrack(progress, row),
+      element('small', `${trackerBytes(row.completed ?? Number(row.size || 0) * progress.value)} / ${trackerBytes(row.size)}`));
+  }
   const activity = element('div', undefined, 'seed-activity');
-  activity.append(element('span', torrentStatus(row.state), 'torrent-state'), element('small', `↓ ${bytes(row.dlspeed || 0)}/s · ↑ ${bytes(row.upspeed || 0)}/s`));
+  activity.append(seedStatusView(row), element('small', `↓ ${bytes(row.dlspeed || 0)}/s · ↑ ${bytes(row.upspeed || 0)}/s`));
   activity.append(seedSwarmView(row));
   const actions = element('div', undefined, 'actions');
   if (appRole !== 'viewer') { const stopped = state(row) === 'stopped'; const toggle = command('', () => torrentAction(row, stopped ? 'start' : 'stop')); toggle.className = 'torrent-toggle'; toggle.innerHTML = stopped ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg>' : '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>'; toggle.title = stopped ? t('Start') : t('Stop'); toggle.setAttribute('aria-label', toggle.title + ': ' + row.name); toggle.disabled = stopped && !downloadsEnabled; actions.append(toggle); }
-  const menu = element('details', undefined, 'torrent-menu'), trigger = element('summary', '⋯'); trigger.setAttribute('aria-label', t('Actions'));
-  const commands = element('div', undefined, 'torrent-menu-content'); commands.append(command(t('Details'), () => showDetails(row)));
-  if (appRole !== 'viewer') commands.append(command(t('Check files'), () => chooseRecheck(row)), command(t('Remove'), () => chooseRemoval(row)));
-  menu.append(trigger, commands); actions.append(menu);
-  item.append(seedPoster(row), identity, transfer, activity, actions); return item;
+  actions.append(torrentActionMenu(row));
+  item.append(seedPoster(row), identity, transfer, activity, actions);
+  globalThis.MediaSeedList?.decorate(item, row);
+  return item;
 }
 document.addEventListener('click', event => {
-  for (const view of document.querySelectorAll('.seed-swarm[open]')) if (!view.contains(event.target)) view.open = false;
+  for (const view of document.querySelectorAll('.seed-swarm[open], .seed-status[open]')) if (!view.contains(event.target)) view.open = false;
 });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape') for (const view of document.querySelectorAll('.seed-swarm[open]')) view.open = false;
+  if (event.key === 'Escape') for (const view of document.querySelectorAll('.seed-swarm[open], .seed-status[open]')) view.open = false;
 });
 const seedDetailCache = new Map();
 let seedDetailRequest = 0;
@@ -160,47 +282,87 @@ function cachedDetail(hash, section, force=false) {
   const saved=seedDetailCache.get(key);
   if(saved && (saved.pending || Date.now()-saved.at<15000))return saved.promise;
   const entry={pending:true,at:0};
-  entry.promise=api(`torrents/${hash}/details?section=${section}`).then(data=>{entry.pending=false;entry.at=Date.now();return data;},error=>{if(seedDetailCache.get(key)===entry)seedDetailCache.delete(key);throw error;});
+  entry.promise=api(section==='media'?`torrents/${hash}/media`:`torrents/${hash}/details?section=${section}`).then(data=>{entry.pending=false;entry.at=Date.now();return data;},error=>{if(seedDetailCache.get(key)===entry)seedDetailCache.delete(key);throw error;});
   seedDetailCache.set(key,entry);while(seedDetailCache.size>60)seedDetailCache.delete(seedDetailCache.keys().next().value);
   return entry.promise;
 }
-async function richDetails(row) {
+async function richDetails(row, initialTab = 'overview') {
   const request=++seedDetailRequest;selectedHash=row.hash;
   document.querySelector('#detail-name').textContent=row.name;document.querySelector('#detail-message').textContent='';
   document.querySelector('#policy-form input').value=Number(row.ratio_limit)>=1?row.ratio_limit:1;
   document.querySelector('#policy-form').hidden=true;
   const target=document.querySelector('#detail-data'),hero=element('div',undefined,'seed-detail-hero'),summary=element('div');
-  summary.append(element('span',torrentStatus(row.state),'seed-badge'),seedBadges(row),element('p',`${trackerBytes(row.size)} · ${seedSource(row)}`,'muted'));hero.append(seedPoster(row,true),summary);
-  const controls=element('div',undefined,'actions'),notice=element('small',t('Fetching details…'),'muted'),reload=command(t('Refresh'),()=>load(true));reload.type='button';controls.append(notice,reload);
+  summary.append(element('span',torrentStatus(row.state),'seed-badge'),seedBadges(row),element('p',`${trackerBytes(row.size)} · ${seedTracker(row)} · ${seedSource(row)}`,'muted'));hero.append(seedPoster(row,true),summary);
+  const notice=element('small',t('Fetching details…'),'muted'); notice.setAttribute('role','status'); summary.append(notice);
+  if(appRole!=='viewer'){
+    const fetchMetadata=command(t('Refresh data from tracker'),async()=>{fetchMetadata.disabled=true;try{await refreshTrackerMetadata(row);}finally{fetchMetadata.disabled=false;}});
+    summary.append(fetchMetadata);
+  }
+  const reload=document.querySelector('#detail-refresh'); reload.onclick=()=>load(true);
   const tabs=element('div',undefined,'seed-detail-tabs'),content=element('div',undefined,'seed-detail-content');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label',t('Torrent details'));content.id='seed-detail-tabpanel';content.setAttribute('role','tabpanel');
-  target.replaceChildren(hero,controls,tabs,content);if(!dialog.open)dialog.showModal();
-  let details={properties:{total_downloaded:row.downloaded,total_uploaded:row.uploaded,addition_date:row.added_on},files:[],trackers:[],peers:[],credit:{}},selected=0,overviewLoaded=false,loadCycle=0;
-  const sectionFor=index=>index===2?'files':index===3?'connections':'overview';
+  target.replaceChildren(hero,tabs,content);if(!dialog.open)dialog.showModal();
+  let details={properties:{total_downloaded:row.downloaded,total_uploaded:row.uploaded,addition_date:row.added_on},files:[],trackers:[],peers:[],credit:{}},selected=initialTab,overviewLoaded=false,loadCycle=0;
+  const tabNames=[['overview','Overview'],['seeding','Seeding'],['cleanup','Cleanup rule'],['files','Files'],['connections','Connections'],['activity','Activity'],['media','Media']];
+  const sectionFor=key=>key==='files'?'files':key==='connections'?'connections':key==='media'?'media':'overview';
   function paint(){
     content.replaceChildren();const credited={...row,...details.credit,cleanup:details.cleanup || row.cleanup};
-    if(selected===0){const list=element('dl',undefined,'seed-detail-facts');
+    if(selected==='overview'){const list=element('dl',undefined,'seed-detail-facts');
       const amount=credited.account_credited_uploaded??credited.credited_uploaded;
       for(const [label,value] of [['Downloaded',trackerBytes(details.properties.total_downloaded)],['Uploaded',trackerBytes(details.properties.total_uploaded)],['Estimated credited upload',typeof amount==='number'?'≈ '+trackerBytes(amount):t('Unknown')],['Source',seedSource(row)],['Added',details.properties.addition_date?new Date(details.properties.addition_date*1000).toLocaleString(locale()):'—'],['Download folder',details.downloadFolder?`${t(details.downloadFolder.label)} · ${details.downloadFolder.path}`:overviewLoaded?t('Download folder is outside approved storage or unavailable'):t('Fetching details…')]])list.append(element('dt',t(label)),element('dd',value));content.append(list);
-    } else if(selected===1){content.append(trackerCreditView(credited));if(overviewLoaded)renderCleanupDetails(details.cleanup,row,content);}
-    else if(selected===2){if(appRole!=='viewer')content.append(command(t('Check files'),()=>chooseRecheck(row)));content.append(element('p',t('File progress is the last client observation. Check files to verify existing data and detect missing or damaged pieces.'),'muted'),detailTable(t('Files'),[['name',t('Name')],['displaySize',t('Size')],['displayProgress',t('Progress')]],details.files.map(file=>({...file,displaySize:trackerBytes(file.size),displayProgress:typeof file.progress==='number'?`${Math.round(file.progress*100)}%`:'—'}))));}
-    else if(selected===3)content.append(detailTable(t('Trackers'),[['host','Tracker'],['status',t('Status')],['num_peers','Peers']],details.trackers),detailTable('Peers',[['ip','IP'],['client',t('Client')],['progress',t('Progress')]],details.peers));
-    else {content.append(element('p',torrentStatus(row.state)),element('p',t('VPN availability is checked before starting. Historical controller events are available in MediaHub Logs.'),'muted'));if(overviewLoaded)renderCleanupDetails(details.cleanup,row,content);}
-    [...tabs.children].forEach((button,i)=>{button.setAttribute('aria-selected',String(i===selected));button.tabIndex=i===selected?0:-1;});content.setAttribute('aria-labelledby','seed-detail-tab-'+selected);
-    document.querySelector('#policy-form').hidden=selected!==1||!overviewLoaded||appRole==='viewer'||(details.cleanup?.mode&&details.cleanup.mode!=='never');
+    } else if(selected==='seeding'){content.append(trackerCreditView(credited));}
+    else if(selected==='cleanup'){if(overviewLoaded)renderCleanupDetails(details.cleanup,row,content,()=>load(true));}
+    else if(selected==='files'){if(appRole!=='viewer')content.append(command(t('Check files'),()=>chooseRecheck(row)));content.append(element('p',t('File progress is the last client observation. Check files to verify existing data and detect missing or damaged pieces.'),'muted'),detailTable(t('Files'),[['name',t('Name')],['displaySize',t('Size')],['displayProgress',t('Progress')]],details.files.map(file=>({...file,displaySize:trackerBytes(file.size),displayProgress:typeof file.progress==='number'?`${Math.round(file.progress*100)}%`:'—'}))));}
+    else if(selected==='connections')content.append(detailTable(t('Trackers'),[['host','Tracker'],['status',t('Status')],['num_peers','Peers']],details.trackers),detailTable('Peers',[['ip','IP'],['client',t('Client')],['progress',t('Progress')]],details.peers));
+    else if(selected==='media'){globalThis.MediaSeedIntelligence?.renderMedia(details.metadata,content);}
+    else {content.append(element('p',torrentStatus(row.state)),element('p',t('VPN availability is checked before starting. Historical controller events are available in MediaHub Logs.'),'muted'));}
+    [...tabs.children].forEach((button,i)=>{button.setAttribute('aria-selected',String(tabNames[i][0]===selected));button.tabIndex=tabNames[i][0]===selected?0:-1;});content.setAttribute('aria-labelledby','seed-detail-tab-'+selected);
+    document.querySelector('#policy-form').hidden=selected!=='seeding'||!overviewLoaded||appRole==='viewer'||(details.cleanup?.mode&&details.cleanup.mode!=='never');
   }
   async function load(force=false){const section=sectionFor(selected),cycle=++loadCycle;reload.disabled=true;notice.textContent=t('Fetching details…');
     try{const data=await cachedDetail(row.hash,section,force);if(request!==seedDetailRequest||cycle!==loadCycle||!dialog.open)return;details={...details,...data};if(section==='overview')overviewLoaded=true;if(section===sectionFor(selected)){notice.textContent=t('Updated {0}',{0:new Date(seedDetailCache.get(csrf+':'+row.hash+':'+section)?.at||Date.now()).toLocaleTimeString(locale())});paint();}}
     catch(error){if(request===seedDetailRequest&&cycle===loadCycle&&dialog.open)notice.textContent=t(error.message);}
-    finally{if(cycle===loadCycle)reload.disabled=false;}
+    finally{if(request===seedDetailRequest&&cycle===loadCycle)reload.disabled=false;}
   }
-  for(const [index,name] of ['Overview','Seeding','Files','Connections','Activity'].entries()){const button=command(t(name),()=>{selected=index;paint();void load();});button.id='seed-detail-tab-'+index;button.setAttribute('role','tab');button.setAttribute('aria-controls',content.id);button.onkeydown=event=>{if(!['ArrowLeft','ArrowRight'].includes(event.key))return;event.preventDefault();selected=(index+(event.key==='ArrowRight'?1:4))%5;paint();void load();tabs.children[selected].focus();};tabs.append(button);}
+  for(const [index,[key,name]] of tabNames.entries()){
+    const button=command(t(name),()=>{selected=key;paint();void load();});
+    button.id='seed-detail-tab-'+key;button.setAttribute('role','tab');button.setAttribute('aria-controls',content.id);
+    button.onkeydown=event=>{
+      if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+      event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?tabNames.length-1:(index+(event.key==='ArrowRight'?1:tabNames.length-1))%tabNames.length;
+      selected=tabNames[next][0];paint();void load();tabs.children[next].focus();
+    };tabs.append(button);
+  }
   paint();await load();
+}
+function trackerEventSummary(row) {
+  if (!row) return '';
+  const age = Date.now() / 1000 - row?.checkedAt;
+  if (row?.status !== 'ok' || !Number.isFinite(age) || age < -5 || age > 90 || !Array.isArray(row.globalEvents)) return t('Global freeleech status unknown');
+  const event = row.globalEvents.find(event => event.type === 'global_freeleech' && Date.parse(event.endsAt) > Date.now());
+  return event ? t('Global freeleech · until {0}', {0: new Date(event.endsAt).toLocaleString(locale(), {dateStyle: 'short', timeStyle: 'short'})}) : '';
+}
+function torrentGlobalFreeleech(row) {
+  const accounts = globalThis.MediaSeedTrackerRows || [];
+  const knownTracker = row.tracker_provider === 'nordicbytes' || accounts.some(account =>
+    account.name && (account.name === row.tracker_name || account.name === row.tracker_benefits?.tracker));
+  if (!knownTracker) return null;
+  for (const account of accounts) {
+    if (row.tracker_id || row.tracker_benefits?.trackerId) {
+      if (account.id !== (row.tracker_id || row.tracker_benefits.trackerId)) continue;
+    } else if ((account.provider || 'nordicbytes') !== 'nordicbytes') continue;
+    const age = Date.now() / 1000 - account.checkedAt;
+    if (account.status !== 'ok' || !Number.isFinite(age) || age < -5 || age > 90 || !Array.isArray(account.globalEvents)) continue;
+    const event = account.globalEvents.find(event => event.type === 'global_freeleech' && Date.parse(event.endsAt) > Date.now());
+    if (event) return event;
+  }
+  return null;
 }
 function richTrackerSummary(rows) {
   const target = document.querySelector('#seed-accounts'); if (!target) return;
   target.replaceChildren();
   for (const row of rows) { const card = element('div', undefined, 'seed-account'); card.append(element('strong', row.name));
     card.append(element('span', row.stats ? `${t('Ratio')} ${trackerNumber(row.stats.ratio)} · ${t('Buffer')} ${trackerBytes(row.stats.buffer)} · ${t('Warnings')} ${trackerNumber(row.stats.warnings)}` : t('Account data unavailable')));
+    const event = trackerEventSummary(row); if (event) card.append(element('small', event));
     if (row.checkedAt) card.append(element('small', new Date(row.checkedAt * 1000).toLocaleTimeString(locale()), 'muted')); target.append(card); }
 }
 async function richPreview() {
@@ -214,20 +376,22 @@ async function richPreview() {
     for(let offset=0;offset<sources.length;offset+=4){const group=await Promise.all(sources.slice(offset,offset+4).map(async source=>{
       const response=await fetch('/api/torrent-preview',{method:'POST',headers:{'Content-Type':fileMode?'application/x-bittorrent':'application/json','X-MediaSeed-CSRF':csrf},body:fileMode?source:JSON.stringify({magnet:source})});const data=await response.json();if(!response.ok)throw new Error(t('Torrent information unavailable'));return data;
     }));if(generation!==richPreview.request||!addDialog.open)return;results.push(...group);}
-    const accounts=new Map();for(const result of results)for(const estimate of result.estimates){const key=estimate.accountId||estimate.name;const saved=accounts.get(key)||{...estimate,charged:0,count:0};saved.charged+=estimate.charged??0;saved.count++;accounts.set(key,saved);}
+    const accounts=new Map();for(const result of results)for(const estimate of result.estimates){const key=estimate.accountId||estimate.name;const saved=accounts.get(key)||{...estimate,charged:0,count:0,chargeKnown:true};saved.chargeKnown=saved.chargeKnown&&typeof estimate.charged==='number';saved.charged+=estimate.charged??0;saved.count++;accounts.set(key,saved);}
     target.replaceChildren(element('strong',t('Account ratio after adding')));
     for(const estimate of accounts.values()){
-      const known=estimate.count===results.length&&results.every(result=>typeof result.size==='number'),denominator=estimate.downloaded+estimate.charged;
-      const projected=known&&typeof estimate.downloaded==='number'?(denominator?estimate.uploaded/denominator:null):results.length===1?results[0].estimates.find(e=>e.name===estimate.name)?.projected:undefined;
+      estimate.chargeKnown=estimate.chargeKnown&&results.every(result=>result.lookupStatus==='matched');
+      const known=estimate.chargeKnown,denominator=estimate.downloaded+estimate.charged;
+      const projected=known&&typeof estimate.downloaded==='number'?(estimate.charged===0?estimate.current:denominator?estimate.uploaded/denominator:null):undefined;
       const card=element('article',undefined,'ratio-estimate-card'),numbers=element('div',undefined,'ratio-estimate-numbers');card.append(element('span',estimate.name));
       const format=value=>value===null?'∞':typeof value==='number'?Number(value).toLocaleString(locale(),{minimumFractionDigits:2,maximumFractionDigits:4}):t('Unknown');
-      numbers.append(element('span',format(estimate.current)),element('span','→'),element('strong',format(projected)));card.append(numbers,element('small',t('Current ratio → Estimated ratio'),'muted'));card.append(element('p',t('Counts as tracker download: {0}',{0:trackerBytes(estimate.charged)}),'muted'));if(typeof projected==='number'&&projected<=.5)card.classList.add('seed-ratio-warning');target.append(card);
+      numbers.append(element('span',format(estimate.current)),element('span','→'),element('strong',format(estimate.chargeKnown?projected:undefined)));card.append(numbers,element('small',t('Current ratio → Estimated ratio'),'muted'));card.append(element('p',t('Counts as tracker download: {0}',{0:estimate.chargeKnown?trackerBytes(estimate.charged):t('Unknown')}),'muted'));if(typeof projected==='number'&&projected<=.5)card.classList.add('seed-ratio-warning');target.append(card);
     }
-    for(const result of results){if(result.benefits?.status==='matched')target.append(seedBadges({tracker_benefits:result.benefits}));}
+    for(const result of results){if(result.benefits?.status==='matched')target.append(seedBadges({tracker_benefits:result.benefits}, true));}
     if(results.some(result=>result.metadataPending)){target.append(element('p',t('Tracker benefits are being checked in the background.'),'muted'));if((richPreview.retries||0)<8){richPreview.retries=(richPreview.retries||0)+1;setTimeout(()=>{if(generation===richPreview.request&&addDialog.open)void richPreview();},3000);}}else richPreview.retries=0;
-    if(!accounts.size)target.append(element('p',t('Ratio estimate needs a known torrent size and fresh tracker account data.'),'muted'));
+    for(const result of results)if(result.lookupStatus&&result.lookupStatus!=='matched')target.append(element('p',t('Tracker or torrent could not be verified through its API. No download cost has been assumed.'),'muted'));
+    if(!accounts.size&&!results.some(result=>result.lookupStatus&&result.lookupStatus!=='matched'))target.append(element('p',t('Ratio estimate needs a known torrent size and fresh tracker account data.'),'muted'));
     const total=results.every(r=>typeof r.size==='number')?results.reduce((sum,r)=>sum+r.size,0):null;
-    target.append(element('p',`${sources.length} · ${t('Size')}: ${total===null?t('Unknown'):trackerBytes(total)}`,'muted'),element('small',t('Estimate excludes future uploads and other downloads. Unknown freeleech counts as a normal download.'),'muted'));
+    target.append(element('p',`${sources.length} · ${t('Size')}: ${total===null?t('Unknown'):trackerBytes(total)}`,'muted'),element('small',t('Estimate uses matched tracker API data. Existing files and future uploads can affect the actual result.'),'muted'));
   }catch(error){if(generation===richPreview.request)target.replaceChildren(element('strong',t('Account ratio after adding')),element('p',t(error.message),'muted'));}
 }
 richPreview.request=0;

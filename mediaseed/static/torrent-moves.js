@@ -10,6 +10,29 @@
   const downloads=document.querySelector('#downloads');
   const setText=(node,value)=>{if(node.textContent!==value)node.textContent=value;};
 
+
+  // Keep simultaneous removal and move counts together in the existing toast.
+  const operationProgress = new Map();
+  function progressNotice(key, label, active, failed = false) {
+    const previous = operationProgress.get(key);
+    if (previous?.label === label && previous.active === active && previous.failed === failed) return;
+    if (active && !previous?.active) {
+      for (const [id, entry] of operationProgress) if (!entry.active) operationProgress.delete(id);
+    }
+    operationProgress.set(key, {label, active, failed});
+    const entries = [...operationProgress.values()], busy = entries.some(entry => entry.active);
+    showNotification(entries.map(entry => entry.label).join(' · '), entries.some(entry => entry.failed) ? 'danger' : busy ? 'info' : 'success', busy);
+  }
+  function moveNotice(job, unavailable = false) {
+    const done = job.items.filter(row => row.phase === 'complete').length, total = job.items.length;
+    const active = !['complete','needs_attention'].includes(job.status);
+    let label = text(`Moving: ${done} of ${total} complete`, `Flytter: ${done} af ${total} færdige`);
+    if (job.status === 'complete') label = text(`Moved: ${done} of ${total} complete`, `Flyttet: ${done} af ${total} færdige`);
+    if (job.status === 'needs_attention') label += text(' · needs review', ' · kræver kontrol');
+    if (unavailable) label += text(' · waiting for updated status', ' · afventer opdateret status');
+    progressNotice('move', label, active, job.status === 'needs_attention' || unavailable);
+  }
+
   function rowFor(hash) {return torrents.find(row=>row.hash===hash);}
   function eligible(row) {return row?.progress===1 && ['uploading','stalledUP','forcedUP','stoppedUP','pausedUP','queuedUP'].includes(row.state);}
   function chosen() {return [...selected].map(rowFor).filter(Boolean);}
@@ -80,7 +103,7 @@
     panelBody=element('div',undefined,'torrent-action-body');panelBody.open=true;panel.append(panelBody);return panelBody;
   }
   function syncPanel() {
-    if(!panel)return;
+    if(!panel || removing)return;
     if(appRole==='viewer' || (!selected.size && !jobView)) {
       if(panelBody)panelBody.open=false;
       panel.hidden=true;downloads.classList.remove('torrent-panel-open');panelSignature='';return;
@@ -117,6 +140,7 @@
     node.append(element('p',text(`${snapshot.length} selected torrents`,`${snapshot.length} valgte torrents`)));
     const names=element('ul',undefined,'torrent-move-names');for(const row of snapshot)names.append(element('li',row.name));node.append(names);
     const warning=element('p',deleteFiles?text('All downloaded files belonging to these torrents will be deleted. This cannot be undone.','Alle downloadede filer, der tilhører disse torrents, bliver slettet. Det kan ikke fortrydes.'):text('The torrents are removed and seeding stops. Downloaded files remain in their current folders.','Torrents fjernes, og seeding stopper. Downloadede filer bliver i deres nuværende mapper.'));node.append(warning);
+    node.append(element('p',text('This also removes torrents that have not reached their selected seeding ratio or 50 hours of seeding. Are you sure you want to remove all torrents listed above?','Dette fjerner også torrents, som ikke har nået deres valgte seedingratio eller 50 timers seeding. Er du sikker på, at du vil fjerne alle torrents på listen ovenfor?'),'muted'));
     const form=element('form');let consent;
     if(deleteFiles) {const label=element('label',undefined,'torrent-delete-consent');consent=element('input');consent.type='checkbox';consent.required=true;label.append(consent,element('span',text('I understand that the downloaded files will be permanently deleted.','Jeg forstår, at de downloadede filer slettes permanent.')));form.append(label);}
     const actions=element('div',undefined,'actions');
@@ -130,19 +154,31 @@
       const target=panelShell(text('Removing selected torrents','Fjerner valgte torrents'));
       const status=element('p',undefined,'torrent-removal-status');status.setAttribute('role','status');target.append(status);
       const results=element('ul',undefined,'torrent-removal-results');target.append(results);
-      let accepted=0,processed=0;
-      for(const row of snapshot) {
-        status.textContent=text(`Processing ${++processed} of ${snapshot.length}…`,`Behandler ${processed} af ${snapshot.length}…`);
-        try {
-          // Reuse existing seeding-goal confirmation and client disappearance checks.
-          if(await torrentAction(row,'remove',deleteFiles)) {accepted++;selected.delete(row.hash);void confirmRemoval(row);}
-          else results.append(element('li',row.name+' · '+text('Cancelled; kept','Annulleret; bevaret')));
-        }catch(error){results.append(element('li',row.name+' · '+error.message));}
+      let completed=0,failed=0,settled=0;
+      const confirmations=[];
+      function updateProgress() {
+        const active=settled<snapshot.length;
+        let label=active?text(`Removing: ${completed} of ${snapshot.length} complete`,`Fjerner: ${completed} af ${snapshot.length} færdige`):text(`Removed: ${completed} of ${snapshot.length} complete`,`Fjernet: ${completed} af ${snapshot.length} færdige`);
+        if(failed)label+=text(` · ${failed} not confirmed; see details`, ` · ${failed} ikke bekræftet; se detaljer`);
+        status.textContent=label;progressNotice('remove',label,active,failed>0);
       }
+      function failure(row,error) {
+        failed++;selected.add(row.hash);
+        results.append(element('li',row.name+' · '+error.message));
+      }
+      updateProgress();
+      for(const row of snapshot) {
+        try {
+          // Count completion only after the client confirms disappearance.
+          await torrentAction(row,'remove',deleteFiles,true);
+          selected.delete(row.hash);
+          confirmations.push(confirmRemoval(row,{silent:true}).then(()=>{completed++;},error=>failure(row,error)).finally(()=>{settled++;updateProgress();}));
+        }catch(error){failure(row,error);settled++;updateProgress();}
+      }
+      await Promise.all(confirmations);
       removing=false;panelSignature='';sync();
-      const message=text(`${accepted} of ${snapshot.length} removal requests accepted. Confirmation is checked with the torrent client.`,`${accepted} af ${snapshot.length} fjernelser accepteret. Bekræftelsen kontrolleres hos torrentklienten.`);
-      if(selected.size){panelBody.append(element('p',message,'muted'),results);}
-      showNotification(message,accepted===snapshot.length?'success':'info');
+      if(selected.size)panelBody.append(element('p',status.textContent,'muted'),results);
+
     };
     cancel.focus();
   }
@@ -182,7 +218,7 @@
       folders.onchange=()=>{if(folders.value)void browse([folder,folders.value].filter(Boolean).join('/')).catch(notify);};
       form.onsubmit=async event=>{
         event.preventDefault();if(!ready)return;submit.disabled=true;
-        try {const job=await api('torrent-moves',{hashes:rows.map(row=>row.hash),location:location.value,folder},'POST');latest=job;nextPoll=0;show(job);void poll();}
+        try {const job=await api('torrent-moves',{hashes:rows.map(row=>row.hash),location:location.value,folder},'POST');latest=job;nextPoll=0;moveNotice(job);show(job);void poll();}
         catch(error){notify(error);submit.disabled=false;}
       };
       await browse('');
@@ -203,7 +239,7 @@
       if(row.phase==='complete')block.append(element('small',text(`${row.verifiedFiles} files verified`,`${row.verifiedFiles} filer kontrolleret`)));
       target.append(block);
     }
-    if(job.error){target.append(element('p',text('The move needs review. Files have been preserved.','Flytningen kræver kontrol. Filerne er bevaret.'),'muted'),element('p',job.error));target.append(button('Try again','Prøv igen',async()=>{try{latest=await api(`torrent-moves/${job.id}/retry`,{},'POST');nextPoll=0;paint(node,latest);void poll();}catch(error){notify(error);}}));}
+    if(job.error){target.append(element('p',text('The move needs review. Files have been preserved.','Flytningen kræver kontrol. Filerne er bevaret.'),'muted'),element('p',job.error));target.append(button('Try again','Prøv igen',async()=>{try{latest=await api(`torrent-moves/${job.id}/retry`,{},'POST');nextPoll=0;moveNotice(latest);paint(node,latest);void poll();}catch(error){notify(error);}}));}
     if(job.status!=='complete')target.append(element('p',text('You can close the panel. The job continues in the background.','Du kan lukke panelet. Arbejdet fortsætter i baggrunden.'),'muted'));
   }
   function show(job) {jobView=job;panelSignature='';syncPanel();}
@@ -215,12 +251,12 @@
       const job=jobs[0];if(!job)return;const wasActive=latest?.id===job.id && latest.status!=='complete';latest=job;
       sync();activity.hidden=false;activity.title=text('Move history','Flyttehistorik')+': '+phase(job.status);
       if(panelBody?.dataset.job===job.id){jobView=job;paint(panelBody,job);}
+      if(!['complete','needs_attention'].includes(job.status) || wasActive)moveNotice(job);
       if(job.status==='complete' && wasActive && !notified.has(job.id)) {
         notified.add(job.id);for(const row of job.items)selected.delete(row.hash);sync();
-        showNotification(text('Files moved and verified.','Filerne er flyttet og kontrolleret.'),'success');
         if(typeof seedDetailCache!=='undefined')seedDetailCache.clear();
       }
-    } catch(error) {if(panelBody?.dataset.job)notify(error);}
+    } catch(error) {if(latest && !['complete','needs_attention'].includes(latest.status))moveNotice(latest,true);else if(panelBody?.dataset.job)notify(error);}
     finally {polling=false;nextPoll=Date.now()+(latest && !['complete','needs_attention'].includes(latest.status)?1500:15000);}
   }
   const list=document.querySelector('#torrents');if(!list)return;

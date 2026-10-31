@@ -154,7 +154,7 @@ def test_manual_early_stop_checks_credit_instead_of_raw_ratio(tmp_path):
         if request.url.path.endswith('/properties'):
             return httpx.Response(200, json={'total_uploaded':1000,'total_downloaded':1000,'share_ratio':1,'addition_date':CREATED+60,'seeding_time':60})
         if request.url.path.endswith('/info'):
-            return httpx.Response(200, json=[])
+            return httpx.Response(200, json=[{'hash':HASH,'state':'stalledUP','progress':1}])
         mutations.append(request.url.path)
         return httpx.Response(204)
     with TestClient(create_app(tmp_path, 'http://testserver', qbit_password='synthetic', transport=httpx.MockTransport(handler))) as client:
@@ -258,3 +258,70 @@ def test_upgrade_scans_beyond_first_500_torrents(tmp_path):
         assert calls[-1][2]['hashes']==existing[-1]['hash']
         assert calls[-1][2]['seedingTimeLimit']=='-1'
     asyncio.run(scenario())
+
+
+def test_batch_download_history_reads_tracker_accounts_once(tmp_path):
+    ledger, _, _, _ = setup(tmp_path)
+    calls=[]
+    ledger.download_history.accounts=lambda: calls.append(True) or []
+    results=ledger.observe_many([row(),{**row(),'hash':'b'*40}])
+    assert len(results)==2
+    assert len(calls)==1
+
+
+def test_optional_insight_failure_does_not_block_ratio_accounting(tmp_path,caplog):
+    ledger, _, _, _ = setup(tmp_path)
+    def failed(*args):raise OSError('private synthetic detail')
+    ledger.observer=failed
+    result=ledger.observe_many([row()])
+    assert result[0]['credited_uploaded'] is not None
+    assert 'Insight observation failed (OSError)' in caplog.text
+    assert 'private synthetic detail' not in caplog.text
+
+
+def test_custom_unit3d_does_not_inherit_nordic_green_rules(tmp_path):
+    ledger, _, _, cache = setup(tmp_path, known=False)
+    cache.remember(HASH, {'id':'sagmire','name':'Sagmire','provider':'unit3d','base_url':'https://sagmire.org'}, {'info_hash':HASH,'created_at':datetime.fromtimestamp(CREATED,timezone.utc).isoformat()})
+    result=ledger.observe(row(),CREATED+120)
+    assert result['credited_ratio']==1 and result['credited_uploaded']==1000
+    assert not result['green_pending'] and not result['green_active']
+    assert result['green_rule_until'] is None and result['tracker_rule'] is None
+    assert result['tracker_id']=='sagmire'
+
+
+def test_announce_site_chooses_adapter_before_metadata_and_after_site_change(tmp_path):
+    ledger, _, _, _ = setup(tmp_path, known=False)
+    ledger.tracker_accounts=lambda:[{'id':'other','name':'Other','provider':'unit3d','base_url':'https://sagmire.org'},{'id':'nb','name':'NB','provider':'nordicbytes'}]
+    other=ledger.observe(row(tracker='https://t.sagmire.org/announce'),CREATED+120)
+    assert other['credited_ratio']==1 and other['tracker_id']=='other' and not other['green_pending']
+    nordic=ledger.observe(row(uploaded=1100,tracker='https://t.nordicbytes.org/announce'),CREATED+130)
+    assert nordic['green_pending'] and nordic['tracker_id']=='nb'
+
+
+def test_custom_featured_badge_does_not_invent_freeleech_or_double_upload(tmp_path):
+    ledger, _, _, cache = setup(tmp_path, known=False)
+    cache.remember(HASH, {'id':'other','name':'Other','provider':'unit3d','base_url':'https://sagmire.org'}, {'info_hash':HASH,'featured':True,'freeleech':0,'double_upload':False})
+    result=ledger.observe(row(),time.time())
+    assert result['tracker_benefits']['freeleech']==0
+    assert result['tracker_benefits']['doubleUpload'] is False
+
+
+def test_stale_counter_retains_last_display_ratio_but_cannot_reach_goal(tmp_path):
+    ledger, _, _, _ = setup(tmp_path)
+    accepted=ledger.observe(row(uploaded=2200),CREATED+120)
+    assert accepted['credited_ratio']==1.1
+    stale=ledger.observe(row(uploaded=2100),CREATED+121)
+    assert stale['last_credited_ratio']==accepted['credited_ratio']
+    assert stale['ratio_checked_at']==CREATED+120
+    assert stale['credited_ratio']==0 and stale['credit_observation_stale']
+    assert not reached(CleanupPolicy(mode='ratio',ratio=1).model_dump(),{**row(uploaded=2100),**stale})
+    assert ledger.load(HASH)['uploaded']==2200
+    # The display snapshot survives restart, without changing the ledger baseline.
+    restarted=TrackerCredit(ledger.database,tmp_path,ledger.raw_qbit)
+    assert restarted.observe({**row(),"uploaded":None},CREATED+122)['last_credited_ratio']==1.1
+    fresh=restarted.observe(row(uploaded=2300),CREATED+123)
+    assert fresh['credited_ratio']==1.15 and fresh['last_credited_ratio']==1.15
+    assert fresh['ratio_checked_at']==CREATED+123
+    # A re-added torrent has a new counter identity and cannot inherit that ratio.
+    reset=restarted.observe({**row(added_on=CREATED+500),"uploaded":None},CREATED+501)
+    assert reset['last_credited_ratio'] is None

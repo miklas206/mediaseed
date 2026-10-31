@@ -21,7 +21,7 @@ def test_preview_is_authenticated_read_only_and_does_not_fetch_magnet_urls(tmp_p
         assert client.post('/api/torrent-preview', content=TORRENT).status_code == 401
         sign_in(client)
         response = client.post('/api/torrent-preview', content=TORRENT, headers={'Content-Type': 'application/x-bittorrent'})
-        assert response.status_code == 200 and response.json() == {'size': 1024, 'name': 'test', 'estimates': [], 'benefits': {}, 'metadataPending': False}
+        assert response.status_code == 200 and response.json() == {'size': 1024, 'name': 'test', 'estimates': [], 'benefits': {}, 'metadataPending': False, 'lookupStatus':'tracker_unknown'}
         assert client.post('/api/torrent-preview', json={'magnet': 'https://example.invalid/private'}).status_code == 422
         response = client.post('/api/torrent-preview', json={'magnet': 'magnet:?xt=urn:btih:' + 'a'*40 + '&xs=https://example.invalid/private'})
         assert response.status_code == 200 and response.json()['size'] is None

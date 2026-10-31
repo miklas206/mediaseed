@@ -1,0 +1,61 @@
+/* Original vector pond. Surfaces remain opaque enough to read actual status. */
+:root[data-look="duck-pond"]{--theme-font:"Trebuchet MS","Segoe UI",sans-serif;--skin-radius:16px;--skin-shadow:0 12px 36px #001b1633;--scene:none;--pond-water:#0a2425;--pond-deep:#071919;--pond-glow:#739f6433;--pond-ring:#a3d6be;}
+:root[data-look="duck-pond"][data-appearance-mode="light"]{--pond-water:#c8dfcb;--pond-deep:#b1d0c7;--pond-glow:#fff3a7aa;--pond-ring:#406e5d;}
+:root[data-look="duck-pond"] body{isolation:isolate;font-family:var(--theme-font);}
+.duck-pond-scene{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none;background:radial-gradient(ellipse at 76% 14%,var(--pond-glow),transparent 48%),linear-gradient(165deg,var(--pond-water),var(--pond-deep));}
+.pond-moon{position:absolute;right:12%;top:8%;width:64px;aspect-ratio:1;border-radius:50%;background:#ffe9ad;box-shadow:0 0 65px 15px #e9d98612;opacity:.6;}
+.pond-shimmer{position:absolute;inset:0;background:repeating-radial-gradient(ellipse at 70% -10%,transparent 0 74px,#8cc4aa0a 75px 77px,transparent 78px 130px);animation:pond-light 24s ease-in-out infinite alternate;}
+.pond-duck-lane{position:absolute;width:clamp(65px,12vw,var(--duck-size));aspect-ratio:180/140;animation:pond-swim var(--swim-duration) ease-in-out var(--swim-delay) infinite alternate;}
+.pond-duck{position:relative;z-index:1;transform-origin:50% 80%;animation:pond-bob 3.8s ease-in-out infinite;}
+.pond-duck svg{display:block;width:100%;height:auto;transform:scaleX(var(--duck-facing));}
+.pond-ripple{position:absolute;left:4%;right:4%;top:72%;height:18%;border:1px solid var(--pond-ring);border-radius:50%;opacity:.2;}
+.pond-ripple::after{content:'';position:absolute;inset:-30%;border:1px solid var(--pond-ring);border-radius:50%;animation:pond-ripple 4.5s ease-out infinite;}
+.pond-lily{position:absolute;width:clamp(28px,4vw,66px);aspect-ratio:1.9;border-radius:50%;background:conic-gradient(from 32deg,#4c8668 0 310deg,transparent 311deg);transform:rotate(var(--pad-rotation));opacity:.6;box-shadow:0 6px 8px #001c1b33;}
+.pond-lily::after{content:'';position:absolute;inset:18% 26%;border-radius:50%;border-top:1px solid #a5c68866;}
+.pond-firefly{position:absolute;width:3px;height:3px;border-radius:50%;background:#f5e7a0;box-shadow:0 0 12px 2px #f8d96555;animation:pond-firefly 8s ease-in-out infinite alternate;}
+.pond-reeds{position:absolute;bottom:-12px;width:clamp(100px,17vw,245px);transform-origin:50% 100%;animation:pond-reeds 9s ease-in-out infinite alternate;opacity:.8;}
+.pond-reeds svg{display:block;width:100%;height:auto;}
+.pond-reeds-left{left:-3%;}.pond-reeds-right{right:-3%;scale:-1 1;animation-delay:-4s;}
+:root[data-look="duck-pond"] :is(.panel,.workspace-card,.hub-app-card,.resource-card,.profile,.card){border-color:color-mix(in srgb,var(--accent) 17%,var(--line));}
+:root[data-look="duck-pond"] :is(.primary,button.primary){box-shadow:0 3px 0 color-mix(in srgb,var(--accent) 40%,transparent);}
+:root[data-look="duck-pond"] :is(button,input,select,textarea){border-radius:10px;}
+.pond-motion{position:fixed;right:18px;bottom:84px;z-index:40;min-height:34px;padding:6px 11px;border:1px solid var(--line);border-radius:20px;background:var(--surface,var(--panel));color:var(--text);font:500 11px/1.3 system-ui,sans-serif;box-shadow:0 3px 16px #001b161a;cursor:pointer;}
+.pond-motion:focus-visible{outline:2px solid var(--accent);outline-offset:3px;}
+:root:is([data-navigation="dock-bottom"],[data-app-navigation="dock-bottom"]) .pond-motion{bottom:100px;}
+.duck-pond-scene[data-paused="true"] *,.duck-pond-scene[data-paused="true"] *::after{animation-play-state:paused!important;}
+@keyframes pond-swim{from{translate:-30% -18%;}to{translate:75% 12%;}}
+@keyframes pond-bob{0%,100%{transform:translateY(0) rotate(-2deg);}50%{transform:translateY(-5px) rotate(2deg);}}
+@keyframes pond-ripple{from{transform:scale(.65);opacity:.5;}to{transform:scale(1.5);opacity:0;}}
+@keyframes pond-firefly{from{transform:translate(0,0);opacity:.1;}to{transform:translate(22px,-28px);opacity:.75;}}
+@keyframes pond-reeds{from{transform:rotate(-2deg);}to{transform:rotate(3deg);}}
+@keyframes pond-light{to{transform:translate(2%,1.5%) scale(1.02);}}
+@media(max-width:600px){.pond-duck-lane{width:80px;}.pond-duck-lane:nth-of-type(5){display:none;}.pond-motion{right:10px;bottom:calc(84px + env(safe-area-inset-bottom));font-size:10px;}.pond-moon{width:42px;}}
+@media(prefers-reduced-motion:reduce){.duck-pond-scene *,.duck-pond-scene *::after{animation:none!important;}}
+:root[data-reduced-motion="true"] .duck-pond-scene *,:root[data-reduced-motion="true"] .duck-pond-scene *::after{animation:none!important;}
+
+/* Direct manipulation lives above the app only while a duck is held/thrown. */
+.pond-play-layer{position:fixed;inset:0;z-index:1000;pointer-events:none;overflow:hidden;}
+.pond-play-layer .pond-toss-duck{position:absolute;left:0;top:0;animation:none;transform-origin:50% 60%;will-change:transform;filter:drop-shadow(0 12px 8px #001b1640);}
+.pond-wing-far{visibility:hidden;}
+.pond-held .pond-wing-far{visibility:visible;}
+.pond-held .pond-wing{transform-box:fill-box;transform-origin:90% 60%;animation:pond-wing-flap .13s ease-in-out infinite alternate;}
+.pond-held .pond-wing-far{animation-delay:-.1s;}
+.pond-away{visibility:hidden;animation-play-state:paused!important;}
+.pond-relocated{animation-name:pond-relocated-swim;animation-delay:0s;}
+html.pond-over-duck,html.pond-over-duck *:not(button):not(a){cursor:grab;}
+html.pond-grabbing,html.pond-grabbing *{cursor:grabbing!important;user-select:none;}
+.pond-play-controls{position:fixed;left:12px;bottom:125px;z-index:1001;pointer-events:none;}
+.pond-play-controls button{position:absolute;width:1px;height:1px;padding:0;border:0;clip-path:inset(50%);overflow:hidden;white-space:nowrap;}
+.pond-play-controls button:focus-visible{position:relative;display:block;clip-path:none;width:auto;max-width:calc(100vw - 24px);height:auto;white-space:normal;padding:10px 14px;background:var(--surface,var(--panel));color:var(--text);border:2px solid var(--accent);pointer-events:auto;}
+.pond-splash{position:absolute;width:var(--splash-size);height:18px;translate:-50% -50%;pointer-events:none;animation:pond-splash-life .95s linear both;}
+.pond-splash::before,.pond-splash::after{content:'';position:absolute;inset:0;border:2px solid var(--pond-ring);border-radius:50%;animation:pond-splash-ring .9s ease-out both;}
+.pond-splash::after{animation-delay:.12s;border-width:1px;}
+.pond-splash i{position:absolute;left:50%;top:40%;width:5px;height:9px;border-radius:60% 60% 50% 50%;background:var(--pond-ring);animation:pond-splash-drop .65s ease-out var(--drop-delay) both;}
+.pond-play-layer[data-paused="true"] *{animation:none!important;}
+@keyframes pond-wing-flap{from{transform:rotate(-40deg) scaleY(.65);}to{transform:rotate(40deg) scaleY(1.2);}}
+@keyframes pond-relocated-swim{from{translate:0 0;}to{translate:var(--duck-drift,24px) -6px;}}
+@keyframes pond-splash-life{0%,99%{opacity:1;}100%{opacity:0;}}
+@keyframes pond-splash-ring{from{transform:scale(.35);opacity:.9;}to{transform:scale(1.9);opacity:0;}}
+@keyframes pond-splash-drop{0%{transform:translate(0,0) scale(.5);opacity:0;}18%{opacity:.9;}65%{transform:translate(var(--splash-x),var(--splash-y)) scale(1);opacity:.8;}100%{transform:translate(calc(var(--splash-x) * 1.1),6px) scale(.3);opacity:0;}}
+@media(prefers-reduced-motion:reduce){.pond-play-layer *{animation:none!important;}}
+:root[data-reduced-motion="true"] .pond-play-layer *{animation:none!important;}

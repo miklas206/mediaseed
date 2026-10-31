@@ -1,8 +1,11 @@
 """Operator-approved download locations shared with the torrent client."""
 
 import json
+import errno
+import secrets
 import os
 import shutil
+import tempfile
 from pathlib import Path, PurePosixPath
 
 from fastapi import HTTPException
@@ -51,7 +54,7 @@ class Storage:
         ):
             raise HTTPException(422, "Choose an approved download folder")
         parts = relative.split("/") if relative else []
-        if any(p in {"", ".", ".."} for p in parts) or relative.startswith("/"):
+        if any(p in {"", ".", "..", ".incomplete"} for p in parts) or relative.startswith("/"):
             raise HTTPException(422, "Choose an approved download folder")
         # The local-volume browser cannot bypass the named media location checks.
         if location == "local" and parts[:1] == ["media"]:
@@ -73,6 +76,53 @@ class Storage:
     def destination(self, location, relative):
         row, _ = self.directory(location, relative, writable=True)
         return row["path"] + ("/" + relative if relative else "")
+
+    def incomplete(self, destination):
+        """Prepare staging beside the final files, including existing installs."""
+        selected = self.describe(destination)
+        if selected is None:
+            raise HTTPException(422, "Choose an approved download folder")
+        _, parent = self.directory(selected["location"], selected["folder"], writable=True)
+        staging = parent / ".incomplete"
+        try:
+            staging.mkdir(exist_ok=True)
+            if (staging.resolve(strict=True) != staging or not staging.is_dir()
+                    or staging.stat().st_dev != parent.stat().st_dev
+                    or os.path.ismount(staging)
+                    or not os.access(staging, os.W_OK | os.X_OK)):
+                raise OSError()
+            # Network mounts can advertise write permission while returning EIO.
+            with tempfile.TemporaryFile(dir=staging) as probe:
+                probe.write(b"\0")
+                probe.flush()
+                os.fsync(probe.fileno())
+            # A pooled device ID can hide multiple physical disks. Prove the
+            # completion operation can rename, rather than copy, before import.
+            source = staging / ('.mediaseed-rename-' + secrets.token_hex(16))
+            target = parent / source.name
+            created = False
+            renamed = False
+            try:
+                with source.open('xb') as probe:
+                    created = True
+                    probe.write(b'\0')
+                if target.exists() or target.is_symlink():
+                    raise OSError('Rename probe collision')
+                try:
+                    os.rename(source, target)
+                    renamed = True
+                except OSError as error:
+                    if error.errno == errno.EXDEV:
+                        raise HTTPException(409, 'Storage cannot rename completed files on their original disk. Run MediaSeed pool host setup before adding downloads.') from None
+                    raise
+            finally:
+                if created:
+                    source.unlink(missing_ok=True)
+                    if renamed:
+                        target.unlink(missing_ok=True)
+        except OSError:
+            raise HTTPException(409, "The destination's .incomplete folder is unavailable, read-only or on another filesystem") from None
+        return destination.rstrip("/") + "/.incomplete"
 
     def describe(self, destination):
         """Expose only client paths inside explicitly approved download locations."""

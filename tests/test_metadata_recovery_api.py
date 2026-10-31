@@ -74,7 +74,7 @@ def test_recovered_metadata_and_cover_are_authenticated_persistent_and_upgrade_s
         calls = []
 
         async def qbit(*args, **kwargs):
-            return httpx.Response(200, json=[{'hash': HASH, 'name': 'Synthetic.Release.mkv'}])
+            return httpx.Response(200, json=[{'hash': HASH, 'name': 'Synthetic.Release.mkv', 'tracker': 'https://t.nordicbytes.org/announce'}])
 
         async def read(account, path, params):
             calls.append(path)

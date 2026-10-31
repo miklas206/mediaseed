@@ -40,7 +40,7 @@ def test_independent_account_and_sessions(client):
 
 def test_torrents_are_filtered_and_controls_fail_closed(client):
     sign_in(client)
-    assert client.get("/api/torrents").json() == [{"hash": "a" * 40, "name": "Test torrent", "progress": 0.5, "cleanup": {"mode": "never", "status": "disabled"}}]
+    assert client.get("/api/torrents").json() == [{"hash": "a" * 40, "name": "Test torrent", "progress": 0.5, "tracker_provider": None, "download_history": {}, "own_upload": None, "cleanup": {"mode": "never", "status": "disabled"}}]
     assert client.post("/api/torrents", json={"url": "magnet:?xt=urn:btih:" + "a" * 40}).json()["stopped"] is True
     assert client.post("/api/torrents/start", json={"torrent_hash": "a" * 40}).status_code == 409
     assert client.post("/api/torrents/remove", json={"torrent_hash": "all"}).status_code == 422
@@ -51,6 +51,9 @@ def test_torrents_are_filtered_and_controls_fail_closed(client):
 def test_host_origin_and_cookie_guards(client):
     assert client.get("/healthz", headers={"host": "untrusted.test"}).status_code == 400
     assert client.post("/api/auth/setup", json={"username": "tester", "password": PASSWORD}, headers={"origin": "https://untrusted.test"}).status_code == 403
+    rejected = client.post('/api/trackers/test/torrents/12', json={'ratio': 1}, headers={'origin': 'https://untrusted.test'})
+    assert rejected.status_code == 403
+    assert rejected.json() == {'detail': 'Request origin not allowed. Reload MediaSeed using its configured address.'}
     sign_in(client)
     assert client.get("/api/auth/me").headers["Cache-Control"] == "no-store"
 

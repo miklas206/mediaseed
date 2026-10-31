@@ -1,0 +1,30 @@
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE),assert=require('node:assert/strict');
+(async()=>{const browser=await chromium.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox']});
+try{
+ const context=await browser.newContext({viewport:{width:1440,height:1050}}),base='http://127.0.0.1:15412';
+ await context.request.post(base+'/api/auth/setup',{data:{username:'tester',password:'synthetic-password-only'}});
+ const {csrf}=await(await context.request.post(base+'/api/auth/login',{data:{username:'tester',password:'synthetic-password-only'}})).json();
+ const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.addInitScript(()=>{window.EventSource=class extends EventTarget{close(){}};});
+ await page.route('**/api/**',async route=>{
+  const path=new URL(route.request().url()).pathname;
+  if(path==='/api/auth/me')return route.fulfill({json:{csrf,role:'administrator',username:'Synthetic',language:'da'}});
+  if(path.startsWith('/api/uploader')||path.startsWith('/api/upload/')||path.startsWith('/api/auth/'))return route.continue();
+  return route.fulfill({json:path==='/api/dashboard'?{runtime:{ready:true,downloadsEnabled:true},queue:{active:0,limit:8,waiting:0},torrents:[]}:path==='/api/activity'?{entries:[]}:path==='/api/storage'?{locations:[]}:[]});
+ });
+ await page.goto(base+'/');await page.locator('#workspace').waitFor({state:'visible'});await page.locator('[data-view=uploader]').click();
+ await page.waitForFunction(async()=>{const response=await fetch('/api/upload/upload-helper/'+('b'.repeat(24)));return response.ok&&(await response.json()).readyForReview;});
+ const response=await context.request.get(base+'/api/upload/upload-helper/'+'b'.repeat(24));assert.equal(response.status(),200);const job=await response.json();console.log(JSON.stringify({ready:job.readyForReview,proof:job.conversionProof,version:job.automaticChecksVersion}));
+ assert.equal(job.conversionProof.id,'a'.repeat(32));assert.equal(job.automaticChecksVersion,3);
+ await page.locator('#upload-tools-panel').evaluate(e=>e.open=true);await page.locator('#upload-history').evaluate(e=>e.open=true);await page.locator('#upload-older-jobs .job-accordion').evaluate(e=>e.open=true);
+ const review=page.locator('#upload-older-jobs .uploader-review');
+ await context.request.post(base+'/__fixture/mode',{data:{duplicate:true,variant:'different'}});
+ await review.locator('details').first().evaluate(e=>e.open=true);
+ await review.getByRole('button',{name:'Tjek dubletter'}).click();await review.getByText(/De eksisterende udgaver har tekniske forskelle/).first().waitFor();
+ assert.equal(await review.getByRole('button',{name:'Upload til NordicBytes'}).count(),0);
+ const send=review.getByRole('button',{name:'Start seeding',exact:true});assert.equal(await send.isDisabled(),true);
+ await review.getByLabel('Link til den færdige upload').fill('https://nordicbytes.org/torrents/9');
+ await review.locator('input[type=checkbox]').check();assert.equal(await send.isEnabled(),true);
+ assert.equal((await(await context.request.get(base+'/__fixture/state')).json()).writes,0);
+ assert.deepEqual(errors,[]);console.log(JSON.stringify({oldDraftRecheckedAutomatically:true,conversionReceiptVerified:true,manualComparisonRequired:true,manualSeedingEnabledAfterConfirmation:true,noTrackerPostSent:true,errors}));
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exit(1)});

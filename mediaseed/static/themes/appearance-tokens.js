@@ -14,6 +14,7 @@ exports.themeStyles = [
     "precision-terminal",
     "floating-layers",
     "edge-signal",
+    "duck-pond",
 ];
 exports.navigationLayouts = [
     "sidebar",
@@ -249,6 +250,20 @@ exports.themePresets = [
             secondary: "#d5ac80",
             background: "#282828",
             depth: 30,
+        },
+    },
+    {
+        id: "duck-pond",
+        name: "Duck Pond",
+        description: "Golden ducks, emerald water and fireflies. A living little pond.",
+        value: {
+            ...appearance_tokens_1.defaultAppearance,
+            style: "duck-pond",
+            mode: "dark",
+            accent: "#f6ce73",
+            secondary: "#9ed8bd",
+            background: "#204c42",
+            depth: 52,
         },
     },
 ];

@@ -55,7 +55,7 @@ test('shipped provider markup supports profile choice, polling, explicit connect
       return { ok: true, json: async () => url === '/api/vpn' ? state : url === '/api/auth/status' ? { needsSetup: true } : url === '/api/torrents' ? [] : {} };
     },
   });
-  vm.runInContext(readFileSync(new URL('../mediaseed/static/i18n.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/rich-ui.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
+  vm.runInContext(readFileSync(new URL('../mediaseed/static/i18n.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/torrent-controls.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/rich-ui.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../mediaseed/static/app.js', import.meta.url), 'utf8'), context);
   context.MediaAppI18n.setLanguage('da'); await context.refreshVpn();
   assert.equal(find('#vpn-provider').value, '');
   assert.equal(find('#vpn-profile').value, '');

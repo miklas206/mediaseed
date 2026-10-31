@@ -1,0 +1,97 @@
+/* The reference's aligned rows, with covers and existing selection/actions. */
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready{--accordion-columns:22px 24px 54px minmax(170px,2.3fr) minmax(130px,1.2fr) minmax(190px,1.8fr) minmax(100px,1fr) 52px 108px}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready :is(.torrent-table-header,#torrents>.torrent){grid-template-columns:var(--accordion-columns);gap:12px}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready .torrent-table-header{padding:12px;min-height:42px}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready .torrent-table-header::after{content:none}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready .seed-column-name{grid-column:2/5!important;padding-left:0}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents>.torrent{min-height:102px;padding:12px;transition:background-color .15s}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents>.seed-is-expanded{background:color-mix(in srgb,var(--accent) 5%,transparent);box-shadow:inset 3px 0 var(--accent)!important}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .torrent-move-select{grid-column:1!important;grid-row:1!important;justify-self:center;min-width:20px}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-expand-toggle{grid-column:2!important;grid-row:1!important;display:grid;place-items:center;padding:0;width:24px;min-height:34px;border:0;background:transparent;color:var(--muted);border-radius:5px}
+.seed-expand-toggle svg{transition:transform .15s}
+.seed-expand-toggle[aria-expanded=true] svg{transform:rotate(90deg)}
+.seed-expand-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-poster{grid-column:3!important;grid-row:1!important;width:54px;height:78px}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-identity{grid-column:4!important;grid-row:1!important}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-activity{grid-column:5!important;grid-row:1!important}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-progress-cell{grid-column:6!important;grid-row:1!important;grid-template-columns:minmax(0,1fr);gap:7px}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-list-percent{grid-column:1!important;grid-row:1!important;display:block!important;font-size:.77rem}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-progress-track{grid-column:1!important;grid-row:2!important;height:9px}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-goal-caption{grid-row:3!important}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-list-speeds{grid-column:7!important;grid-row:1!important;display:flex;flex-direction:column;gap:5px;min-width:0}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready .seed-list-speeds .seed-list-metric{display:flex!important;gap:7px;align-items:center;font-size:.78rem;white-space:nowrap}
+.seed-list-speeds .seed-rate-arrow{color:var(--healthy);font-size:1.1rem;line-height:1}
+.seed-list-speeds .seed-list-upload .seed-rate-arrow{color:var(--muted)}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-list-ratio{grid-column:8!important;grid-row:1!important;display:grid!important;font-size:.78rem}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .actions{grid-column:9!important;grid-row:1!important;flex-direction:row;gap:6px}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-files-button{display:grid}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready .seed-inline-details{grid-column:1/-1!important;grid-row:2!important;min-width:0;padding:0 16px 12px;border:1px solid var(--line);border-radius:8px;background:var(--glass,var(--surface));margin-top:2px;font-size:.79rem}
+.seed-inline-details[hidden]{display:none!important}
+.seed-inline-tabs{display:flex;gap:20px;min-width:0;overflow-x:auto;border-bottom:1px solid var(--line)}
+#workspace .seed-inline-tabs button{flex:none;padding:13px 8px 12px;min-height:44px;background:transparent;border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--muted);font-size:.8rem}
+#workspace .seed-inline-tabs button[aria-selected=true]{color:var(--text);border-bottom-color:var(--accent)}
+.seed-inline-status{display:flex;gap:12px;align-items:center;color:var(--muted);overflow-wrap:anywhere}
+.seed-inline-status:empty{display:none}
+.seed-inline-status:not(:empty){padding-top:14px}
+.seed-inline-content{min-width:0;overflow-x:auto;padding:18px 0}
+.seed-inline-content table{min-width:420px}
+.seed-inline-content:is([data-tab=files],[data-tab=connections]){max-height:440px;overflow:auto}
+.seed-inline-content>.seed-badges{margin-top:18px}
+.seed-inline-content>button{margin-bottom:12px}
+.seed-inline-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px}
+.seed-inline-facts section{min-width:0}
+.seed-inline-facts section+section{padding-left:20px;border-left:1px solid var(--line)}
+.seed-inline-facts h4{font-size:.78rem;color:var(--muted);margin:0 0 12px;font-weight:600}
+.seed-inline-facts dl{display:grid;gap:10px;margin:0}
+.seed-inline-facts dl>div{display:flex;justify-content:space-between;align-items:baseline;gap:12px;min-width:0}
+.seed-inline-facts dt{color:var(--muted);font-size:.74rem}
+.seed-inline-facts dd{margin:0;text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums;font-size:.76rem;max-width:70%}
+.seed-inline-footer{display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);padding-top:12px;min-width:0}
+.seed-inline-folder{margin-right:auto;min-width:0;color:var(--muted);font-size:.73rem;overflow-wrap:anywhere}
+#workspace .seed-inline-footer button{flex:none;font-size:.73rem;min-height:34px;padding:6px 10px}
+#workspace[data-torrent-layout=cards] :is(.seed-expand-toggle,.seed-inline-details,.seed-list-speeds){display:none!important}
+@container(max-width:1120px){
+ #workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready :is(.torrent-table-header,#torrents>.torrent){--accordion-columns:20px 22px 48px minmax(120px,2fr) minmax(112px,1.3fr) minmax(130px,1.5fr) 96px 44px 72px;gap:8px}
+ #workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-poster{width:48px;height:70px}
+ #workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-files-button{display:none}
+ .seed-inline-facts{grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}
+ .seed-inline-facts section:nth-child(3){border-left:0;padding-left:0}
+}
+@container(max-width:760px){
+ #workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready .torrent-table-header{display:none!important}
+ #workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents>.torrent{grid-template-columns:20px 22px 44px minmax(0,1fr) 32px;gap:10px 6px;padding:12px 6px;min-height:0}
+ #workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-poster{grid-column:3!important;width:44px;height:66px}
+ #workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-identity{grid-column:4!important;grid-row:1!important;padding-right:4px}
+ #workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .torrent-move-select{grid-column:1!important;grid-row:1!important;align-self:center}
+ #workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-expand-toggle{grid-column:2!important;grid-row:1!important}
+ #workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .actions{grid-column:5!important;grid-row:1!important;flex-direction:column}
+ #workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-activity{grid-column:1/-1!important;grid-row:2!important;display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+ #workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-progress-cell{grid-column:1/-1!important;grid-row:3!important}
+ #workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-list-speeds{grid-column:1/5!important;grid-row:4!important;display:flex;flex-direction:row;flex-wrap:wrap;gap:16px}
+ #workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-list-ratio{grid-column:5!important;grid-row:4!important;text-align:right}
+ #workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready .seed-inline-details{grid-row:5!important;padding:0 10px 12px}
+ .seed-list-speeds .seed-metric-label{display:none}
+ .seed-inline-footer{flex-wrap:wrap}
+ .seed-inline-folder{flex-basis:100%}
+}
+@container(max-width:460px){
+ .seed-inline-facts{grid-template-columns:minmax(0,1fr);gap:16px}
+ .seed-inline-facts section+section{border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:16px}
+ .seed-inline-tabs{gap:12px}
+}
+@media(prefers-reduced-motion:reduce){.seed-expand-toggle svg,#workspace .seed-rich-row{transition:none}}
+
+/* Existing card metrics must not create implicit columns inside the speed cell. */
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready .seed-list-speeds .seed-list-metric{grid-column:auto!important;grid-row:auto!important;justify-self:auto;text-align:left}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready :is(.seed-list-speeds,.seed-list-ratio) .seed-metric-label{display:none!important}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-progress-cell>:not(.seed-progress-track):not(.seed-list-percent):not(.seed-goal-caption){display:none!important}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-goal-caption{grid-row:auto!important}
+/* Scope fact typography so the surrounding workspace cannot enlarge its rows. */
+#workspace .seed-inline-facts h4{font-size:.78rem;line-height:1.4;margin:0 0 12px;padding:0;min-height:0}
+#workspace .seed-inline-facts :is(dt,dd){margin:0;padding:0;min-height:0;line-height:1.5}
+#workspace .seed-inline-facts dl{align-content:start}
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready .seed-list-speeds .seed-list-metric{font-size:.74rem}
+.seed-list-speeds .seed-metric-value{min-width:0;overflow:hidden;text-overflow:ellipsis}
+
+/* Keep the native meter inside the compact track; older list rules set it to 16px. */
+#workspace.torrent-accordion-ready[data-torrent-layout=list] #downloads.torrent-actions-ready #torrents .seed-progress-track progress{height:100%;min-height:0;max-height:100%;margin:0}

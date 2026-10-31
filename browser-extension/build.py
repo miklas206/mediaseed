@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT.parent / "mediaseed" / "static"
-FILES = ["i18n.js", "common.js", "bridge.js", "background.js", "worker.js", "capture.js", "popup.js", "popup.html", "popup.css", "README.md"]
+FILES = ["i18n.js", "common.js", "bridge.js", "background.js", "worker.js", "popup.js", "popup.html", "popup.css", "README.md"]
 
 
 def package(browser):

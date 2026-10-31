@@ -1,49 +1,19 @@
-# MediaSeed browserudvidelse 1.3.0
+# MediaSeed browserudvidelse 1.5.1
 
-Send magnetlinks og torrentfiler direkte til din egen MediaSeed med gemte standardvalg. Logoet vises i værktøjslinjen og udvidelseslisten. Udvidelsen genbruger dit normale login i en MediaSeed-fane og gemmer ingen adgangskoder, cookies eller CSRF-nøgler. Ingen analytics eller eksterne tjenester.
+Én højreklikshandling: **Send til MediaSeed**. RSS-links genkendes på feedruten eller RSS/XML/Atom-endelsen; øvrige HTTP-downloadlinks hentes som torrentfiler, og magnetlinks valideres. RSS-links hentes ikke af udvidelsen. De åbnes i MediaSeeds RSS-formular. Torrentfiler og magneter åbnes i MediaSeeds tilføjelsesformular. Start/pause, mappe, seedtid, ratio og oprydning vælges og bekræftes kun i MediaSeed.
 
-Version 1.3.0 fanger også NordicBytes' `/torrents/download/...`-links uden `.torrent` i adressen, når hjemmesiden er aktiveret. Filen hentes med kildesidens normale login og sendes med gemte start-/seedingvalg; en popup på kildesiden bekræfter et accepteret svar fra MediaSeed. Andre NordicBytes-sider og almindelige downloads overtages ikke. Efter manuel opdatering skal NordicBytes-fanen genindlæses, så den nye klikfangst indlæses.
+Udvidelsen finder og fokuserer en eksisterende MediaSeed-fane eller åbner den gemte adresse. Ved login venter linket i browsersessionen og leveres efter login. Ved en åben dialog bevares linket; luk dialogen og tryk Fortsæt i udvidelsen. Ét link kan vente ad gangen, i højst 15 minutter. Ryd sletter kun det ventende link; ingen download er startet.
+
+Opsætningen har et bredere adressefelt og knappen Gem og åbn MediaSeed. Ingen downloadindstillinger eller separate RSS-knapper findes i udvidelsen. Adressen gemmes lokalt. Private links og torrentbytes gemmes kun i sessionshukommelsen, aldrig i en destinations-URL, synkroniseret lager eller permanent fejlhistorik. Ved manglende sessionslager bruges flygtig hukommelse. Normalt MediaSeed-login og serverens VPN-/lagerkontroller bevares.
 
 ## Installation og opdatering
 
-Hent pakken fra **Browserudvidelse** øverst i MediaSeed. Downloadsiden vælger pakke efter browser; valget kan ændres.
+Hent pakken i MediaSeed → Browserudvidelse, pak den ud og indlæs den udpakket under chrome://extensions (eller tilsvarende Chromium-browser). Ved opdatering erstattes filerne i den eksisterende udvidelsesmappe, og Genindlæs vælges. Den gemte MediaSeed-adresse bevares. Ældre start-/oprydningsvalg i browserlager ignoreres; ingen serverindstillinger migreres eller overskrives. Genindlæs gamle trackerfaner for at fjerne tidligere klikopsamling.
 
-- **Chrome / Edge / Brave / Opera:** Udpak `mediaseed-chromium.zip`. Åbn browserens udvidelser, slå udviklertilstand til, vælg **Indlæs udpakket**, og vælg mappen med `manifest.json`. Ved opdatering erstattes filerne i den samme mappe, og udvidelsen genindlæses. Adressen og gemte valg bevares under samme udvidelses-ID.
-- **Firefox desktop:** Udpak `mediaseed-firefox.zip`. Åbn `about:debugging#/runtime/this-firefox`, vælg **Indlæs midlertidig tilføjelse**, og vælg `manifest.json`. Kræver Firefox 140+. Midlertidig installation udløber ved genstart. Permanent almindelig Firefox-installation kræver Mozilla-signering; pakken er ikke signeret eller publiceret.
-- **Safari:** `mediaseed-safari-source.zip` er kilde til Apples WebExtension-konvertering, ikke en færdig Safari-app. Udpak på en Mac med Xcode og brug `xcrun safari-web-extension-packager /sti/til/mappe` (ældre Xcode: `safari-web-extension-converter`). Gennemgå kompatibilitetsmeldinger og byg appen. Distribution kræver Apples signering. Safari/mobile browsere er ikke runtime-verificeret. iOS Chrome/Edge understøtter ikke desktop-installationsmetoden.
+Firefox-pakken er til midlertidig indlæsning under about:debugging og kræver Firefox 140+. Safari-pakken er kildekode til Xcode, ikke en testet eller signeret Safari-app. Der er ingen automatisk butiksopdatering. Byg pakker med `python browser-extension/build.py` og kontrollér dem med `--check`.
 
-## Forbind én gang
+## Flere torrents direkte i MediaSeed
 
-1. Åbn udvidelsen, mens du står på MediaSeed eller dens downloadside. Adressen udfyldes automatisk. Fra andre sider kan adressen indtastes under **Forbindelse**. Brug MediaSeeds egen origin, inklusive port; både domæne og LAN-adresse understøttes uden hardkodet server.
-2. Tryk **Gem og forbind**, og giv browseradgang. Certifikatet skal være betroet; certifikatkontrol omgås ikke.
-3. Log ind normalt, hvis din MediaSeed-session er udløbet. Allerede aktive sessioner genbruges; ingen separat udvidelsesadgangskode kræves.
+Højreklik på et torrent-downloadlink og vælg **Send til MediaSeed**. Gentag for de næste links; filerne samles i MediaSeeds åbne tilføjelsesvindue. Mappe og indstillinger bevares. Hurtige højrekliksoverførsler behandles i rækkefølge. Ingen separat udvidelsesfane eller batchvælger åbnes. Torrentdownloads starter først, når brugeren bekræfter i MediaSeed.
 
-## Gem dine standardvalg
-
-Åbn **Indstillinger**, vælg start med det samme eller pause, ratio, automatisk oprydning, seedtimer og om filer skal bevares, og tryk **Gem standardindstillinger**. Oversigten viser de gemte valg. Ikke-gemte ændringer markeres tydeligt og bruges først efter gem. Indstillingerne bevares, når popupen lukkes, browseren genstartes, eller en torrent tilføjes.
-
-Oprydning kan være aldrig, tid, ratio, BÅDE eller ENTEN. **Aldrig** og filbevaring er standard. Automatisk filsletning kræver eksplicit valg og gem; det fremgår af oversigten. Regler gemmes i MediaSeed pr. ny import og kan slås fra under Detaljer. Browseren behøver ikke være åben; MediaSeed skal køre. Uden oprydning fortsætter seeding uden tids- eller ratiogrænse, indtil du selv stopper eller fjerner torrenten. Udvidelse 1.3.1 viser dette tydeligt; serverrettelsen gælder også allerede installerede udvidelser.
-
-## Direkte tilføjelse
-
-- **Højreklik på magnet- eller torrentlink → Tilføj i MediaSeed.** Linket sendes med de gemte valg uden ekstra formular. Torrentfilen hentes i hjemmesidens egen fanes login-session, når muligt.
-- **Almindelige klik:** Aktivér linkfangst for hjemmesiden i udvidelsen én gang. Klik på magnetlinks eller links med `.torrent` i stien sendes derefter direkte. Fjern hjemmesiden fra listen for at slå fangst fra.
-- **Indsæt eller træk ind:** Indsæt et magnetlink eller vælg/træk en torrentfil ind i popupen. Den primære knap bruger dit gemte startvalg; den anden knap kan ændre start/pause for denne import. De gemte oprydningsvalg bruges stadig.
-
-En kort kvittering på hjemmesiden og `OK` på ikonet viser accept. `!` og en gemt fejlstatus viser problemer. Hvis opsætning, adgang eller login mangler, åbnes en klargjort formular med det oprindelige link. Ingen automatisk gentagelse af POST ved fejl: kontrollér listen i MediaSeed før et nyt forsøg. En fejl i kvitteringen efter en accepteret import udløser aldrig gentagelse.
-
-Start kræver stadig verificeret VPN og skriveadgang. Særlige downloadflows, redirects, links på en anden host eller private trackere kan kræve engangsadgang til kildens host eller normal download efterfulgt af filvalg. Magnetmetadata kan være forsinket i torrentnetværket.
-
-## Data, tilladelser og verifikation
-
-Kun MediaSeed-origin, aktiverede hjemmesider, standardindstillinger og kort seneste status med tidspunkt gemmes varigt lokalt. Torrentlinks/filer til fejlretning gemmes i sessionlager eller hukommelse, udløber efter ti minutter og gemmes aldrig varigt. En linkadresse kan indeholde private tracker-parametre og vises ikke i status.
-
-Browseradgang gives pr. host. Browserens hosttilladelser omfatter alle porte på hosten; udvidelsen håndhæver MediaSeeds præcise origin. Hjemmesider kan ikke ændre standardvalg eller sende vilkårlige API-kald. Klikfangst begrænses til aktiverede hjemmesider, øverste frame og reelle brugerklik. Ingen nye obligatoriske hosttilladelser er tilføjet.
-
-Der er ingen butikspublicering eller automatisk opdatering. Hent den nye pakke og genindlæs udvidelsen. Tests bruger syntetiske browser-/API-transporter for direkte afsendelse, vedvarende valg, kildefil-login, afviste afsendere og fejl uden gentagelse. PNG-ikoner og pakkernes indhold kontrolleres. Faktisk installation i browserne er ikke verificeret her.
-
-## Byg
-
-`python browser-extension/build.py` bygger reproducerbare ZIP-filer i `mediaseed/static/extensions/`. `--check` kontrollerer indcheckede pakker. PNG-ikoner er eksporteret fra MediaSeeds eksisterende vektorgeometri; på Windows kan `build-icons.ps1` genopbygge dem med System.Drawing. Python-pakkebyg kræver ingen grafiske afhængigheder.
-
-Tests: `node --test tests/extension.test.mjs tests/extension-download.test.mjs` og `pytest tests/test_extension_packages.py`.
+Ved en ny udvidelsesinstallation skal adressen og browseradgangen gemmes én gang via værktøjslinjens MediaSeed-ikon. Opsætning åbner kun ikonets popup; hvis browseren blokerer automatisk åbning, viser ikonet en besked, og det aktuelle link venter i sessionshukommelsen. En entydig genkendelig MediaSeed-fane kan genbruges automatisk, hvis dens vært allerede har fået browseradgang. Udvidelsen anmoder ikke om bred læseadgang til faner/historik.

@@ -9,9 +9,11 @@
   const routePaths=['<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>','<path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Z"/><path d="m8 12 3 3 5-6"/>','<path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/>','<path d="m5 4-3 12v4h20v-4L19 4Z M2 16h20M17 18h2"/>'];
   for(const [index,label] of ['Internet','MediaVPN','MediaSeed','Media storage'].entries()) {
     if(index) {const link=element('span',undefined,'download-route-link');link.setAttribute('aria-hidden','true');route.append(link);}
-    const node=element('span',undefined,'download-route-node');node.append(svgIcon(routePaths[index]),element('strong',t(label)));route.append(node);
+    const node=element('span',undefined,'download-route-node');if(index===1)node.classList.add('route-vpn');node.append(svgIcon(routePaths[index]),element('strong',t(label)));route.append(node);
   }
-  flow.append(description,route);workspace.querySelector('.seed-stats').before(flow);
+  const flowHeading=element('div',undefined,'download-flow-heading');
+  flowHeading.append(element('span',t('Protected transfer route'),'download-flow-eyebrow'),description);
+  flow.append(flowHeading,route);workspace.querySelector('.seed-stats').before(flow);
   const packetFlow=MediaSeedPackets.mount(route);
   for(const [index,article] of [...workspace.querySelectorAll('.seed-stats article')].entries()) {
     const paths=['<path d="M12 3v18m-6-6 6 6 6-6"/>','<path d="M12 21V3m-6 6 6-6 6 6"/>','<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M4 9h16M4 15h16"/>'];
@@ -44,18 +46,22 @@
   document.querySelector('#feed-form').addEventListener('reset',()=>setTimeout(syncBadges,0));
   function openEditor(kind){if(appRole!=='administrator')return;editors[kind]?.showModal();setTimeout(syncBadges,0);}
   function render(){
-    const active=document.querySelector('#connection-flow').dataset.state==='active' && downloadsEnabled;
-    const traffic=torrentSnapshotValid&&Date.now()-lastTorrentSample<30000?torrentTraffic():null;
-    packetFlow.update(traffic?.dl_info_speed,traffic?.up_info_speed,active&&!!traffic);
-    flow.dataset.active=String(active);flow.dataset.download=String(active&&!!traffic&&traffic.dl_info_speed>0);flow.dataset.upload=String(active&&!!traffic&&traffic.up_info_speed>0);
-    const status=active?traffic&&(traffic.dl_info_speed>0||traffic.up_info_speed>0)?'Protected transfers active':'VPN ready · waiting for peers':'Transfers blocked · check VPN';
-    description.textContent=t(status);
+    const connectionState=document.querySelector('#connection-flow').dataset.state;
+    const active=connectionState==='active' && downloadsEnabled;
+    flow.dataset.state=connectionState;
+    const age=Date.now()-lastTorrentSample;
+    const traffic=torrentSnapshotValid&&age>=0&&age<30000?torrentTraffic():null;
     flow.hidden=document.querySelector('#downloads').hidden;
+    packetFlow.update(traffic?.dl_info_speed,traffic?.up_info_speed,active&&!!traffic&&!document.hidden&&!flow.hidden);
+    flow.dataset.active=String(active);flow.dataset.download=String(active&&!!traffic&&traffic.dl_info_speed>0);flow.dataset.upload=String(active&&!!traffic&&traffic.up_info_speed>0);
+    const status=active?!traffic?'Waiting for a fresh traffic measurement.':traffic&&(traffic.dl_info_speed>0||traffic.up_info_speed>0)?'Protected transfers active':'VPN ready · waiting for peers':connectionState==='connecting'?'Connecting · downloads blocked':connectionState==='unknown'?'Status cannot be verified':connectionState==='disconnected'?'No VPN selected':'Transfers blocked · check VPN';
+    description.textContent=t(status);
     const runtime=document.querySelector('#connection-country').textContent;
-    vpn.replaceChildren(element('span',t('Connection')),element('strong',active?t('VPN verified'):t('Status cannot be verified')),element('small',active?runtime:t('Check the connection under VPN')));
-    if(active)vpn.append(element('small',document.querySelector('#connection-ip').textContent+' · '+document.querySelector('#connection-port').textContent),element('small',document.querySelector('#connection-checked').textContent));
-    const accounts=globalThis.MediaSeedTrackerRows||[],row=accounts[0];
+    vpn.replaceChildren(element('span',t('Connection')),element('strong',active?t('VPN verified'):t(connectionState==='connecting'?'Connecting · downloads blocked':connectionState==='unknown'?'Status cannot be verified':connectionState==='disconnected'?'No VPN selected':'Connection blocked')),element('small',active?runtime:t('Check the connection under VPN')));
+
+    const accounts=globalThis.MediaSeedTrackerRows||[],row=accounts.find(row=>row.status==='ok'&&row.stats)||accounts.find(row=>row.stats)||accounts[0];
     account.replaceChildren(element('span',t('Tracker and ratio')),element('strong',row?.stats?t('Ratio {0} · Buffer {1}',{0:trackerNumber(row.stats.ratio),1:trackerBytes(row.stats.buffer)}):t('Account data unavailable')));
+    const event = trackerEventSummary(row); if (event) account.append(element('small', event));
     if(row?.stats){
       const totals=element('dl',undefined,'download-account-totals');
       for(const [label,value] of [['Tracker upload',row.stats.uploaded],['Tracker download',row.stats.downloaded]]){const metric=element('div');metric.append(element('dt',t(label)),element('dd',trackerBytes(value)));totals.append(metric);}
@@ -73,13 +79,14 @@
     for(const button of queueActions.querySelectorAll('button'))button.disabled=!torrentSnapshotValid;
     activityCount.textContent=torrentSnapshotValid?t('{0} uploading · {1} downloading',{0:torrents.filter(r=>r.upspeed>0).length,1:torrents.filter(r=>r.dlspeed>0).length}):t('Status unavailable');
     for(const button of document.querySelectorAll('[data-admin-only]'))button.hidden=appRole!=='administrator';
+    globalThis.MediaSeedList?.renderSummary();
   }
   let activityLoading=false;
   async function refreshActivity(){if(activityLoading||document.querySelector('#workspace').hidden)return;activityLoading=true;
     try{const data=await api('activity');const rows=data.entries||[];events.hidden=!rows.length;summary.textContent=t('Latest automatic activity ({0})',{0:rows.length});eventList.replaceChildren(...rows.map(row=>{
       const item=element('article',undefined,'automation-event');const statusLabels={added:'Torrent added',started:'Added to download queue',paused:'Added paused',intent:'Import not confirmed; automatic retry is blocked',feed_error:'Feed could not be fetched',import_unconfirmed:'Import not confirmed; automatic retry is blocked',too_large:'Torrent exceeds the size limit',badges_unverified:'Required badges could not be verified',metadata_unknown:'Torrent metadata is unknown',size_unknown:'Torrent size is unknown'};
-      item.append(element('strong',row.title||t('RSS entry')),element('span',`${row.source==='rss'?'RSS':t('Build ratio')} · ${t(statusLabels[row.status]||row.status)}`),element('small',new Date(row.created*1000).toLocaleString(locale())));
-      const link=command(t('View details'),()=>{if(row.hash){const torrent=torrents.find(r=>r.hash===row.hash);if(torrent){void showDetails(torrent);return;}}go(row.source==='rss'?'feeds':'ratio-scout');if(row.source==='rss' && row.feed && appRole!=='viewer')void richFeedHistory(row.feed,'RSS').catch(notify);});item.append(link);return item;
+      item.append(element('strong',row.title||t('RSS entry')),element('span',`${row.source==='rss'?'RSS':t('Earlier automatic downloads')} · ${t(statusLabels[row.status]||row.status)}`),element('small',new Date(row.created*1000).toLocaleString(locale())));
+      const link=command(t('View details'),()=>{if(row.hash){const torrent=torrents.find(r=>r.hash===row.hash);if(torrent){void showDetails(torrent);return;}}go(row.source==='rss'?'feeds':'downloads');if(row.source==='rss' && row.feed && appRole!=='viewer')void richFeedHistory(row.feed,'RSS').catch(notify);});item.append(link);return item;
     }));}catch{events.hidden=false;summary.textContent=t('Automatic activity unavailable');}finally{activityLoading=false;}}
   for(const button of document.querySelectorAll('[data-view]'))button.addEventListener('click',()=>{render();if(button.dataset.view==='downloads')void refreshActivity();});
   globalThis.MediaSeedWorkspace={render,openEditor,syncBadges,closeEditor:kind=>editors[kind]?.close()};

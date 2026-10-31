@@ -1,4 +1,4 @@
-"""Opt-in, per-import cleanup. Only the exact tagged import can be removed."""
+"""Opt-in per-torrent cleanup bound to an import tag or confirmed add identity."""
 import asyncio
 import base64
 import hashlib
@@ -11,13 +11,23 @@ from urllib.parse import parse_qs, urlsplit
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from mediaseed.cleanup_upgrade import upgrade_cleanup_hours
+
+MAX_CLEANUP_RULES = 500
+OBSERVATION_BATCH = 100  # Stay below MediaVPN's 12 KiB RPC payload bound.
+
 
 class CleanupPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     mode: Literal["never", "time", "ratio", "both", "either"] = "never"
-    hours: float = Field(default=49, ge=1 / 60, le=87600, allow_inf_nan=False)
+    hours: float = Field(default=50, ge=1 / 60, le=87600, allow_inf_nan=False)
     ratio: float = Field(default=1, ge=1, le=1000, allow_inf_nan=False)
     delete_files: bool = False
+
+
+class CleanupUpdate(CleanupPolicy):
+    added_on: float = Field(gt=0, allow_inf_nan=False)
+    confirm_delete_files: bool = False
 
 
 def cleanup_identity(rule, row):
@@ -30,7 +40,25 @@ def cleanup_identity(rule, row):
     return added is None or (type(row.get("added_on")) in (int, float) and row["added_on"] == added)
 
 
-def source_hashes(magnet=None, content=None, include_metadata=False):
+def announce_hosts(tree):
+    # Only hostnames leave this parser; announce passkeys remain private.
+    values = [tree.get(b"announce")] if isinstance(tree,dict) else []
+    tiers = tree.get(b"announce-list",[]) if isinstance(tree,dict) else []
+    if isinstance(tiers,list):
+        for tier in tiers[:100]:
+            if isinstance(tier,list): values.extend(tier[:100])
+    hosts = []
+    for value in values:
+        try:
+            address = urlsplit(value.decode("utf8") if isinstance(value,bytes) else str(value))
+            host = address.hostname
+            if address.scheme in {"http","https","udp"} and host and not address.username and not address.password:
+                hosts.append(host.lower())
+        except (ValueError,UnicodeError): pass
+    return list(dict.fromkeys(hosts))[:100]
+
+
+def source_hashes(magnet=None, content=None, include_metadata=False, include_trackers=False):
     if magnet:
         topics = parse_qs(urlsplit(magnet).query).get("xt", [])
         hashes = []
@@ -80,7 +108,7 @@ def source_hashes(magnet=None, content=None, include_metadata=False):
         return value
 
     try:
-        parse()
+        tree = parse()
         if index != len(content) or not isinstance(info_value, dict):
             raise ValueError()
         if include_metadata:
@@ -106,7 +134,8 @@ def source_hashes(magnet=None, content=None, include_metadata=False):
             name = info_value.get(b"name.utf-8", info_value.get(b"name", b""))
             return {"size": size if type(size) is int and size >= 0 else None,
                     "name": name.decode("utf-8", errors="replace")[:300] if isinstance(name, bytes) else None,
-                    "hashes": source_hashes(content=content)}
+                    "hashes": source_hashes(content=content),
+                    **({"tracker_hosts": announce_hosts(tree)} if include_trackers else {})}
         if info_value.get(b"meta version") == 2 and b"pieces" not in info_value:
             digest = hashlib.sha256(info_slice).hexdigest()
             return [digest, digest[:40]]
@@ -147,6 +176,7 @@ class CleanupManager:
         self.observation_failed = False
         with database() as db:
             db.execute("CREATE TABLE IF NOT EXISTS torrent_cleanup (id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+            upgrade_cleanup_hours(db)
 
     def records(self):
         with self.database() as db:
@@ -155,6 +185,10 @@ class CleanupManager:
     def save(self, record):
         with self.database() as db:
             db.execute("INSERT OR REPLACE INTO torrent_cleanup VALUES (?,?)", (record["id"], json.dumps(record)))
+
+    def require_capacity(self):
+        if sum(r["mode"] != "never" for r in self.records()) >= MAX_CLEANUP_RULES:
+            raise HTTPException(409, f"Automatic cleanup supports {MAX_CLEANUP_RULES} active imports; cancel an existing rule first")
 
     def public(self, identifier):
         row = next((r for r in self.records() if identifier.lower() in r["hashes"]), None)
@@ -165,6 +199,44 @@ class CleanupManager:
             for row in self.records():
                 if identifier.lower() in row["hashes"]:
                     db.execute("DELETE FROM torrent_cleanup WHERE id=?", (row["id"],))
+
+    async def torrent(self, identifier):
+        rows = (await self.qbit("/api/v2/torrents/info", payload={"hashes": identifier})).json()
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict) or str(rows[0].get("hash", "")).lower() != identifier:
+            raise HTTPException(409, "Torrent is unavailable; reload its cleanup settings")
+        added = rows[0].get("added_on")
+        if type(added) not in (int, float) or not math.isfinite(added) or added <= 0:
+            raise HTTPException(409, "Torrent identity could not be confirmed")
+        return rows[0]
+
+    async def inspect(self, identifier):
+        row = await self.torrent(identifier)
+        return {"policy": self.public(identifier), "added_on": row["added_on"]}
+
+    async def update(self, identifier, body):
+        if body.mode != "never" and body.delete_files and not body.confirm_delete_files:
+            raise HTTPException(422, "Confirm automatic deletion of downloaded files")
+        async with self.lock:
+            row = await self.torrent(identifier)
+            if row["added_on"] != body.added_on:
+                raise HTTPException(409, "Torrent changed; reload its cleanup settings")
+            if body.mode == "never":
+                return await self._cancel(identifier)
+            existing = next((r for r in self.records() if identifier in r["hashes"]), None)
+            if existing and not cleanup_identity(existing, row):
+                raise HTTPException(409, "Cleanup blocked: torrent identity could not be confirmed")
+            if not existing:
+                self.require_capacity()
+            policy = CleanupPolicy(**body.model_dump(include=set(CleanupPolicy.model_fields)))
+            record = {**(existing or {}), **policy.model_dump(),
+                      "id": existing["id"] if existing else secrets.token_hex(12),
+                      "hashes": [identifier], "added_on": body.added_on,
+                      "tag": existing.get("tag") if existing else None,
+                      "status": "active", "start": False}
+            # Saving never starts, stops or removes a torrent. The normal worker
+            # enforces the selected rule on a later fresh, identity-bound sample.
+            self.save(record)
+            return {"saved": True, "policy": self.public(identifier)}
 
     async def add(self, add_fn, policy, ratio, **args):
         if policy.mode == "never" and not args.get("start"):
@@ -177,8 +249,8 @@ class CleanupManager:
         if not hashes:
             raise HTTPException(422, "Cannot identify this torrent for automatic cleanup")
         async with self.lock:
-            if policy.mode != "never" and sum(r["mode"] != "never" for r in self.records()) >= 50:
-                raise HTTPException(409, "Automatic cleanup supports 50 active imports; cancel an existing rule first")
+            if policy.mode != "never":
+                self.require_capacity()
             rows = (await self.qbit("/api/v2/torrents/info", payload={"hashes": "|".join(hashes)})).json()
             if policy.mode == "never" and isinstance(rows, list) and rows and all(isinstance(row, dict) and str(row.get("hash", "")).lower() in hashes for row in rows):
                 # A duplicate import must not acquire a new rule or identity tag.
@@ -198,7 +270,7 @@ class CleanupManager:
                 self.forget(hashes[0]); raise
             record["status"] = "waiting"; self.save(record)
             try:
-                await self._tick()
+                await self._tick(identifier)
             except Exception:
                 pass  # Durable waiting state; no unconfigured automatic start.
             current = self.public(hashes[0])
@@ -223,20 +295,23 @@ class CleanupManager:
                 pass  # Never delete without a successful, current observation.
             await asyncio.sleep(15)
 
-    async def _tick(self):
-        rules = [r for r in self.records() if r["status"] in {"waiting", "active"}]
+    async def _tick(self, identifier=None):
+        rules = [r for r in self.records() if r["status"] in {"waiting", "active"} and (identifier is None or r["id"] == identifier)]
         if not rules:
             return
         hashes = list(dict.fromkeys(h for r in rules for h in r["hashes"]))
-        rows = (await self.qbit("/api/v2/torrents/info", payload={"hashes": "|".join(hashes)})).json()
-        if not isinstance(rows, list):
-            return
+        rows = []
+        for offset in range(0, len(hashes), OBSERVATION_BATCH):
+            batch = (await self.qbit("/api/v2/torrents/info", payload={"hashes": "|".join(hashes[offset:offset + OBSERVATION_BATCH])})).json()
+            if not isinstance(batch, list):
+                return
+            rows.extend(batch)
         for rule in rules:
             row = next((r for r in rows if isinstance(r, dict) and r.get("hash", "").lower() in rule["hashes"]), None)
             if row is None:
                 continue
             identifier = row["hash"].lower()
-            if rule["tag"] not in [x.strip() for x in str(row.get("tags", "")).split(",")]:
+            if not cleanup_identity(rule, row):
                 rule["status"] = "identity_mismatch"; self.save(rule); continue
             if rule["status"] == "active" and any(key in row and row[key] != -1 for key in ("ratio_limit", "seeding_time_limit", "inactive_seeding_time_limit")):
                 await self.qbit("/api/v2/torrents/setShareLimits", "POST", {"hashes": identifier, "ratioLimit": "-1", "seedingTimeLimit": "-1", "inactiveSeedingTimeLimit": "-1", "shareLimitAction": "Stop"})
@@ -261,14 +336,17 @@ class CleanupManager:
 
     async def cancel(self, identifier):
         async with self.lock:
-            rule = next((r for r in self.records() if identifier.lower() in r["hashes"]), None)
-            if rule:
-                # Disable destruction durably before attempting a remote write.
-                self.forget(identifier)
-                try:
-                    rows = (await self.qbit("/api/v2/torrents/info", payload={"hashes": identifier})).json()
-                    if isinstance(rows, list) and any(r.get("hash", "").lower() == identifier and rule["tag"] in [x.strip() for x in str(r.get("tags", "")).split(",")] for r in rows):
-                        await self.qbit("/api/v2/torrents/setShareLimits", "POST", {"hashes": identifier, "ratioLimit": "-1", "seedingTimeLimit": "-1", "inactiveSeedingTimeLimit": "-1", "shareLimitAction": "Stop"})
-                except (HTTPException, ValueError):
-                    return {"saved": True, "mode": "never", "stopLimitsRestored": False}
-            return {"saved": True, "mode": "never"}
+            return await self._cancel(identifier)
+
+    async def _cancel(self, identifier):
+        rule = next((r for r in self.records() if identifier.lower() in r["hashes"]), None)
+        if rule:
+            # Disable destruction durably before attempting a remote write.
+            self.forget(identifier)
+            try:
+                rows = (await self.qbit("/api/v2/torrents/info", payload={"hashes": identifier})).json()
+                if isinstance(rows, list) and any(isinstance(r, dict) and str(r.get("hash", "")).lower() == identifier and cleanup_identity(rule, r) for r in rows):
+                    await self.qbit("/api/v2/torrents/setShareLimits", "POST", {"hashes": identifier, "ratioLimit": "-1", "seedingTimeLimit": "-1", "inactiveSeedingTimeLimit": "-1", "shareLimitAction": "Stop"})
+            except (HTTPException, ValueError):
+                return {"saved": True, "mode": "never", "stopLimitsRestored": False}
+        return {"saved": True, "mode": "never"}

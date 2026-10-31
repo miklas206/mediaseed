@@ -15,7 +15,7 @@ try {
 } catch {}
 function sortTorrentRows(rows, key, direction) {
   const text = key === 'name' || key === 'state';
-  const value = row => key === 'ratio' ? (row.credited_ratio ?? row.ratio) : row[key];
+  const value = row => key === 'ratio' ? seedCreditRatio(row) : row[key];
   return rows.sort((a, b) => {
     const first = value(a), second = value(b);
     const valid = v => text ? typeof v === 'string' : typeof v === 'number' && Number.isFinite(v) && v >= 0 && (key !== 'eta' || v < 8640000);
@@ -37,26 +37,40 @@ const pendingRemovals = new Map();
 let appRole = 'administrator';
 let vpnDraft = false;
 let vpnFreshUntil = 0;
+let vpnConnecting = false;
 let trafficFreshUntil = 0;
 const message = document.querySelector('#message');
 const dialog = document.querySelector('#torrent-details');
 let notificationTimer;
-function showNotification(text, tone = 'danger') {
+function showNotification(text, tone = 'danger', persistent = false) {
   clearTimeout(notificationTimer);
   message.dataset.tone = tone;
+  message.dataset.persistent = String(persistent);
   message.textContent = t(text);
-  if (text) notificationTimer = setTimeout(() => { message.textContent = ''; }, 6000);
+  if (text && !persistent) notificationTimer = setTimeout(() => { message.textContent = ''; }, 6000);
 }
 message.tabIndex = 0;
 message.addEventListener('mouseenter', () => clearTimeout(notificationTimer));
 message.addEventListener('focus', () => clearTimeout(notificationTimer));
-function resumeNotification() { if (message.textContent && !message.matches(':hover') && document.activeElement !== message) notificationTimer = setTimeout(() => { message.textContent = ''; }, 6000); }
+function resumeNotification() { if (message.dataset.persistent !== 'true' && message.textContent && !message.matches(':hover') && document.activeElement !== message) notificationTimer = setTimeout(() => { message.textContent = ''; }, 6000); }
 message.addEventListener('mouseleave', resumeNotification);
 message.addEventListener('blur', resumeNotification);
 const errorLabels = {'Invalid credentials': t("Your username or password is incorrect."), 'Try again later': t("Too many login attempts. Try again shortly."), 'Torrent client is not configured': t("The torrent client is not connected yet."), 'Sign in required': t("Sign in to continue."), 'Tracker API key lacks access': t("The API key cannot access the tracker's torrents."), 'Tracker rate limit reached; try again later': t("The tracker limits requests. Try again shortly."), 'Tracker request failed': t("The tracker could not provide a response."), 'Tracker unavailable or invalid response': t("The tracker is unavailable or returned an unknown response."), 'Unsafe tracker download address': t("The tracker returned a download URL that is not approved."), 'Torrent client rejected the torrent file': t("qBittorrent rejected the torrent file.")};
+for (const label of ['Session verification failed', 'Request address not allowed. Open MediaSeed using its configured address.', 'Request origin not allowed. Reload MediaSeed using its configured address.']) errorLabels[label] = t(label);
 async function api(path, body, method) {
-  const response = await fetch('/api/' + path, {method: method || (body ? 'POST' : 'GET'), headers: {'Content-Type': 'application/json', 'X-MediaSeed-CSRF': csrf}, ...(body ? {body: JSON.stringify(body)} : {})});
-  const result = await response.json();
+  let response;
+  try {
+    response = await fetch('/api/' + path, {method: method || (body ? 'POST' : 'GET'), headers: {'Content-Type': 'application/json', 'X-MediaSeed-CSRF': csrf}, ...(body ? {body: JSON.stringify(body)} : {})});
+  } catch {
+    throw new Error(t('The request could not be confirmed. Check the connection. If you were adding a torrent, check Downloads before trying again.'));
+  }
+  let result;
+  try { result = await response.json(); }
+  catch {
+    const label = response.status === 401 ? 'Sign in required' : response.status === 403 ? 'Session verification failed' : null;
+    throw Object.assign(new Error(label || t('The server returned an unreadable response (HTTP {0}). Reload MediaSeed. If you were adding a torrent, check Downloads before trying again.', {0: response.status})), {status: response.status});
+  }
+  if (!result || typeof result !== 'object') throw Object.assign(new Error(t('The server returned an unreadable response (HTTP {0}). Reload MediaSeed. If you were adding a torrent, check Downloads before trying again.', {0: response.status})), {status: response.status});
   if (!response.ok) throw Object.assign(new Error(typeof result.detail === 'string' ? result.detail : t("Check the fields and try again.")), {status: response.status});
   if((method || (body ? 'POST' : 'GET'))!=='GET' && typeof seedDetailCache!=='undefined')seedDetailCache.clear();
   return result;
@@ -74,16 +88,17 @@ function torrentStatus(value) {
 }
 function state(row) { if (/error|missing/i.test(row.state)) return 'error'; if (/stopped|paused/i.test(row.state)) return 'stopped'; if (Number(row.progress) >= 1) return 'seeding'; return 'downloading'; }
 function command(label, handler) { const button = element('button', label); button.type = 'button'; button.onclick = async () => { button.disabled = true; try { await handler(); } catch (error) { notify(error); } finally { button.disabled = button.dataset.added === 'true'; } }; return button; }
-async function torrentAction(row, action, deleteFiles = false) {
-  try { await api('torrents/' + action, {torrent_hash: row.hash, delete_files: deleteFiles}); }
-  catch (error) { if (error.status !== 409 || action === 'start') throw error; if (!await confirmEarlyAction(row, action, deleteFiles)) return; await api('torrents/' + action, {torrent_hash: row.hash, delete_files: deleteFiles, confirm_early: true}); }
+async function torrentAction(row, action, deleteFiles = false, removalConfirmed = false) {
+  const confirmed = action === 'remove' && removalConfirmed;
+  try { await api('torrents/' + action, {torrent_hash: row.hash, delete_files: deleteFiles, ...(confirmed ? {confirm_early: true} : {})}); }
+  catch (error) { if (confirmed || error.status !== 409 || action === 'start') throw error; if (!await confirmEarlyAction(row, action, deleteFiles)) return; await api('torrents/' + action, {torrent_hash: row.hash, delete_files: deleteFiles, confirm_early: true}); }
   if (action === 'remove') {
     pendingRemovals.set(row.hash, {confirmed: false});
     renderTorrents();
   } else await refreshTorrents();
   return true;
 }
-async function confirmRemoval(row) {
+async function confirmRemoval(row, {silent = false} = {}) {
   const deadline = Date.now() + 30000;
   try {
     while (true) {
@@ -91,15 +106,17 @@ async function confirmRemoval(row) {
       if (result.present === false) {
         pendingRemovals.set(row.hash, {confirmed: true});
         renderTorrents();
-        showNotification(t("The torrent has been removed."), 'success');
-        return;
+        if (!silent) showNotification(t("The torrent has been removed."), 'success');
+        return true;
       }
       if (Date.now() >= deadline) throw new Error(t("Removal is not confirmed yet. Refresh the list to check its status."));
       await new Promise(resolve => setTimeout(resolve, 500));
     }
   } catch (error) {
     pendingRemovals.delete(row.hash);
-    renderTorrents(); notify(error);
+    renderTorrents();
+    if (silent) throw error;
+    notify(error);
   }
 }
 const earlyDialog = document.querySelector('#early-seeding');
@@ -108,7 +125,7 @@ function confirmEarlyAction(row, action, deleteFiles) {
   if (earlyConfirmation) return Promise.resolve(false);
   document.querySelector('#early-title').textContent = action === 'remove' ? t("Remove before the seeding goal is reached?") : t("Stop before the seeding goal is reached?");
   document.querySelector('#early-name').textContent = row.name;
-  document.querySelector('#early-help').textContent = t("The torrent has not reached the selected {0}upload ratio of {1} or 49 hours of seeding yet. Continue anyway?", {0: 'credited_ratio' in row ? t("credited ") : '', 1: trackerNumber(Number(row.ratio_limit) >= 1 ? row.ratio_limit : 1)});
+  document.querySelector('#early-help').textContent = t("The torrent has not reached the selected {0}upload ratio of {1} or 50 hours of seeding yet. Continue anyway?", {0: 'credited_ratio' in row ? t("credited ") : '', 1: trackerNumber(Number(row.ratio_limit) >= 1 ? row.ratio_limit : 1)});
   document.querySelector('#early-consequence').textContent = action === 'remove' ? (deleteFiles ? t("The torrent and downloaded files will be deleted. This cannot be undone.") : t("The torrent will be removed. Downloaded files are preserved.")) : t("The torrent will be stopped. The torrent and downloaded files are preserved.");
   document.querySelector('#confirm-early').textContent = action === 'remove' ? t("Remove anyway") : t("Stop anyway");
   document.querySelector('#cancel-early').textContent = action === 'remove' ? t("Keep torrent") : t("Continue seeding");
@@ -188,6 +205,7 @@ function preserveListInteraction(target, key) {
 }
 
 function renderTorrents() {
+  globalThis.MediaSeedList?.syncTrackers();
   const measured = torrentSnapshotValid ? torrentTraffic() : null;
   for (const [id, value] of [['seed-download-speed', measured ? `${bytes(measured.dl_info_speed)}/s` : '\u2014'], ['seed-upload-speed', measured ? `${bytes(measured.up_info_speed)}/s` : '\u2014'], ['seed-torrent-count', torrentSnapshotValid ? String(torrents.length) : '\u2014']]) {
     const node = document.querySelector('#' + id); if (node) node.textContent = value;
@@ -195,7 +213,9 @@ function renderTorrents() {
   const search = document.querySelector('#search').value.toLocaleLowerCase(); const filter = document.querySelector('#filter').value; const sort = document.querySelector('#sort').value;
   const visible = torrents.filter(row => !pendingRemovals.has(row.hash));
   const rows = visible.filter(row => String(row.name).toLocaleLowerCase().includes(search) && (filter === 'all' || (filter === 'checking' ? String(row.state).startsWith('checking') : state(row) === filter)));
-  const source = document.querySelector('#source-filter').value; const filtered = rows.filter(row => source === 'all' || (row.category === 'MediaSeed-Ratio' ? 'ratio' : String(row.category || '').startsWith('MediaSeed-RSS-') ? 'rss' : 'manual') === source); rows.splice(0, rows.length, ...filtered);
+  const source = document.querySelector('#source-filter').value;
+  const tracker = document.querySelector('#tracker-filter')?.value || '';
+  const filtered = rows.filter(row => (source === 'all' || (row.category === 'MediaSeed-Ratio' ? 'ratio' : String(row.category || '').startsWith('MediaSeed-RSS-') ? 'rss' : 'manual') === source) && (!tracker || seedTracker(row) === tracker)); rows.splice(0, rows.length, ...filtered);
   sortTorrentRows(rows, sort, document.querySelector('#sort-direction').value || (sort === 'name' ? 'asc' : 'desc'));
   const pending = [...pendingRemovals.values()].filter(row => !row.confirmed).length;
   document.querySelector('#count').textContent = t("{0} of {1} torrents{2}", {0: rows.length, 1: visible.length, 2: pending ? ' · ' + pending + ' fjernes' : ''});
@@ -208,11 +228,12 @@ function renderTorrents() {
   document.querySelector('#next-page').disabled = torrentPage >= pages;
   document.querySelector('#page-status').textContent = t('Showing {0}–{1} of {2} · Page {3} of {4}', {0: rows.length ? start + 1 : 0, 1: Math.min(start + pageSize, rows.length), 2: rows.length, 3: torrentPage, 4: pages});
   for (const [index, row] of rows.slice(start, start + pageSize).entries()) {
-    const signature=JSON.stringify([row,start+index,locale(),appRole,downloadsEnabled]);
+    const signature=JSON.stringify([row,start+index,locale(),appRole,downloadsEnabled,row.download_history]);
     const previous=previousRows.get(row.hash), item=previous?.seedSignature===signature?previous:seedTorrent(row,start+index);
     item.seedSignature=signature; target.append(item);
   }
   restoreInteraction();
+  globalThis.MediaSeedList?.renderSummary();
 
 }
 function torrentTraffic() {
@@ -227,6 +248,7 @@ let lastTorrentSample = 0;
 function applyTorrentSnapshot(rows, request) {
   if (request !== torrentListRequest) return;
   torrentSnapshotValid = Array.isArray(rows);
+  document.querySelector('#torrents').dataset.fresh = String(torrentSnapshotValid);
   if (torrentSnapshotValid) {
     lastTorrentSample = Date.now();
     torrents = rows;
@@ -267,6 +289,8 @@ async function refreshAuxiliary() {
       const storage = document.querySelector('#storage'); storage.hidden = false;
       try {
         const capacity = await api('storage');
+        globalThis.MediaSeedStorage = capacity;
+        globalThis.MediaSeedList?.renderSummary();
         const groups = new Map();
         for (const row of capacity.locations || [capacity]) {
           const key = row.available !== false && row.filesystemId ? row.filesystemId : row.id || 'local';
@@ -283,7 +307,7 @@ async function refreshAuxiliary() {
           storage.append(card);
         }
       }
-      catch { storage.textContent = t("Local storage unavailable"); storageRefreshAt = Date.now() + 30000; }
+      catch { globalThis.MediaSeedStorage = null; globalThis.MediaSeedList?.renderSummary(); storage.textContent = t("Local storage unavailable"); storageRefreshAt = Date.now() + 30000; }
     })());
   }
   await Promise.allSettled(tasks);
@@ -293,12 +317,12 @@ async function refresh() {
   const request = ++torrentListRequest;
   try {
     const snapshot = await api('dashboard');
-    downloadsEnabled = snapshot.runtime.downloadsEnabled === true; renderConnection(snapshot.runtime);
+    downloadsEnabled = !vpnConnecting && snapshot.runtime.downloadsEnabled === true; renderConnection(snapshot.runtime);
     applyTorrentSnapshot(snapshot.torrents, request);
     const queue = snapshot.queue;
     globalThis.MediaSeedQueue = queue;
     globalThis.MediaSeedWorkspace?.render();
-    if (request === torrentListRequest) document.querySelector('#queue-status').textContent = queue ? t("Queue: {0}/{1} active · {2} waiting · RSS {3} · Manual {4}{5}", {0: queue.active, 1: queue.limit === -1 ? t('Unlimited') : queue.limit ?? t('Unknown'), 2: queue.waiting, 3: queue.rssActive, 4: queue.manualActive, 5: (queue.ratioActive ? t(" · Build ratio: {0}", {0: queue.ratioActive}) : '') + (queue.boundedView ? t(" · Limited to 500 torrents") : '')}) : t("Queue status unavailable");
+    if (request === torrentListRequest) document.querySelector('#queue-status').textContent = queue ? t("Queue: {0}/{1} active · {2} waiting · RSS {3} · Manual {4}{5}", {0: queue.active, 1: queue.limit === -1 ? t('Unlimited') : queue.limit ?? t('Unknown'), 2: queue.waiting, 3: queue.rssActive, 4: queue.manualActive, 5: (queue.ratioActive ? t(" · Earlier automatic downloads: {0}", {0: queue.ratioActive}) : '') + (queue.boundedView ? t(" · Limited to 500 torrents") : '')}) : t("Queue status unavailable");
   } catch {
     downloadsEnabled = false; renderConnection({unavailable: true}); applyTorrentSnapshot(null, request);
     globalThis.MediaSeedQueue = null; globalThis.MediaSeedWorkspace?.render();
@@ -357,17 +381,23 @@ function countryLabel(country) {
 function renderConnection(state) {
   const checked = Number(state.checkedAt);
   const fresh = Number.isFinite(checked) && Math.abs(Date.now() - checked * 1000) < 90000;
-  const active = state.provider === 'mediavpn' && state.ready === true && state.downloadsEnabled === true && fresh;
+  const active = !vpnConnecting && state.provider === 'mediavpn' && state.ready === true && state.downloadsEnabled === true && fresh;
   const unavailable = state.unavailable || (state.ready && !fresh);
-  const status = active ? 'active' : unavailable ? 'unknown' : state.provider || state.disconnectPending ? 'blocked' : 'disconnected';
+  const status = vpnConnecting ? 'connecting' : active ? 'active' : unavailable ? 'unknown' : state.provider || state.disconnectPending ? 'blocked' : 'disconnected';
   document.querySelector('#connection-flow').dataset.state = status;
-  document.querySelector('#connection-status').textContent = active ? t("Connected · VPN verified") : unavailable ? t("Status cannot be verified") : state.disconnectPending ? t("Disconnection pending") : state.provider ? t("Connection blocked") : t("No VPN selected");
+  document.querySelector('#connection-status').textContent = vpnConnecting ? t("Connecting · downloads blocked") : active ? t("Connected · VPN verified") : unavailable ? t("Status cannot be verified") : state.disconnectPending ? t("Disconnection pending") : state.provider ? t("Connection blocked") : t("No VPN selected");
   document.querySelector('#connection-country').textContent = active ? countryLabel(state.country) : t("Waiting for connection");
   const flag = active ? countryFlag(state.country) : null;
   if (flag) document.querySelector('#connection-country').append(flag);
   document.querySelector('#connection-ip').textContent = active ? state.publicIp || t("IP unknown") : t("Downloads blocked");
   document.querySelector('#connection-port').textContent = active ? t("VPN port {port}", {port: state.forwardedPort || t("Unknown")}) : state.provider ? t("Check the connection under VPN") : t("Select a VPN under the VPN tab");
   document.querySelector('#connection-checked').textContent = fresh ? t("Checked {0}", {0: new Date(checked * 1000).toLocaleTimeString(locale())}) : t("Waiting for status check");
+  // Every verification label follows the same fresh evidence as the shield.
+  document.querySelector('#vpn-status').textContent = active ? t("Verified") : t(status === 'connecting' ? 'Connecting · downloads blocked' : status === 'unknown' ? 'Status cannot be verified' : state.provider ? 'Unverified' : 'Not attached');
+  document.querySelector('#vpn-downloads').textContent = active ? t("Allowed through VPN") : t("Blocked");
+  document.querySelector('#vpn-ip').textContent = active ? state.publicIp || t("Unverified") : t("Unverified");
+  document.querySelector('#vpn-port').textContent = active ? state.forwardedPort || t("Unverified") : t("Unverified");
+  document.querySelector('#vpn-reason').textContent = status === 'unknown' ? t("Waiting for a fresh VPN check. Downloads remain blocked.") : t(state.reason || '');
   vpnFreshUntil = active ? Date.now() + 30000 : 0;
   if (!active) renderTraffic();
   globalThis.MediaSeedWorkspace?.render();
@@ -386,8 +416,11 @@ function renderTraffic(transfer) {
   trafficFreshUntil = measured ? Date.now() + 30000 : 0;
 }
 function expireConnection() {
+  const age = Date.now() - lastTorrentSample;
+  document.querySelector('#torrents').dataset.fresh = String(torrentSnapshotValid && lastTorrentSample > 0 && age >= 0 && age < 30000);
   if (vpnFreshUntil && Date.now() >= vpnFreshUntil) { downloadsEnabled = false; renderConnection({unavailable: true}); }
   if (trafficFreshUntil && Date.now() >= trafficFreshUntil) renderTraffic();
+  globalThis.MediaSeedWorkspace?.render();
 }
 // Decorative bits follow measured activity; they never represent torrent content.
 function randomBits(count) { return Array.from({length: count}, () => Math.random() < .5 ? '0' : '1').join(''); }
@@ -406,7 +439,7 @@ function initializeStreams() {
 }
 initializeStreams();
 setInterval(expireConnection, 1000);
-document.addEventListener('visibilitychange', () => { expireConnection(); if (!document.hidden && document.body.classList.contains('signed-in')) void refresh(); });
+document.addEventListener('visibilitychange', () => { document.documentElement.dataset.pageHidden = String(document.hidden); expireConnection(); if (!document.hidden && document.body.classList.contains('signed-in')) void refresh(); });
 
 function updateVpnChoice() {
   const selected = document.querySelector('#vpn-provider').value === 'mediavpn';
@@ -414,7 +447,7 @@ function updateVpnChoice() {
   document.querySelector('#vpn-profile-field').hidden = !selected;
   profile.disabled = !selected;
   profile.required = selected;
-  document.querySelector('#vpn-connect').disabled = selected && !profile.value;
+  document.querySelector('#vpn-connect').disabled = vpnConnecting || (selected && !profile.value);
 }
 async function refreshVpn() {
   const state = await api('vpn');
@@ -427,9 +460,6 @@ async function refreshVpn() {
   select.replaceChildren(element('option', t("Choose profile"))); select.firstChild.value = '';
   for (const profile of state.profiles || []) { const option = element('option', `${profile.name} \u00b7 ${profile.forwardedPort ? 'port ' + profile.forwardedPort : t("port not verified")}`); option.value = profile.id; select.append(option); }
   select.value = vpnDraft ? previous : state.profileId || '';
-  document.querySelector('#vpn-status').textContent = state.ready ? t("Verified") : state.provider ? t("Unverified") : t("Not attached");
-  document.querySelector('#vpn-downloads').textContent = state.downloadsEnabled ? t("Allowed through VPN") : t("Blocked");
-  document.querySelector('#vpn-ip').textContent = state.publicIp || t("Unverified"); document.querySelector('#vpn-port').textContent = state.forwardedPort || t("Unverified"); document.querySelector('#vpn-reason').textContent = t(state.reason || '');
   document.querySelector('#vpn-disconnect').disabled = !state.provider && !state.disconnectPending;
   updateVpnChoice();
 }
@@ -438,12 +468,14 @@ document.querySelector('#vpn-profile').onchange = () => { vpnDraft = true; updat
 document.querySelector('#vpn-form').onsubmit = async event => {
   event.preventDefault(); const button = document.querySelector('#vpn-connect'); button.disabled = true;
   const provider = document.querySelector('#vpn-provider').value || null;
+  vpnConnecting = provider === 'mediavpn';
+  if (vpnConnecting) { downloadsEnabled = false; renderConnection({provider}); }
   try {
     await api('vpn', {enabled: provider === 'mediavpn', provider, profileId: document.querySelector('#vpn-profile').value || null}, 'PUT');
-    vpnDraft = false;
+    vpnDraft = false; vpnConnecting = false;
     await refreshVpn(); await refresh();
     showNotification(provider ? t("MediaVPN selected. The torrent client starts when the profile is verified.") : t("MediaVPN disconnected. Downloads are blocked. Data is preserved."), 'success');
-  } catch (error) { notify(error); } finally { updateVpnChoice(); }
+  } catch (error) { vpnConnecting = false; renderConnection({unavailable: true}); notify(error); } finally { updateVpnChoice(); }
 };
 document.querySelector('#vpn-disconnect').onclick = async () => {
   const button = document.querySelector('#vpn-disconnect'); button.disabled = true;
@@ -464,10 +496,11 @@ function trackerCreditView(row) {
   if (row.green_uploaded > 0) panel.append(element('p', t("{0} of uploads were recorded at 0.5×. That portion retains half credit after the period ends.", {0: trackerBytes(row.green_uploaded)}), 'muted'));
   if (row.green_history_estimated) panel.append(element('p', t("Historical uploads cannot be split precisely by time and have been estimated conservatively."), 'muted'));
   const benefits = row.tracker_benefits;
+  panel.append(element('strong', t('Current tracker benefits')));
   if (benefits) {
-    const flags = [benefits.freeleech === null ? t("Freeleech unknown") : `Freeleech ${benefits.freeleech} %`, benefits.doubleUpload ? t("Double upload") : null, benefits.featured ? 'Featured' : null, benefits.internal ? 'Internal' : null, benefits.refundable ? t("Refundable") : null, benefits.ownUpload ? t("Own release · exempt from Green") : null].filter(Boolean);
+    const flags = [benefits.freeleech === null ? t("Freeleech unknown") : `Freeleech ${benefits.freeleech} %`, benefits.doubleUpload ? t("Double upload") : null, benefits.featured ? 'Featured' : null, benefits.internal ? 'Internal' : null, benefits.refundable ? t("Refundable") : null, benefits.ownUpload && benefits.greenRule !== false ? t("Own release · exempt from Green") : null].filter(Boolean);
     panel.append(element('p', t("{0} · Confirmed info hash · {1}", {0: benefits.tracker, 1: flags.join(' · ')}), 'tracker-benefit-flags'));
-    if (benefits.doubleUpload) panel.append(element('p', t("Tracker bonuses are shown for information. The local seeding goal conservatively uses measured uploads with the Green deduction; the account's actual credit is shown on the tracker card."), 'muted'));
+    if (benefits.doubleUpload && benefits.greenRule !== false) panel.append(element('p', t("Tracker bonuses are shown for information. The local seeding goal conservatively uses measured uploads with the Green deduction; the account's actual credit is shown on the tracker card."), 'muted'));
   } else panel.append(element('p', t("Current tracker benefits are awaiting a new API lookup."), 'muted'));
   return panel;
 }
@@ -478,15 +511,16 @@ function detailTable(title, columns, rows) {
 }
 async function showDetails(row) { return richDetails(row); }
 
-function renderCleanupDetails(policy = {mode: 'never'}, row, target) {
+function renderCleanupDetails(policy = {mode: 'never'}, row, target, onSaved) {
   target.append(element('h3', t("Automatic cleanup")));
+  if (appRole !== 'viewer') target.append(command(t('Edit cleanup rule'), () => openTorrentCleanup(row, onSaved)));
   if (policy.mode === 'never') { target.append(element('p', t("Seeding continues until you stop or remove the torrent. No automatic time or ratio limit."), 'muted')); return; }
   const goals = {time: t("{0} hours of active seeding", {0: policy.hours}), ratio: t("credited upload ratio {0}", {0: policy.ratio}), both: t("{0} hours of active seeding AND credited ratio {1}", {0: policy.hours, 1: policy.ratio}), either: t("{0} hours of active seeding OR credited ratio {1}", {0: policy.hours, 1: policy.ratio})};
   const state = {waiting: t("Waiting for preparation; torrent is kept paused"), preparing: t("Preparation was interrupted; check the torrent or disable the rule"), active: t("Monitoring · waiting for the goal and connected downloaders"), identity_mismatch: t("Cleanup blocked: torrent identity could not be confirmed")};
   target.append(element('p', t("{0} after {1}.", {0: policy.delete_files ? t("Remove torrent and files") : t("Remove torrent only · keep files"), 1: goals[policy.mode]})), element('p', policy.observationFailed ? t("Status check failed · cleanup is waiting for a new valid measurement.") : state[policy.status] || t("Waiting for check"), 'muted'));
   if (appRole !== 'viewer') {
     const cancel = element('button', t("Disable automatic cleanup"));
-    cancel.onclick = async () => { cancel.disabled = true; try { const result = await api(`torrents/${row.hash}/cleanup/cancel`, {}); showNotification(result.stopLimitsRestored === false ? t("Cleanup disabled. Removing old stop limits is waiting for the client; starting the torrent clears them.") : t("Automatic cleanup disabled. Torrent and files are preserved."), 'success'); await showDetails(row); } catch (error) {notify(error); cancel.disabled = false;} };
+    cancel.onclick = async () => { cancel.disabled = true; try { const result = await api(`torrents/${row.hash}/cleanup/cancel`, {}); showNotification(result.stopLimitsRestored === false ? t("Cleanup disabled. Removing old stop limits is waiting for the client; starting the torrent clears them.") : t("Automatic cleanup disabled. Torrent and files are preserved."), 'success'); seedDetailCache.delete(csrf + ':' + row.hash + ':overview'); if (onSaved) await onSaved(); else await showDetails(row); } catch (error) {notify(error); cancel.disabled = false;} };
     target.append(cancel);
   }
 }
@@ -537,10 +571,11 @@ function trackerCard(row) {
   const card = element('article', undefined, 'source-row tracker-card');
   const head = element('div', undefined, 'tracker-card-heading');
   const identity = element('div');
-  identity.append(element('h3', row.name), element('p', `NordicBytes${row.username ? ` · ${row.username}` : ''}`, 'muted'));
+  identity.append(element('h3', row.name), element('p', `${row.base_url ? new URL(row.base_url).hostname : 'NordicBytes'}${row.username ? ` · ${row.username}` : ''}`, 'muted'));
   const available = ['ok','stale'].includes(row.status) && row.stats && typeof row.stats === 'object';
   head.append(identity, element('span', row.status === 'stale' ? t('Showing last known tracker statistics') : available ? t("Connected") : t("Account data unavailable"), `tracker-state${available ? ' ready' : ''}`));
   card.append(head);
+  const event = trackerEventSummary(row); if (event) card.append(element('p', event, 'tracker-event'));
   if(row.status==='stale')card.append(element('p',t('Showing last known tracker statistics') + (row.checkedAt ? ' - ' + new Date(row.checkedAt*1000).toLocaleString(locale()) : ''),'muted'));
   if (available) {
     const stats = element('dl', undefined, 'tracker-stats');
@@ -563,7 +598,7 @@ function trackerCard(row) {
     if(!row.ranks?.automatic)ranks.append(element('p',t('Rank unavailable from tracker'),'muted'));
     const progress=row.rankProgress,goal=progress?.target||progress?.firstListed;
     if(goal){ranks.append(element('small',t(progress?.target?'Next rank':'First rank in this table'),'muted'),rankRequirements(goal,true));}
-    const view=command(t('View rank requirements'),()=>showRankDialog(row));view.type='button';ranks.append(view);
+    if(progress?.table?.length){const view=command(t('View rank requirements'),()=>showRankDialog(row));view.type='button';ranks.append(view);}
     card.append(ranks);
 
     const checked = new Date(row.checkedAt * 1000);
@@ -575,7 +610,10 @@ function trackerCard(row) {
 }
 function renderTrackerOverview(rows) {
   globalThis.MediaSeedTrackerRows = rows; globalThis.MediaSeedWorkspace?.render();
+  if (torrentSnapshotValid) renderTorrents();
   richTrackerSummary(rows);
+  globalThis.MediaSeedIntelligence?.refreshIfVisible();
+  globalThis.MediaSeedIntelligence?.updateBadge(rows);
   document.querySelector('#tracker-overview').hidden = !rows.length;
 
 }
@@ -640,11 +678,46 @@ feedFolder.onchange = () => { if (feedFolder.value) void loadFeedFolders([feedFo
 document.querySelector('#feed-folder-up').onclick = () => { void loadFeedFolders(feedFolderPath.split('/').slice(0, -1).join('/')).catch(notify); };
 feedForm.addEventListener('reset', () => { if (!feedEditing) queueMicrotask(() => { void loadFeedLocations().catch(notify); }); });
 
+function feedStateToggle(row) {
+  const pendingFeedToggles = loadSources.pendingToggles ||= new Set();
+  const label = element('span', row.paused ? t('Paused') : t('Enabled'));
+  const track = element('span', undefined, 'feed-switch-track'); track.setAttribute('aria-hidden', 'true');
+  const button = element('button'); button.type = 'button';
+  button.onclick = async () => {
+    if (pendingFeedToggles.has(row.id)) return;
+    const restoreFocus = document.activeElement === button, enabled = row.paused;
+    pendingFeedToggles.add(row.id); button.disabled = true;
+    button.setAttribute('aria-busy', 'true'); label.textContent = t('Saving…');
+    try {
+      await api(`feeds/${encodeURIComponent(row.id)}/state`, {enabled}, 'PUT');
+      // Only change the visible state after the server accepts the request.
+      row.paused = !enabled; button.setAttribute('aria-checked', String(enabled));
+      pendingFeedToggles.delete(row.id);
+      await loadSources('feeds');
+      showNotification(enabled ? t('Feed enabled through VPN.') : t('Feed paused. Existing torrents are preserved.'), 'success');
+    } catch (error) { notify(error); }
+    finally {
+      pendingFeedToggles.delete(row.id); button.disabled = false;
+      button.removeAttribute('aria-busy'); label.textContent = row.paused ? t('Paused') : t('Enabled');
+      if (restoreFocus && [document.body, button].includes(document.activeElement)) {
+        const current = [...document.querySelectorAll('#feed-list > [data-source-id]')].find(item => item.dataset.sourceId === row.id);
+        current?.querySelector('[role="switch"]')?.focus({preventScroll:true});
+      }
+    }
+  };
+  button.className = 'feed-state-switch';
+  button.setAttribute('role', 'switch'); button.setAttribute('aria-checked', String(!row.paused));
+  button.setAttribute('aria-label', t('Automatic downloads for {0}', {0: row.name}));
+  button.title = t('Existing torrents keep their current state.');
+  button.append(track, label);
+  return button;
+}
 async function loadSources(kind) {
   const requests = loadSources.requests ||= {}; const generation = requests[kind] = (requests[kind] || 0) + 1;
-  const rows = await api(kind); if (generation !== requests[kind]) return;
+  const rows = await api(kind); if (generation !== requests[kind] || (kind === 'feeds' && loadSources.pendingToggles?.size)) return;
   const target = document.querySelector(kind === 'feeds' ? '#feed-list' : '#tracker-list'); const restoreInteraction = preserveListInteraction(target, 'sourceId'); target.replaceChildren(); if (!rows.length) target.append(element('p', kind === 'feeds' ? t("No feeds") : t("No accounts"), 'muted'));
   if (kind === 'feeds') {
+    globalThis.MediaSeedFeedNames=Object.fromEntries(rows.map(row=>[row.id,row.name]));
     const preview = document.querySelector('#feed-preview');
     if (preview) {
       preview.replaceChildren();
@@ -664,15 +737,27 @@ async function loadSources(kind) {
     document.querySelector('#tracker-search-submit').disabled = !rows.length;
   }
   for (const row of rows) {
-    const item = kind === 'trackers' ? trackerCard(row) : element('article', undefined, 'source-row'); item.dataset.sourceId = row.id;
-    if (kind === 'feeds') item.append(element('h2', row.name), element('p', `${row.location ? t(feedLocations.find(place => place.id === row.location)?.label || (row.location === 'local' ? 'Local downloads' : row.location)) + ' /' + (row.folder || '') : row.folder || '/downloads'} · Ratio ${row.ratio} · ${row.paused ? t("Paused") : t("Active")} · ${t(row.status || '')}`, 'muted'));
-    if (kind === 'feeds') item.append(element('p', row.start_at ? t('Only fetch RSS entries from: {0}', {0: new Date(row.start_at).toLocaleString()}) : t('No start date selected'), 'muted'));
+    const item = kind === 'trackers' ? (globalThis.MediaSeedIntelligence?.manageCard(row)||trackerCard(row)) : element('article', undefined, 'source-row feed-card'); item.dataset.sourceId = row.id;
+    const feedDetails = kind === 'feeds' ? element('details', undefined, 'feed-card-details') : null;
+    if (feedDetails) { feedDetails.append(element('summary', t('Feed settings and filters'))); }
+    if (kind === 'feeds') {
+      const head = element('div', undefined, 'feed-card-heading');
+      const identity = element('div', undefined, 'feed-card-identity');
+      identity.append(element('span', 'RSS', 'feed-card-type'), element('h2', row.name));
+      const controls = element('div', undefined, 'feed-card-controls');
+      const status = element('span', row.paused ? t('Paused') : t('Enabled'), 'feed-state-badge'); status.dataset.enabled = String(!row.paused);
+      controls.append(appRole === 'administrator' ? feedStateToggle(row) : status);
+      head.append(identity, controls); item.append(head);
+      item.append(element('p', t(row.status || ''), 'feed-runtime-status'));
+      feedDetails.append(element('p', `${t('Storage location')}: ${row.location ? t(feedLocations.find(place => place.id === row.location)?.label || (row.location === 'local' ? 'Local downloads' : row.location)) + ' /' + (row.folder || '') : row.folder || '/downloads'} · Ratio ${row.ratio}`, 'muted'));
+    }
+    if (kind === 'feeds') feedDetails.append(element('p', row.start_at ? t('Only fetch RSS entries from: {0}', {0: new Date(row.start_at).toLocaleString()}) : t('No start date selected'), 'muted'));
     const actions = element('div', undefined, 'actions');
-    if (kind === 'feeds') { item.append(element('p',t('Estimated credited upload')+': '+(typeof row.upload?.creditedUploadedBytes==='number'?'≈ '+trackerBytes(row.upload.creditedUploadedBytes):t('Unknown'))+(row.upload?.unknownDownloads?' · '+t('{0} downloads without measurements',{0:row.upload.unknownDownloads}):''),'feed-upload-total'));item.append(element('p', [row.include?.join(', '), row.exclude?.length ? t('Avoid') + ': ' + row.exclude.join(', ') : '', row.max_bytes ? t('Maximum size') + ': ' + trackerBytes(row.max_bytes) : '', row.badges?.join(' · ')].filter(Boolean).join(' · ') || t('No additional filters'), 'seed-feed-rules')); actions.append(command(t('History'), () => richFeedHistory(row.id, row.name))); }
+    if (kind === 'feeds') { item.append(element('p',t('Estimated credited upload')+': '+(typeof row.upload?.creditedUploadedBytes==='number'?'≈ '+trackerBytes(row.upload.creditedUploadedBytes):t('Unknown'))+(row.upload?.unknownDownloads?' · '+t('{0} downloads without measurements',{0:row.upload.unknownDownloads}):''),'feed-upload-total'));feedDetails.append(element('p', [row.include?.join(', '), row.exclude?.length ? t('Avoid') + ': ' + row.exclude.join(', ') : '', row.max_bytes ? t('Maximum size') + ': ' + trackerBytes(row.max_bytes) : '', row.badges?.join(' · ')].filter(Boolean).join(' · ') || t('No additional filters'), 'seed-feed-rules')); actions.append(command(t('History'), () => richFeedHistory(row.id, row.name))); }
     if (appRole === 'administrator') {
-      if (kind === 'feeds') actions.append(command(row.paused ? 'Aktivér' : 'Pause', async () => { await api(`feeds/${row.id}/state`, {enabled: row.paused}, 'PUT'); await loadSources('feeds'); showNotification(row.paused ? t("Feed enabled through VPN.") : t("Feed paused. Existing torrents are preserved."), 'success'); }));
       actions.append(command(t("Edit"), async () => { const details = kind === 'feeds' ? await api(`feeds/${encodeURIComponent(row.id)}`) : row; globalThis.MediaSeedWorkspace?.openEditor(kind);  const form = document.querySelector(kind === 'feeds' ? '#feed-form' : '#tracker-form'); feedEditing = kind === 'feeds'; form.reset(); feedEditing = false; for (const [key, value] of Object.entries(details)) { const input = form.elements.namedItem(key); if (input) input.value = key === 'start_at' && value ? new Date(new Date(value).getTime() - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : value ?? ''; } if (kind === 'feeds') { for (const key of ['include','exclude']) form.elements.namedItem(key).value = (details[key] || []).join(', '); for (const option of form.elements.namedItem('badges').options) option.selected = (details.badges || []).includes(option.value); globalThis.MediaSeedWorkspace?.syncBadges(); globalThis.MediaSeedFeedPolicy?.load(details.cleanup); form.elements.namedItem('max_gib').value = details.max_bytes ? details.max_bytes / (1024 ** 3) : ''; form.elements.namedItem('url').placeholder = 'https://nordicbytes.org/rss/…'; void loadFeedLocations(details.location || 'local', details.folder || '').catch(notify); } form.querySelector('input[name="name"]').focus(); }), command(t("Remove"), async () => { if (!confirm(t("Remove {0}? Files and torrents are preserved.", {0: row.name}))) return; await api(`settings/${kind}/${row.id}`, undefined, 'DELETE'); await loadSources(kind); }));
     }
+    if (feedDetails) { item.append(feedDetails); actions.classList.add('feed-card-actions'); if (appRole === 'administrator') actions.lastElementChild.classList.add('source-remove'); }
     item.append(actions); target.append(item);
   }
   restoreInteraction();
@@ -685,25 +770,70 @@ async function pollSources(kind) {
 }
 let trackerSearchGeneration = 0;
 document.querySelector('#tracker-account').onchange = () => { trackerSearchGeneration++; document.querySelector('#tracker-results').replaceChildren(); document.querySelector('#tracker-search-status').textContent = ''; };
+let preparingTrackerDownload = false;
+async function openTrackerDownload(account, row) {
+  if (appRole === 'viewer') throw new Error(t('Read-only app access'));
+  if (preparingTrackerDownload) throw new Error(t('Wait for the selected torrent to load.'));
+  const checkDialog = () => {
+    if (addingTorrent || document.querySelector('dialog[open]')) throw new Error(t('Finish the open dialog before importing another item.'));
+  };
+  checkDialog();
+  preparingTrackerDownload = true;
+  try {
+    const prepared = await api(`trackers/${encodeURIComponent(account)}/torrents/${encodeURIComponent(row.id)}/prepare`, {});
+    if (typeof prepared.base64 !== 'string' || prepared.base64.length > 5592408 || typeof prepared.name !== 'string' || !prepared.name.toLowerCase().endsWith('.torrent')) throw new Error(t('Choose a torrent file'));
+    let data;
+    try { data = Uint8Array.from(atob(prepared.base64), value => value.charCodeAt(0)); }
+    catch { throw new Error(t('Choose a torrent file')); }
+    if (!data.length || data.length > 4 * 1024 * 1024 || data[0] !== 100 || data[data.length - 1] !== 101) throw new Error(t('Choose a torrent file'));
+    checkDialog();
+    const file = new File([data], prepared.name, {type:'application/x-bittorrent', lastModified:0});
+    retryAddDraft = false;
+    openAdd();
+    const mode = addForm.querySelector('[name="mode"][value="file"]');
+    mode.checked = true; mode.dispatchEvent(new Event('change', {bubbles:true}));
+    selectTorrentFiles([file]);
+  } finally { preparingTrackerDownload = false; }
+}
 document.querySelector('#tracker-search').onsubmit = async event => {
   event.preventDefault(); const form = event.target; const account = form.elements.namedItem('account').value; if (!account) return;
   const generation = ++trackerSearchGeneration; const button = document.querySelector('#tracker-search-submit'); const target = document.querySelector('#tracker-results'); const status = document.querySelector('#tracker-search-status'); button.disabled = true; target.replaceChildren(); status.textContent = t("Searching…");
   try {
-    const response = await api(`trackers/${encodeURIComponent(account)}/search?query=${encodeURIComponent(form.elements.namedItem('query').value)}`);
+    const parameters=new URLSearchParams({query:form.elements.namedItem('query').value});
+    for(const key of ['free','double','featured','availability']){const control=form.elements.namedItem(key);if(control&&control.value!=='')parameters.set(key,control.value);}
+    const response = await api(`trackers/${encodeURIComponent(account)}/search?${parameters}`);
     if (generation !== trackerSearchGeneration) return;
-    status.textContent = response.results.length ? t("{0} results · Torrents are added paused. Starting requires a verified VPN.", {0: response.results.length}) : t("No results");
+    status.textContent = response.results.length ? t("{0} results · Choose Download to select a folder and settings.", {0: response.results.length}) : t("No results");
     for (const row of response.results) {
       const item = element('article', undefined, 'source-row'); item.append(element('h2', row.name), element('p', t("{0} · Seeders {1} · Leechers {2}", {0: row.size === null ? t("Unknown size") : bytes(row.size), 1: row.seeders ?? '?', 2: row.leechers ?? '?'}), 'muted'));
-      const actions = element('div', undefined, 'actions'); const add = command(t("Add paused"), async () => {
-        if (!form.reportValidity()) return;
-        await api(`trackers/${encodeURIComponent(account)}/torrents/${encodeURIComponent(row.id)}`, {ratio: Number(form.elements.namedItem('ratio').value)});
-        add.textContent = t("Added paused"); add.dataset.added = 'true'; showNotification(t("Torrent added paused. Downloading requires a verified VPN."), 'success'); await refresh();
+      item.append(element('p',[row.category,row.resolution,row.release_year,row.freeleech>0?`${row.freeleech}% Freeleech`:null,row.double_upload?t('Double upload'):null].filter(Boolean).join(' · '),'muted'));
+      const actions = element('div', undefined, 'actions'); const add = command(t("Download"), async () => {
+        add.textContent = t('Preparing torrent…');
+        try { await openTrackerDownload(account, row); }
+        finally { add.textContent = t('Download'); }
       });
       actions.append(add); item.append(actions); target.append(item);
     }
   } catch (error) { if (generation === trackerSearchGeneration) { status.textContent = ''; notify(error); } }
   finally { button.disabled = document.querySelector('#tracker-account').options.length === 1; }
 };
+const trackerForm=document.querySelector('#tracker-form');
+document.querySelector('#tracker-form [name=provider]').addEventListener('change',()=>{
+  trackerForm.elements.namedItem('base_url').value=trackerForm.elements.namedItem('provider').value==='nordicbytes'?'https://nordicbytes.org':'';
+  document.querySelector('#tracker-test-status').textContent='';
+});
+document.querySelector('#tracker-form [name=base_url]').addEventListener('input',()=>{
+  trackerForm.elements.namedItem('provider').value=trackerForm.elements.namedItem('base_url').value.replace(/\/$/,'')==='https://nordicbytes.org'?'nordicbytes':'unit3d';
+  document.querySelector('#tracker-test-status').textContent='';
+});
+document.querySelector('#test-tracker').onclick=async()=>{
+  const button=document.querySelector('#test-tracker'),status=document.querySelector('#tracker-test-status');
+  const body=Object.fromEntries(new FormData(trackerForm));delete body.id;body.name=body.name||'Tracker';
+  button.disabled=true;status.textContent=t('Testing API…');
+  try{await api('trackers/test',body);status.textContent=t('API connected. Save to add this tracker.');}
+  catch(error){status.textContent=t(error.message);}finally{button.disabled=false;}
+};
+trackerForm.addEventListener('reset',()=>{document.querySelector('#tracker-test-status').textContent='';});
 for (const [selector, kind] of [['#feed-form', 'feeds'], ['#tracker-form', 'trackers']]) {
   const form = document.querySelector(selector); form.onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(form)); const identifier = body.id; delete body.id; if (kind === 'feeds') { if (!feedStorageReady) { showNotification(t('Choose an available writable folder')); return; } body.location = feedLocation.value; body.folder = feedFolderPath; body.ratio = 1; body.cleanup = globalThis.MediaSeedFeedPolicy?.value(); for (const key of ['include','exclude']) body[key] = String(body[key] || '').split(',').map(x => x.trim()).filter(Boolean); body.badges = [...form.elements.namedItem('badges').selectedOptions].map(option => option.value); body.max_bytes = body.max_gib ? Math.round(Number(body.max_gib) * (1024 ** 3)) : null; delete body.max_gib; body.start_at = body.start_at ? new Date(body.start_at).toISOString() : null; } try { const saved = await api(kind + (identifier ? '/' + identifier : ''), body, identifier ? 'PUT' : 'POST'); if (kind === 'feeds' && (saved.start_at ? new Date(saved.start_at).getTime() : null) !== (body.start_at ? new Date(body.start_at).getTime() : null)) throw new Error(t('The saved start date could not be verified. Your form is preserved.')); form.reset(); form.elements.namedItem('id').value = ''; globalThis.MediaSeedWorkspace?.closeEditor(kind); await loadSources(kind); showNotification(t("Saved palette"), 'success'); } catch (error) { notify(error); } };
   form.addEventListener('reset', () => { form.elements.namedItem('id').setAttribute('value', ''); });
@@ -716,7 +846,7 @@ document.querySelector('#previous-page').onclick = () => {torrentPage--; renderT
 document.querySelector('#next-page').onclick = () => {torrentPage++; renderTorrents();};
 document.querySelector('#open-rss')?.addEventListener('click', () => document.querySelector('[data-view="feeds"]').click());
 document.querySelector('#manage-trackers').onclick = () => document.querySelector('[data-view="trackers"]').click();
-function showWorkspace() { if (appRole !== 'viewer') void loadSources('feeds').catch(() => { const preview = document.querySelector('#feed-preview'); if (preview) preview.textContent = t('Feed list unavailable'); }); const rssPanel = document.querySelector('.seed-rss'); if (rssPanel) rssPanel.hidden = appRole === 'viewer'; void refreshTrackerOverview(); document.body.classList.add('signed-in'); document.querySelector('#session-loading').hidden = true; document.querySelector('#identity').hidden = true; document.querySelector('#workspace').hidden = false; document.querySelector('#logout').hidden = false; document.querySelector('#new-torrent').hidden = appRole === 'viewer'; document.querySelector('#policy-form').hidden = appRole === 'viewer'; for (const selector of ['#feed-form', '#tracker-form', '#vpn-form']) document.querySelector(selector).hidden = appRole !== 'administrator'; for (const selector of ['[data-view="feeds"]', '[data-view="trackers"]', '[data-view="ratio-scout"]']) document.querySelector(selector).hidden = appRole === 'viewer'; refresh(); }
+function showWorkspace() { if (appRole !== 'viewer') void loadSources('feeds').catch(() => { const preview = document.querySelector('#feed-preview'); if (preview) preview.textContent = t('Feed list unavailable'); }); const rssPanel = document.querySelector('.seed-rss'); if (rssPanel) rssPanel.hidden = appRole === 'viewer'; void refreshTrackerOverview(); document.body.classList.add('signed-in'); document.querySelector('#session-loading').hidden = true; document.querySelector('#identity').hidden = true; document.querySelector('#workspace').hidden = false; document.querySelector('#logout').hidden = false; document.querySelector('#new-torrent').hidden = appRole === 'viewer'; document.querySelector('#policy-form').hidden = appRole === 'viewer'; for (const selector of ['#feed-form', '#tracker-form', '#vpn-form']) document.querySelector(selector).hidden = appRole !== 'administrator'; for (const selector of ['[data-view="feeds"]', '[data-view="trackers"]']) document.querySelector(selector).hidden = appRole === 'viewer'; refresh(); }
 document.querySelector('#login').onsubmit = async event => { event.preventDefault(); const body = Object.fromEntries(new FormData(event.target)); try { if (needsSetup) { await api('auth/setup', body); needsSetup = false; } csrf = (await api('auth/login', body)).csrf; const identity = await api('auth/me'); setLanguage(identity.language || 'en'); globalThis.MediaAppTheme.applyIdentity(identity); event.target.reset(); showWorkspace(); } catch (error) { notify(error); } };
 document.querySelector('#refresh').onclick = refresh;
 const addDialog = document.querySelector('#add-torrent');
@@ -728,10 +858,10 @@ let torrentFiles = [];
 const torrentFileKey = file => JSON.stringify([file.name, file.size, file.lastModified || 0]);
 function renderTorrentFiles() {
   const list = document.querySelector('#torrent-file-list'); list.replaceChildren();
-  const statuses = {pending: 'Ready to add', uploading: 'Adding…', added: 'Added', error: 'Failed — check the torrent list before retrying'};
+  const statuses = {pending: 'Ready to add', uploading: 'Adding…', added: 'Added', unconfirmed: 'Awaiting confirmation', error: 'Failed — check the torrent list before retrying'};
   for (const item of torrentFiles) {
     const row = element('li', undefined, 'torrent-file-row'); row.dataset.state = item.state;
-    const info = element('div'); info.append(element('strong', item.file.name), element('small', `${bytes(item.file.size)} · ${t(statuses[item.state])}${item.message ? ' · ' + t(item.message) : ''}`, 'muted'));
+    const info = element('div'); info.append(element('strong', item.file.name), element('small', `${bytes(item.file.size)} · ${t(item.outcome === 'duplicate' ? 'Skipped as duplicate' : statuses[item.state])}${item.message ? ' · ' + t(item.message) : ''}`, 'muted'));
     row.append(info);
     if (item.state !== 'added') {
       const remove = element('button', t('Remove from selection')); remove.type = 'button'; remove.disabled = addingTorrent;
@@ -742,7 +872,7 @@ function renderTorrentFiles() {
     list.append(row);
   }
   document.querySelector('#file-name').textContent = torrentFiles.length === 1 ? torrentFiles[0].file.name : t('{0} files selected', {0: torrentFiles.length});
-  document.querySelector('#torrent-batch-status').textContent = t('{0} of {1} files added', {0: torrentFiles.filter(item => item.state === 'added').length, 1: torrentFiles.length});
+  document.querySelector('#torrent-batch-status').textContent = t('{0} added · {1} skipped as duplicates · {2} selected', {0: torrentFiles.filter(item => item.state === 'added' && item.outcome !== 'duplicate').length, 1: torrentFiles.filter(item => item.outcome === 'duplicate').length, 2: torrentFiles.length});
   document.querySelector('#seed-preview-button').disabled = addingTorrent;
   updateAddStart();
 }
@@ -758,8 +888,9 @@ function selectTorrentFiles(files) {
   if (rejected.length) showNotification(t('{0} files were skipped. Choose .torrent files up to 4 MiB each; at most 100 files and 64 MiB per selection.', {0: rejected.length}));
 }
 let addingTorrent = false;
+let retryAddDraft = false;
 function addCleanupPolicy() {
-  return {mode: document.querySelector('#add-cleanup-mode').value || 'never', hours: Number(document.querySelector('#add-cleanup-hours').value || 49), ratio: Number(document.querySelector('#add-cleanup-ratio').value || 1), delete_files: document.querySelector('#add-cleanup-action').value === 'files'};
+  return {mode: document.querySelector('#add-cleanup-mode').value || 'never', hours: Number(document.querySelector('#add-cleanup-hours').value || 50), ratio: Number(document.querySelector('#add-cleanup-ratio').value || 1), delete_files: document.querySelector('#add-cleanup-action').value === 'files'};
 }
 function updateCleanupFields() {
   const {mode, delete_files: files} = addCleanupPolicy(), active = mode !== 'never';
@@ -792,7 +923,11 @@ function updateAddStart() {
 }
 for (const radio of addForm.querySelectorAll('[name="mode"]')) radio.onchange = setAddMode;
 function openAdd() {
-  if (addDialog.open) return;
+  if (addDialog.open || addingTorrent) return;
+  if (retryAddDraft) {
+    addDialog.append(document.querySelector('.notifications')); addDialog.showModal();
+    return;
+  }
   showNotification(''); addForm.reset(); torrentFiles = []; renderTorrentFiles(); richPreview.request++; document.querySelector('#seed-add-preview').replaceChildren();
   document.querySelector('#file-name').textContent = ''; setAddMode();
   updateAddStart();
@@ -868,41 +1003,95 @@ document.addEventListener('drop', event => {
   addForm.querySelector('[name="mode"][value="file"]').checked = true;
   selectTorrentFiles(files);
 });
+async function torrentImportReply(response) {
+  let payload;try { payload=JSON.parse(await response.text()); } catch {}
+  const object=payload && typeof payload==='object' && !Array.isArray(payload);
+  if(response.ok && object)return payload;
+  const message=object && typeof payload.detail==='string' ? payload.detail : t('The server returned HTTP {0}.',{0:response.status});
+  throw Object.assign(new Error(message),{status:response.status,uncertain:response.ok || !object || response.status>=500});
+}
+async function verifyTorrentImport(item,location,folder) {
+  const response=await fetch(`/api/torrent-import-status?location=${encodeURIComponent(location)}&folder=${encodeURIComponent(folder)}`,{method:'POST',headers:{'Content-Type':'application/x-bittorrent','X-MediaSeed-CSRF':csrf},body:item.file});
+  const result=await torrentImportReply(response);
+  if(typeof result.present!=='boolean'||typeof result.pending!=='boolean')throw new Error(t('The addition could not be confirmed. Check the torrent list before retrying.'));
+  return result;
+}
+function existingTorrentImport(result) {
+  if(!result.present)return null;
+  return {added:false,verifiedExisting:true,otherDestination:!result.sameDestination};
+}
+async function uploadTorrentFile(item,url,location,folder) {
+  let before;
+  try { before=await verifyTorrentImport(item,location,folder); }
+  catch(error) { error.pauseBatch=error.status!==422 && error.status!==413;throw error; }
+  const existing=existingTorrentImport(before);if(existing)return {...existing,duplicate:!item.awaitingReceipt};
+  if(before.pending)throw Object.assign(new Error(t('A previous addition is still being prepared. Check status before retrying.')),{pauseBatch:true});
+  item.awaitingReceipt=true;
+  try {
+    const reply=await torrentImportReply(await fetch(url,{method:'POST',headers:{'Content-Type':'application/x-bittorrent','X-MediaSeed-CSRF':csrf},body:item.file}));
+    item.awaitingReceipt=false;return {...reply,duplicate:reply.existing===true};
+  } catch(error) {
+    if(Number.isInteger(error.status)&&!error.uncertain&&error.status!==409){item.awaitingReceipt=false;throw error;}
+    item.message='Connection interrupted. Checking whether this torrent was added…';renderTorrentFiles();
+    for(const delay of [500,1000,2000]) {
+      await new Promise(resolve=>setTimeout(resolve,delay));
+      try { const result=await verifyTorrentImport(item,location,folder);const present=existingTorrentImport(result);if(present)return {...present,duplicate:error.status===409}; }
+      catch(checkError) { if(checkError.status===409)throw checkError; }
+    }
+    error.pauseBatch=true;throw error;
+  }
+}
 addForm.onsubmit = async event => {
   event.preventDefault(); if (addingTorrent) return;
   const fileMode = addForm.elements.namedItem('mode').value === 'file'; const ratio = 1;
   const start = event.submitter?.value === 'start';
   if (!addStorageReady) { showNotification(t('Choose an available writable folder')); return; }
   const location = addLocation.value, folder = addFolderPath;
+  const magnet = addForm.elements.namedItem('url').value.trim();
   const cleanup = addCleanupPolicy();
   const cleanupQuery = cleanup.mode === 'never' ? '' : `&cleanup_mode=${cleanup.mode}&cleanup_hours=${cleanup.hours}&cleanup_ratio=${cleanup.ratio}&cleanup_delete_files=${cleanup.delete_files}`;
   const pending = torrentFiles.filter(item => item.state !== 'added');
   if (fileMode && !pending.length) { showNotification(t("Choose torrent files that have not been added yet.")); return; }
-  addingTorrent = true; const controls = [...addForm.elements, document.querySelector('#close-add')]; const disabledStates = controls.map(control => control.disabled); controls.forEach(control => { control.disabled = true; });
+  const addButton = document.querySelector('#new-torrent'), addButtonLabel = addButton.textContent;
+  addingTorrent = true; const controls = [...addForm.elements, document.querySelector('#close-add'), addButton]; const disabledStates = controls.map(control => control.disabled); controls.forEach(control => { control.disabled = true; });
+  addButton.textContent = t('Adding torrents…');
+  retryAddDraft = false;
+  addDialog.close();
+  showNotification(t('Adding torrents…'), 'info');
   try {
     let result;
     if (fileMode) {
-      let added = 0;
+      let added = 0, duplicates = 0;
       for (const item of pending) {
         item.state = 'uploading'; item.message = ''; renderTorrentFiles();
         try {
-          const response = await fetch(`/api/torrents/upload?filename=${encodeURIComponent(item.file.name)}&ratio=${ratio}${cleanupQuery}&start=${start}&location=${encodeURIComponent(location)}&folder=${encodeURIComponent(folder)}`, {method: 'POST', headers: {'Content-Type': 'application/x-bittorrent', 'X-MediaSeed-CSRF': csrf}, body: item.file});
-          const payload = await response.json(); if (!response.ok) throw new Error(typeof payload.detail === 'string' ? payload.detail : t("The torrent file could not be added."));
-          result = payload; item.state = 'added'; added++;
-          item.message = payload.cleanupPending ? 'Cleanup preparation pending' : payload.startRequested ? 'Start requested through VPN' : 'Added paused';
-        } catch (error) { item.state = 'error'; item.message = errorLabels[error.message] || t('The addition could not be confirmed. Check the torrent list before retrying.'); }
+          const payload = await uploadTorrentFile(item,`/api/torrents/upload?filename=${encodeURIComponent(item.file.name)}&ratio=${ratio}${cleanupQuery}&start=${start}&location=${encodeURIComponent(location)}&folder=${encodeURIComponent(folder)}`,location,folder);
+          result = payload; item.state = 'added'; item.outcome = payload.duplicate ? 'duplicate' : 'new'; item.awaitingReceipt=false;
+          if(payload.duplicate)duplicates++;else added++;
+          item.message = payload.otherDestination ? 'The torrent already exists in another folder. Existing files were kept.' : payload.verifiedExisting || payload.duplicate ? 'Already in the torrent list; existing settings were kept.' : payload.cleanupPending ? 'Cleanup preparation pending' : payload.startRequested ? 'Start requested through VPN' : 'Added paused';
+        } catch (error) { item.state = error.pauseBatch ? 'unconfirmed' : 'error'; item.message = errorLabels[error.message] || (Number.isInteger(error.status) ? error.message : t('The addition could not be confirmed. Check the torrent list before retrying.'));if(error.pauseBatch){renderTorrentFiles();break;} }
         renderTorrentFiles();
       }
       const failed = pending.filter(item => item.state === 'error').length;
-      if (torrentFiles.length > 1 || failed) {
-        showNotification(t('{0} files added; {1} failed. Successful files will not be sent again.', {0: added, 1: failed}), failed ? 'danger' : 'success');
-        await refreshTorrents(); return;
+      const unconfirmed=pending.filter(item=>item.state==='unconfirmed').length;
+      const unsent=pending.filter(item=>item.state==='pending').length;
+      retryAddDraft = failed > 0 || unconfirmed > 0 || unsent > 0;
+      if (torrentFiles.length > 1 || failed || unconfirmed || duplicates) {
+        const parts=[t('{0} added',{0:added})];
+        if(duplicates)parts.push(t('{0} skipped as duplicates',{0:duplicates}));
+        if(failed)parts.push(t('{0} failed',{0:failed}));
+        if(unconfirmed)parts.push(t('{0} awaiting confirmation',{0:unconfirmed}));
+        if(unsent)parts.push(t('{0} not sent',{0:unsent}));
+        const summary=parts.join(' · ')+'.';
+        const reason=pending.find(item=>['error','unconfirmed'].includes(item.state))?.message;
+        showNotification(summary+(reason?' '+reason:'')+(unsent?' '+t('Connection unavailable. Remaining files were not sent; reopen Add torrent to continue.'):failed?' '+t('Open Add torrent to review and retry unsuccessful files.'):''),failed||unconfirmed||unsent?'danger':'success');
+        void refreshTorrents().catch(notify); return;
       }
-    } else { result = await api('torrents', {url: addForm.elements.namedItem('url').value.trim(), ratio, start, location, folder, ...(cleanup.mode === 'never' ? {} : {cleanup})}); }
+    } else { result = await api('torrents', {url: magnet, ratio, start, location, folder, ...(cleanup.mode === 'never' ? {} : {cleanup})}); }
     addDialog.close(); showNotification((result.cleanupPending ? t("Torrent added paused. The cleanup rule is awaiting preparation; your selected start will follow.") : result.startRequested ? (result.pending ? t("Magnet link received. Start selected; waiting for metadata from the torrent network.") : t("Torrent added. Start requested through VPN.")) : (result.pending ? t("Magnet link received paused. Metadata is waiting for VPN.") : t("Torrent added paused. Press Start when you want to download."))) + (result.webSourcesIgnored ? t(" Extra web sources in the link were omitted; the hash and trackers are used.") : ''), 'success');
-    await refreshTorrents();
-  } catch (error) { notify(error); }
-  finally { addingTorrent = false; controls.forEach((control, index) => { control.disabled = disabledStates[index]; }); updateAddStart(); if (fileMode) renderTorrentFiles(); }
+    void refreshTorrents().catch(notify);
+  } catch (error) { retryAddDraft = true; notify(error); }
+  finally { addingTorrent = false; addButton.textContent = addButtonLabel; controls.forEach((control, index) => { control.disabled = disabledStates[index]; }); updateAddStart(); if (fileMode) renderTorrentFiles(); }
 };
 document.querySelector('#logout').onclick = async () => { try { await api('auth/logout', {}); location.reload(); } catch (error) { notify(error); } };
 setInterval(() => { if (!document.hidden && document.body.classList.contains('signed-in')) { if (!document.querySelector('#vpn').hidden) refreshVpn().catch(() => {}); if (!document.querySelector('#feeds').hidden) pollSources('feeds').catch(() => {}); refresh(); } }, 5000);
