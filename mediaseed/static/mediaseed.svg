@@ -1,1 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" color="#25c9ed"><path d="M16 4V19M10 13L16 19L22 13"/><path d="M5 20V25L8 28H24L27 25V20"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" class="brand-mark" data-brand="mediaseed" data-brand-version="prisme-1" aria-hidden="true"><defs><linearGradient id="prisme-mediaseed-32-front" class="prisme-front" gradientUnits="userSpaceOnUse" x1="5" y1="4" x2="28" y2="30"><stop offset="0" class="prisme-start"/><stop offset=".48" class="prisme-mid"/><stop offset="1" class="prisme-end"/></linearGradient><linearGradient id="prisme-mediaseed-32-back" class="prisme-back" gradientUnits="userSpaceOnUse" x1="5" y1="4" x2="28" y2="30"><stop offset="0" class="prisme-start"/><stop offset=".48" class="prisme-mid"/><stop offset="1" class="prisme-end"/></linearGradient><linearGradient id="prisme-mediaseed-32-fold" class="prisme-fold" gradientUnits="userSpaceOnUse" x1="5" y1="4" x2="28" y2="30"><stop offset="0" class="prisme-start"/><stop offset=".48" class="prisme-mid"/><stop offset="1" class="prisme-end"/></linearGradient><linearGradient id="prisme-mediaseed-32-light" class="prisme-light" gradientUnits="userSpaceOnUse" x1="5" y1="4" x2="28" y2="30"><stop offset="0" class="prisme-start"/><stop offset=".48" class="prisme-mid"/><stop offset="1" class="prisme-end"/></linearGradient><radialGradient id="prisme-mediaseed-32-orb" cx="30%" cy="25%" r="75%"><stop offset="0" class="prisme-orb-light"/><stop offset=".42" class="prisme-mid"/><stop offset="1" class="prisme-end"/></radialGradient></defs><style>.brand-mark{display:inline-block;flex-shrink:0;color:var(--accent,#25c9ed);vertical-align:middle;stroke:none!important;overflow:visible}
+.brand-mark path{stroke:color-mix(in srgb,var(--accent,#25c9ed) 60%,white)!important;stroke-width:.12;stroke-linejoin:round;paint-order:stroke fill}
+.prisme-start{stop-color:color-mix(in srgb,var(--accent,#25c9ed) 65%,white)}
+.prisme-mid{stop-color:var(--accent,#25c9ed)}
+.prisme-end{stop-color:var(--indigo,var(--secondary,#8d9cff))}
+.prisme-back .prisme-start{stop-color:var(--indigo,var(--secondary,#8d9cff))}
+.prisme-back .prisme-mid{stop-color:color-mix(in srgb,var(--accent,#25c9ed) 60%,var(--indigo,var(--secondary,#8d9cff)))}
+.prisme-back .prisme-end,.prisme-fold .prisme-end{stop-color:color-mix(in srgb,var(--indigo,var(--secondary,#8d9cff)) 65%,black)}
+.prisme-fold .prisme-start{stop-color:color-mix(in srgb,var(--accent,#25c9ed) 45%,black)}
+.prisme-light .prisme-start{stop-color:color-mix(in srgb,var(--accent,#25c9ed) 35%,white)}
+.prisme-light .prisme-end{stop-color:var(--accent,#25c9ed)}
+.sidebar-heading .brand .brand-mark{width:29px;height:29px}.shell-brand .brand .brand-mark{width:28px;height:28px}.mobile-brand .brand .brand-mark{width:26px;height:26px}
+.prisme-nav-icon{display:inline-block;vertical-align:middle;flex-shrink:0;color:inherit}
+.settings-tabs button{display:inline-flex;align-items:center;gap:8px}
+[data-prisme-nav]{display:inline-flex;align-items:center;gap:8px}
+.app-nav-icon>.prisme-nav-icon{width:20px;height:20px}
+@media(forced-colors:active){.brand-mark path{fill:CanvasText!important}}
+
+.prisme-orb-light{stop-color:color-mix(in srgb,var(--accent,#25c9ed) 20%,white)}
+</style><path d="M5.44 11.84V20.48Q5.44 27.52 13.44 27.52H17.28L14.08 22.72H12.48Q9.92 22.72 9.92 19.52V11.84Z" fill="url(#prisme-mediaseed-32-back)" fill-rule="evenodd"/><path d="M9.92 4.16 2.56 12.16Q1.6 13.44 3.52 13.44H7.36V21.76Q7.36 16.32 12.48 14.72V13.44H16.64Q18.56 13.44 17.28 12.16Z" fill="url(#prisme-mediaseed-32-front)" fill-rule="evenodd"/><path d="M26.56 20.16V11.52Q26.56 4.48 18.56 4.48H14.72L17.92 9.28H19.52Q22.08 9.28 22.08 12.48V20.16Z" fill="url(#prisme-mediaseed-32-back)" fill-rule="evenodd"/><path d="M22.08 27.84 29.44 19.84Q30.4 18.56 28.48 18.56H24.64V10.24Q24.64 15.68 19.52 17.28V18.56H15.36Q13.44 18.56 14.72 19.84Z" fill="url(#prisme-mediaseed-32-front)" fill-rule="evenodd"/></svg>
