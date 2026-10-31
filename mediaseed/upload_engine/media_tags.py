@@ -52,14 +52,22 @@ def dynamic_range_tags(videos):
 
 def audio_tokens(videos):
     groups = [[t for t in v.get('technical', []) if t.get('@type') == 'Audio'] for v in videos]
-    formats = [{t.get('Format') for t in group} for group in groups]
-    if not formats or not formats[0] or any(f != formats[0] for f in formats) or len(formats[0]) != 1:
-        return []
-    label = {'AAC':'AAC', 'AC-3':'DD', 'E-AC-3':'DDP', 'DTS':'DTS', 'TrueHD':'TrueHD', 'MLP FBA':'TrueHD', 'MLP FBA 16-ch':'TrueHD', 'FLAC':'FLAC', 'PCM':'PCM'}.get(next(iter(formats[0])))
-    if not label:
-        return []
-    result = [label]
+    def audio_label(track):
+        format_name = track.get('Format')
+        if format_name == 'DTS':
+            evidence = ' '.join(str(track.get(k, '')) for k in ('Format_Profile', 'Format_AdditionalFeatures', 'Format_Commercial_IfAny'))
+            if re.search(r'\b(?:Master Audio|MA|XLL)\b', evidence, re.I):
+                return 'DTS-HD.MA'
+            if re.search(r'\b(?:HRA|High Resolution Audio|XBR)\b', evidence, re.I):
+                return 'DTS-HD.HRA'
+            return 'DTS'
+        return {'AAC':'AAC', 'AC-3':'DD', 'E-AC-3':'DDP', 'TrueHD':'TrueHD', 'MLP FBA':'TrueHD', 'MLP FBA 16-ch':'TrueHD', 'FLAC':'FLAC', 'PCM':'PCM'}.get(format_name)
     tracks = [t for group in groups for t in group]
+    labels = {audio_label(t) for t in tracks}
+    if not groups or any(not group for group in groups) or len(labels) != 1 or None in labels:
+        return []
+    label = labels.pop()
+    result = [label]
     layouts = {t.get('ChannelLayout', '') for t in tracks}
     channels = {str(t.get('Channels', '')) for t in tracks}
     if len(channels) == 1:
@@ -67,7 +75,11 @@ def audio_tokens(videos):
         if count in {'1', '2'}:
             result.append(count + '.0')
         elif count in {'6', '8'} and all('LFE' in layout.split() for layout in layouts):
-            result.append(str(int(count) - 1) + '.1')
+            channel_tag = str(int(count) - 1) + '.1'
+            if label in {'DTS-HD.MA', 'DTS-HD.HRA'}:
+                result[0] += channel_tag
+            else:
+                result.append(channel_tag)
     def atmos(track):
         evidence = ' '.join(str(track.get(k, '')) for k in ('Format', 'Format_AdditionalFeatures', 'Format_Commercial_IfAny'))
         return bool(re.search(r'\b(?:Atmos|JOC)\b', evidence, re.I))

@@ -1,5 +1,6 @@
 """MDTECH names derived from observed streams and explicitly identified content."""
 import re
+import json
 import unicodedata
 from pathlib import Path
 from mediaseed.upload_engine.source_service import service_info
@@ -45,6 +46,29 @@ def folder_suggestions(body, filenames, metadata=None):
     return {'suggestedSeriesFolderName': series, 'suggestedEpisodeFolderName': episode}
 
 
+def complete_video_metadata(tracks, path, run):
+    """Use stream evidence when MediaInfo omits scan/encoder details."""
+    video = [t for t in tracks if t.get('@type') == 'Video']
+    if not video or all(t.get('ScanType') for t in video):
+        return tracks
+    probe = json.loads(run(['ffprobe', '-v', 'error', '-protocol_whitelist', 'file,pipe', '-select_streams', 'v',
+                           '-show_entries', 'stream=field_order:stream_tags=ENCODER',
+                           '-of', 'json', str(path)]))
+    streams = probe.get('streams', [])
+    if len(streams) != len(video):
+        raise NamingError('Videosporenes scanning kunne ikke verificeres.')
+    for track, stream in zip(video, streams):
+        order = stream.get('field_order')
+        if not track.get('ScanType'):
+            if order == 'progressive':
+                track['ScanType'] = 'Progressive'
+            elif order in {'tt', 'bb', 'tb', 'bt'}:
+                track['ScanType'] = 'Interlaced'
+        if not track.get('Encoded_Library'):
+            track['Encoded_Library'] = stream.get('tags', {}).get('ENCODER', '')
+    return tracks
+
+
 def technical_tokens(videos):
     resolutions, codecs = set(), set()
     for video in videos:
@@ -59,9 +83,17 @@ def technical_tokens(videos):
         if not 0 < width <= 32768 or not 0 < height <= 32768:
             raise NamingError('MediaInfo returnerede en ugyldig opløsning.')
         scan = {'progressive': 'p', 'interlaced': 'i'}.get(str(track.get('ScanType', '')).lower())
-        # Never call a cropped 1920x800 stream 1080p, or guess progressive scan.
-        resolutions.add(str(height) + scan if scan and height in {480, 576, 720, 1080, 2160, 4320} else f'{width}x{height}')
-        codec = {'AVC': 'h264', 'HEVC': 'h265', 'AV1': 'AV1', 'VP9': 'VP9'}.get(track.get('Format'))
+        # Release quality uses the nominal raster, including cropped cinema frames.
+        level = {1280: 720, 1920: 1080, 3840: 2160, 7680: 4320}.get(width, height)
+        if not scan or level not in {480, 576, 720, 1080, 2160, 4320} or not level * .4 <= height <= level:
+            raise NamingError('En standardopløsning og scanning kunne ikke verificeres. Kontrollér MediaInfo før upload.')
+        resolutions.add(str(level) + scan)
+        codec = {'AVC': 'AVC', 'HEVC': 'HEVC', 'AV1': 'AV1', 'VP9': 'VP9'}.get(track.get('Format'))
+        encoder = ' '.join(str(track.get(k, '')) for k in ('Encoded_Library', 'Encoded_Library_Name'))
+        if codec == 'HEVC' and re.search(r'\bx265\b', encoder, re.I):
+            codec = 'x265'
+        elif codec == 'AVC' and re.search(r'\bx264\b', encoder, re.I):
+            codec = 'x264'
         if not codec:
             raise NamingError('MediaInfo kunne ikke fastslå en understøttet videocodec. Filen navngives ikke ved gæt.')
         codecs.add(codec)
@@ -113,11 +145,17 @@ def release_title(body, videos, metadata=None):
         tokens.append('UHD')
     tokens.append(body.source_type)
     if body.release_format:
+        if body.media_mode == 'in_place':
+            raise NamingError('En konverteret film er genkodet og må ikke navngives REMUX.')
         if body.source_type != 'BluRay':
             raise NamingError('REMUX kræver en bekræftet BluRay-kilde uden genkodning.')
         tokens.append(body.release_format)
-    tokens.extend(dynamic_range_tags(videos))
-    tokens.append(codec)
+    if body.release_format:
+        tokens.extend(dynamic_range_tags(videos))
+        tokens.append({'x265': 'HEVC', 'x264': 'AVC'}.get(codec, codec))
+    else:
+        tokens.append(codec)
+        tokens.extend(dynamic_range_tags(videos))
     tokens.extend(audio_tokens(videos))
     title = '.'.join(tokens) + '-MDTECH'
     if len(title.encode('utf-8')) > 200:
@@ -130,7 +168,7 @@ def video_filename(title):
 
 
 def release_names(body, videos, metadata=None):
-    if body.media_mode=='in_place':
+    if body.media_mode in {'release','in_place'}:
         selected=[]
         for video in videos:
             audio=[t for t in video.get('technical',[]) if t.get('@type')=='Audio']

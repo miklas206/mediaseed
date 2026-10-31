@@ -37,7 +37,7 @@ from mediaseed.upload_engine.mediainfo_report import combined_report
 from mediaseed.upload_engine.metadata import MetadataClient, MetadataError
 from mediaseed.upload_engine.episode_plan import plan_episodes, uploads_for_plan, episode_uploads
 from mediaseed.upload_engine.artifact_exports import ArtifactExports
-from mediaseed.upload_engine.release_naming import NamingError, release_names, suggested_folder_name, tagged_folder_name, dotted_folder_name, folder_suggestions
+from mediaseed.upload_engine.release_naming import NamingError, complete_video_metadata, release_names, suggested_folder_name, tagged_folder_name, dotted_folder_name, folder_suggestions
 
 VIDEO = {".mkv", ".mp4", ".m4v", ".avi", ".ts", ".m2ts", ".mov"}
 SUBS = {".srt", ".ass", ".ssa", ".vtt"}
@@ -555,8 +555,10 @@ class UploadHelper:
                 self.media_cache[key] = (time.monotonic(), tracks)
             else:
                 tracks = cached[1]
+            if body.media_mode in {'release','in_place'}:
+                tracks = complete_video_metadata(tracks, path, command)
             extras = [{"file": Path(sub.file).name, "language": sub.language} for sub in body.subtitles if sub.video == relative]
-            videos.append({"comparison": measured_facts(tracks,info.st_size), "file": relative, "sourceServices": sorted(metadata_services(tracks)), "technical": [{k: t[k] for k in ("@type", "Default", "Format", "Width", "Height", "FrameRate", "BitRate", "Channels", "Language", "ScanType", "HDR_Format", "HDR_Format_Compatibility", "Format_AdditionalFeatures", "Format_Commercial_IfAny", "ChannelLayout") if k in t} for t in tracks if t.get("@type") in {"Video", "Audio"}], "languages": sorted(track_languages(tracks)), "addedSubtitles": extras, "sizeBytes": info.st_size})
+            videos.append({"comparison": measured_facts(tracks,info.st_size), "file": relative, "sourceServices": sorted(metadata_services(tracks)), "technical": [{k: t[k] for k in ("@type", "Default", "Encoded_Library", "Encoded_Library_Name", "Format_Profile", "Format", "Width", "Height", "FrameRate", "BitRate", "Channels", "Language", "ScanType", "HDR_Format", "HDR_Format_Compatibility", "Format_AdditionalFeatures", "Format_Commercial_IfAny", "ChannelLayout") if k in t} for t in tracks if t.get("@type") in {"Video", "Audio"}], "languages": sorted(track_languages(tracks)), "addedSubtitles": extras, "sizeBytes": info.st_size})
         metadata = self.metadata.details(body)
         naming = {}
         if body.release_owner == 'other':
@@ -734,6 +736,7 @@ class UploadHelper:
                 observed = []
                 for original, relative in inputs:
                     tracks = json.loads(command(['mediainfo', '--Output=JSON', str(original)]))['media']['track']
+                    tracks = complete_video_metadata(tracks, original, command)
                     languages = track_languages(tracks) | {s.language for s in body.subtitles if s.video == relative}
                     observed.append({'file': relative, 'technical': tracks, 'languages': sorted(languages)})
                 naming_metadata = self.metadata.details(body)
@@ -825,7 +828,9 @@ class UploadHelper:
                 languages = sorted(track_languages(tracks))
                 if not {s.language for _, s in mapped} <= set(languages):
                     raise ValueError("MediaInfo kunne ikke bekræfte sprogene for de tilføjede tekster")
-                technical = [{k: t[k] for k in ("@type", "Default", "Format", "Format_Profile", "Width", "Height", "FrameRate", "BitRate", "Channels", "Language", "HDR_Format", "ScanType", "HDR_Format_Compatibility", "Format_AdditionalFeatures", "Format_Commercial_IfAny", "ChannelLayout") if k in t} for t in tracks if t.get("@type") in {"Video", "Audio"}]
+                if body.media_mode in {'release','in_place'}:
+                    tracks = complete_video_metadata(tracks, target, command)
+                technical = [{k: t[k] for k in ("@type", "Default", "Encoded_Library", "Encoded_Library_Name", "Format_Profile", "Format", "Format_Profile", "Width", "Height", "FrameRate", "BitRate", "Channels", "Language", "HDR_Format", "ScanType", "HDR_Format_Compatibility", "Format_AdditionalFeatures", "Format_Commercial_IfAny", "ChannelLayout") if k in t} for t in tracks if t.get("@type") in {"Video", "Audio"}]
                 general = next((t for t in tracks if t.get('@type') == 'General'), {})
                 try:
                     duration_seconds = float(general.get('Duration', 0))
@@ -1277,7 +1282,7 @@ def install_upload_helper(app, authorized, data, storage, database, destinations
                 raise HTTPException(422,'En uploadtitel indeholder ugyldige tegn. Ret titlen i afsnitsoversigten.')
         if body.media_mode in {'source','in_place'} and (body.subtitles or body.destination_location):
             raise HTTPException(422, 'Klargøring i samme mappe kræver ingen ekstra undertekster og ingen kopidestination. Vælg separat kopi for at indlejre tekster.')
-        required = {"mediainfo"} | ({"mkvmerge"} if body.subtitles or body.media_mode in {'release','in_place'} else set()) | ({"ffmpeg", "ffprobe"} if any(c.screenshots for c in children) else set())
+        required = {"mediainfo"} | ({"ffprobe"} if body.media_mode in {"release", "in_place"} else set()) | ({"mkvmerge"} if body.subtitles or body.media_mode in {'release','in_place'} else set()) | ({"ffmpeg", "ffprobe"} if any(c.screenshots for c in children) else set())
         missing = required - {k for k, v in helper.capabilities().items() if v}
         if missing:
             raise HTTPException(409, "Medieværktøjer mangler: " + ", ".join(sorted(missing)) + ". Opdatér MediaUpload-containeren til den nyeste version.")

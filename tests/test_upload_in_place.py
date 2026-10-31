@@ -22,8 +22,8 @@ def test_existing_converted_video_is_not_copied_or_overwritten(tmp_path,monkeypa
  job={'id':'a'*32,'hash':'b'*40,'created':time.time(),'status':'complete','name':'Film.2025.REMUX','destination':str(folder),'files':[{'name':'Source.mkv','output':old.name}]}
  manager.save(job);receipt={'id':job['id'],'identities':{old.name:fingerprint(old)}};atomic(folder/'.mediaseed-converted.json',receipt)
  helper=app.state.native_uploader.helper
- monkeypatch.setattr(helper,'capabilities',lambda:{'mediainfo':True,'mkvmerge':True})
- monkeypatch.setattr('mediaseed.upload_engine.upload_helper.command',lambda args,**kw:json.dumps({'media':{'track':TRACKS}}) if '--Output=JSON' in args else 'Synthetic report')
+ monkeypatch.setattr(helper,'capabilities',lambda:{'mediainfo':True,'mkvmerge':True,'ffprobe':True})
+ monkeypatch.setattr('mediaseed.upload_engine.upload_helper.command',lambda args,**kw:json.dumps({'media':{'track':TRACKS}}) if '--Output=JSON' in args else json.dumps({'streams':[{'field_order':'progressive'}]}) if args[0]=='ffprobe' else 'Synthetic report')
  monkeypatch.setattr(helper.metadata,'details',lambda body:{'status':'ok','kind':'movie','tmdb':12,'title':'Film','year':2025,'overview':'Synthetic synopsis'})
  monkeypatch.setattr(helper.metadata,'release',lambda name:{'status':'unknown'})
  monkeypatch.setattr(helper,'copy_media',lambda *a:pytest.fail('No video copy is allowed'))
