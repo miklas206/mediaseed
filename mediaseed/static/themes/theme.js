@@ -44,7 +44,21 @@
   const localMessage=settings.querySelector('.app-settings-message');
   if (document.querySelector('#downloads')) {
     const downloadsPanel = document.createElement('section'); downloadsPanel.className = 'app-settings-panel';
-    downloadsPanel.innerHTML = '<h3 data-i18n="Download queue">Download queue</h3><form id="download-settings-form"><label><span data-i18n="Simultaneous downloads">Simultaneous downloads</span><input id="max-active-downloads" type="number" min="1" max="100" step="1" required></label><p class="muted" data-i18n="RSS and manual torrents share this limit. File checking has its own queue.">RSS and manual torrents share this limit. File checking has its own queue.</p><p id="download-settings-status" role="status"></p><button id="save-download-settings" type="submit" data-i18n="Save download settings">Save download settings</button></form>';
+    const transferFields = [
+      ['maxConnections', 'Connections in total', 10000],
+      ['maxConnectionsPerTorrent', 'Connections per torrent', 10000],
+      ['maxUploadSlots', 'Upload slots in total', 1000],
+      ['maxUploadSlotsPerTorrent', 'Upload slots per torrent', 1000],
+      ['maxActiveDownloads', 'Simultaneous download torrents', 100],
+      ['maxActiveUploads', 'Simultaneous seeding torrents', 1000],
+    ];
+    downloadsPanel.innerHTML = `<h3 data-i18n="Connections and queue">Connections and queue</h3>
+      <form id="transfer-settings-form">
+        <p class="muted" data-i18n="Connections are shared by uploads and downloads. Upload slots control how many peers receive data at once.">Connections are shared by uploads and downloads. Upload slots control how many peers receive data at once.</p>
+        <div class="transfer-settings-grid">${transferFields.map(([key, label, max]) => `<div class="transfer-setting" data-transfer-field="${key}"><label for="transfer-${key}" data-i18n="${label}">${label}</label><input id="transfer-${key}" type="number" min="1" max="${max}" step="1" required disabled><label class="transfer-unlimited"><input type="checkbox" aria-labelledby="transfer-${key}-unlimited" disabled><span id="transfer-${key}-unlimited" data-i18n="Unlimited">Unlimited</span></label></div>`).join('')}</div>
+        <p class="muted" data-i18n="The queue is shared by RSS and manual torrents. Forced starts bypass queue limits; paused torrents stay paused. More connections do not guarantee more speed.">The queue is shared by RSS and manual torrents. Forced starts bypass queue limits; paused torrents stay paused. More connections do not guarantee more speed.</p>
+        <p id="transfer-settings-status" role="status"></p><button id="save-transfer-settings" type="submit" disabled data-i18n="Save connections and queue">Save connections and queue</button>
+      </form>`;
     settings.insertBefore(downloadsPanel, localMessage);
     const rssPanel = document.createElement('section'); rssPanel.className = 'app-settings-panel';
     rssPanel.innerHTML = '<h3 data-i18n="RSS refresh">RSS refresh</h3><form id="rss-settings-form"><label><span data-i18n="Fetch RSS every (minutes)">Fetch RSS every (minutes)</span><input id="rss-refresh-minutes" type="number" min="1" max="1440" step="1" required></label><p class="muted" data-i18n="Default: 5 minutes. Follow the minimum interval required by your tracker. This applies to all MediaSeed feeds; downloaded entries are checked approximately every 15 seconds.">Default: 5 minutes. Follow the minimum interval required by your tracker. This applies to all MediaSeed feeds; downloaded entries are checked approximately every 15 seconds.</p><p id="rss-settings-status" role="status"></p><button id="save-rss-settings" type="submit" data-i18n="Save RSS settings">Save RSS settings</button></form>';

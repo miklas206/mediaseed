@@ -28,6 +28,7 @@ from mediaseed.cleanup import CleanupManager, CleanupPolicy, cleanup_identity
 from mediaseed.features import add_stopped, install_features, queue_summary
 from mediaseed.tracker_credit import TrackerCredit
 from mediaseed.storage import Storage
+from mediaseed.transfer_settings import TransferSettings
 
 COOKIE = "mediaseed_session"
 HASHER = PasswordHasher()
@@ -292,7 +293,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
                 if public["role"] == "viewer":
                     raise HTTPException(403, "Read-only app access")
                 tracker_admin = request.url.path == "/api/trackers" or (request.url.path.startswith("/api/trackers/") and request.method == "PUT")
-                if public["role"] != "administrator" and (tracker_admin or request.url.path in {"/api/vpn", "/api/download-settings", "/api/rss-settings"} or request.url.path.startswith(("/api/accounts", "/api/feeds", "/api/settings", "/api/runtime", "/api/ratio-scout"))):
+                if public["role"] != "administrator" and (tracker_admin or request.url.path in {"/api/vpn", "/api/download-settings", "/api/rss-settings", "/api/transfer-settings"} or request.url.path.startswith(("/api/accounts", "/api/feeds", "/api/settings", "/api/runtime", "/api/ratio-scout"))):
                     raise HTTPException(403, "App administrator access required")
         if request.method not in {"GET", "HEAD", "OPTIONS"} and not secrets.compare_digest(request.headers.get("X-MediaSeed-CSRF", ""), session["csrf"]):
             raise HTTPException(403, "Session verification failed")
@@ -387,7 +388,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/healthz")
     def health():
-        return {"status": "healthy", "version": "0.1.28"}
+        return {"status": "healthy", "version": "0.1.38"}
 
     @app.get("/api/auth/status")
     async def status(request: Request):
@@ -572,6 +573,45 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
             result = await queue_observation(force=True)
             if result["maxActiveDownloads"] != body.maxActiveDownloads or not result["queueingEnabled"]:
                 raise HTTPException(503, "The download limit could not be verified. Refresh the settings before trying again.")
+            return result
+
+    @app.get("/api/transfer-settings")
+    async def transfer_settings(session=Depends(authorized)):
+        if vpn_url:
+            observed = await vpn_status()
+            if "transfer-settings" not in observed.get("torrentCapabilities", []):
+                raise HTTPException(409, "Update MediaVPN to 0.2.35 or newer to manage connections and queues.")
+            return await vpn_request("transfer", "GET")
+        try:
+            preferences = (await qbit("/api/v2/app/preferences")).json()
+            return TransferSettings.from_preferences(preferences).model_dump()
+        except (ValueError, AttributeError):
+            raise HTTPException(503, "Connection settings are unavailable. Connect the torrent client and try again.") from None
+
+    @app.put("/api/transfer-settings")
+    async def save_transfer_settings(body: TransferSettings, session=Depends(authorized)):
+        async with credit.lock:
+            if vpn_url:
+                observed = await vpn_status()
+                if "transfer-settings" not in observed.get("torrentCapabilities", []):
+                    raise HTTPException(409, "Update MediaVPN to 0.2.35 or newer to manage connections and queues.")
+                result = await vpn_request("transfer", "PUT", body.model_dump())
+                if result != body.model_dump():
+                    raise HTTPException(503, "Connection settings could not be verified. Reload before trying again.")
+            else:
+                desired = body.preferences()
+                previous = (await qbit("/api/v2/app/preferences")).json()
+                try:
+                    await qbit("/api/v2/app/setPreferences", "POST", {"json": json.dumps(desired)})
+                    actual = (await qbit("/api/v2/app/preferences")).json()
+                    if any(type(actual.get(key)) is not type(value) or actual.get(key) != value for key, value in desired.items()):
+                        raise ValueError()
+                except (HTTPException, ValueError, AttributeError):
+                    with suppress(Exception):
+                        await qbit("/api/v2/app/setPreferences", "POST", {"json": json.dumps({key: previous[key] for key in desired if key in previous})})
+                    raise HTTPException(503, "Connection settings could not be verified. Reload before trying again.") from None
+                result = body.model_dump()
+            queue_cache.clear()
             return result
 
     @app.get("/api/rss-settings")

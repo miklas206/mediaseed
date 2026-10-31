@@ -155,7 +155,7 @@ def test_mediavpn_queue_update_requires_capability_and_verifies_native_value(
     monkeypatch.setattr(
         module.httpx,
         "AsyncClient",
-        lambda **kwargs: original(**kwargs, transport=httpx.MockTransport(handler)),
+        lambda **kwargs: original(**{**kwargs, "transport": httpx.MockTransport(handler)}),
     )
     with TestClient(create_app(tmp_path / "state", "http://testserver")) as client:
         sign_in(client)

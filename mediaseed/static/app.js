@@ -939,22 +939,44 @@ window.addEventListener('focus', () => { void refreshAccountPreferences(); });
 setInterval(() => { void refreshAccountPreferences(); }, 60000);
 
 
+let savingTransferSettings = false;
 window.addEventListener('mediaseed-settings-open', async () => {
-  const form = document.querySelector('#download-settings-form'); if (!form) return;
-  const input = document.querySelector('#max-active-downloads'), button = document.querySelector('#save-download-settings'), status = document.querySelector('#download-settings-status');
-  button.disabled = true; input.disabled = true; status.textContent = t('Loading download settings…');
+  const form = document.querySelector('#transfer-settings-form'); if (!form || savingTransferSettings) return;
+  const fields = [...form.querySelectorAll('[data-transfer-field]')];
+  const button = form.querySelector('button'), status = form.querySelector('[role="status"]');
+  const setDisabled = disabled => {
+    button.disabled = disabled;
+    for (const row of fields) {
+      const checkbox = row.querySelector('[type="checkbox"]');
+      checkbox.disabled = disabled;
+      row.querySelector('[type="number"]').disabled = disabled || checkbox.checked;
+    }
+  };
+  const display = settings => {
+    for (const row of fields) {
+      const value = settings[row.dataset.transferField];
+      const input = row.querySelector('[type="number"]'), checkbox = row.querySelector('[type="checkbox"]');
+      checkbox.checked = value === -1; input.value = value > 0 ? value : '';
+      checkbox.onchange = () => { input.disabled = checkbox.checked || appRole !== 'administrator'; if (!input.disabled) input.focus(); };
+    }
+  };
+  setDisabled(true); status.textContent = t('Loading connection settings…');
   try {
-    const settings = await api('download-settings');
-    input.value = settings.maxActiveDownloads > 0 ? settings.maxActiveDownloads : '';
-    input.disabled = appRole !== 'administrator'; button.disabled = appRole !== 'administrator';
-    status.textContent = appRole !== 'administrator' ? t('Only an administrator can change the shared download limit.') : settings.maxActiveDownloads === -1 ? t('The client currently has no download limit. Choose a value to enable its queue.') : t('Current limit: {0} simultaneous downloads', {0: settings.maxActiveDownloads});
+    display(await api('transfer-settings'));
+    setDisabled(appRole !== 'administrator');
+    status.textContent = appRole !== 'administrator' ? t('Only an administrator can change connections and queues.') : t('Current client settings. Changes apply when you save.');
   } catch (error) {status.textContent = errorLabels[error.message] || t(error.message);}
   form.onsubmit = async event => {
-    event.preventDefault(); if (button.disabled) return;
-    button.disabled = true;
-    try { const saved = await api('download-settings', {maxActiveDownloads: Number(input.value)}, 'PUT'); input.value = saved.maxActiveDownloads; status.textContent = t('Current limit: {0} simultaneous downloads', {0: saved.maxActiveDownloads}); showNotification(t('Download limit saved.'), 'success'); await refresh(); }
-    catch (error) {notify(error);}
-    finally {button.disabled = appRole !== 'administrator';}
+    event.preventDefault(); if (button.disabled || !form.reportValidity()) return;
+    const values = Object.fromEntries(fields.map(row => [row.dataset.transferField, row.querySelector('[type="checkbox"]').checked ? -1 : Number(row.querySelector('[type="number"]').value)]));
+    savingTransferSettings = true; setDisabled(true);
+    try {
+      display(await api('transfer-settings', values, 'PUT'));
+      status.textContent = t('Current client settings. Changes apply when you save.');
+      showNotification(t('Connections and queue saved.'), 'success');
+      await refresh();
+    } catch (error) {notify(error);}
+    finally {savingTransferSettings = false; setDisabled(appRole !== 'administrator');}
   };
 });
 
