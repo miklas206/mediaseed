@@ -240,6 +240,8 @@ function showUploadPreview(){
  if($('#upload-description-preview').value!==text)$('#upload-description-preview').value=text;
  $('#upload-automatic-description').disabled=!manual;$('#upload-nfo-preview').value=result?.nfo||'';
  $('#upload-naming-status').textContent=source?.status==='needs_input'?source.message:result?.namingError?result.namingError+' Ret indstillingen under Indstillinger. Beskrivelsen kan stadig redigeres.':'';
+ const namingWarnings=(result?.namingChecks||[]).filter(check=>check.status!=='ok').map(check=>check.text);
+ if(namingWarnings.length)$('#upload-naming-status').textContent+=' '+namingWarnings.join(' ');
  $('#upload-release-file-preview').textContent=result?.outputFiles?'Filen i torrenten: '+Object.values(result.outputFiles).join(' · '):'';
  const seriesTitle=view.child.kind!=='movie'?view.child.catalogue_title:'';
  const seriesSuggestion=seriesTitle?seriesTitle.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9]+/g,'.').replace(/^\.|\.$/g,'')+'.'+chosenReleaseGroup():'';

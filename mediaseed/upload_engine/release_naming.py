@@ -4,7 +4,7 @@ import json
 import unicodedata
 from pathlib import Path
 from mediaseed.upload_engine.source_service import service_info
-from mediaseed.upload_engine.media_tags import language_tag, dynamic_range_tags, audio_tokens
+from mediaseed.upload_engine.media_tags import language_tag, dynamic_range_tags, audio_tokens, primary_audio
 
 
 class NamingError(ValueError):
@@ -105,7 +105,10 @@ def technical_tokens(videos):
 def release_title(body, videos, metadata=None):
     from mediaseed.upload_engine.description import readable_name
     metadata = metadata or {}
-    name = slug(body.catalogue_title or metadata.get('title') or readable_name(body.title))
+    name = slug(metadata.get('title') or body.catalogue_title or readable_name(body.title))
+    # Catalogue identity wins over stale release names and manually cached titles.
+    if not metadata.get('title') and body.kind == 'movie':
+        name = re.sub(r'\.(?:19|20)\d{2}$', '', name)
     if not name:
         raise NamingError('Vælg en entydig film eller serie før MDTECH-navngivning.')
     tokens = [name]
@@ -126,6 +129,10 @@ def release_title(body, videos, metadata=None):
             tokens.append(slug(episode.episode_title))
     else:
         seasons = sorted({e.season for e in body.episode_overrides if e.season > 0})
+        if any(e.season == 0 for e in body.episode_overrides):
+            raise NamingError('Specials skal klargøres separat som S00Exx og må ikke skjules i et sæsoninterval.')
+        if seasons and seasons != list(range(seasons[0], seasons[-1] + 1)):
+            raise NamingError('Sæsonintervallet har huller. Klargør sæsonerne separat.')
         if not seasons:
             raise NamingError('Identificér sæsonerne før MDTECH-navngivning.')
         tokens.append(f'S{seasons[0]:02}' if len(seasons) == 1 else f'S{seasons[0]:02}-S{seasons[-1]:02}')
@@ -172,7 +179,10 @@ def release_names(body, videos, metadata=None):
         selected=[]
         for video in videos:
             audio=[t for t in video.get('technical',[]) if t.get('@type')=='Audio']
-            primary=next((t for t in audio if t.get('Default')=='Yes'),audio[0] if audio else None)
+            try:
+                primary=primary_audio(audio)
+            except ValueError as exc:
+                raise NamingError(str(exc)) from None
             selected.append({**video,'technical':[t for t in video.get('technical',[]) if t.get('@type')!='Audio']+([primary] if primary else [])})
         videos=selected
     title = release_title(body, videos, metadata)

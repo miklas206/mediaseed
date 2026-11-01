@@ -6,7 +6,9 @@ from mediaseed.app import create_app
 from mediaseed.conversion import atomic,fingerprint
 from mediaseed.upload_engine.upload_helper import decode_torrent
 from test_uploader import login
-from test_upload_comparison import TRACKS
+from test_upload_comparison import TRACKS as COMPARISON_TRACKS
+TRACKS = [dict(track) for track in COMPARISON_TRACKS]
+next(track for track in TRACKS if track.get("@type") == "Audio")["Default"] = "Yes"
 
 @pytest.mark.parametrize('scenario',['source','in_place','failure','seeded','collision','recovery','permission','link_recovery','credited','folder_collision'])
 def test_existing_converted_video_is_not_copied_or_overwritten(tmp_path,monkeypatch,scenario):
@@ -83,6 +85,13 @@ def test_existing_converted_video_is_not_copied_or_overwritten(tmp_path,monkeypa
   if scenario in ('in_place','credited'):assert final!=old and 'TrueHD.7.1.Atmos' in final.name and final.name.endswith('.MDTECH.mkv')
   else:assert final==old
   nfo=final.with_suffix('.nfo');assert nfo.is_file()
+  if scenario in ('in_place','credited'):
+   saved_nfo=(helper.data/'upload-helper'/result['id']/'captain-quack.nfo').read_bytes()
+   assert nfo.read_bytes()==saved_nfo
+   assert result['releaseName'].replace('-MDTECH','.MDTECH')==final.stem
+   if scenario=='in_place':
+    assert not result['readyForReview']
+    assert next(check for check in result['checks'] if check['rule']=='navn kilde')['status']=='missing'
   torrent=c.get('/api/upload/upload-helper/'+response.json()['id']+'/download')
   info=decode_torrent(torrent.content)[b'info'];assert info[b'name']==folder.name.encode() and len(info[b'files'])==2
   assert {f[b'path'][0].decode() for f in info[b'files']}=={final.name,nfo.name}

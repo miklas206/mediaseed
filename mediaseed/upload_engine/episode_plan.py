@@ -29,6 +29,9 @@ def plan_episodes(body, catalogue, today=None):
         override = overrides.get(file)
         numbers = re.findall(r'(?i)S(\d{1,3})E(\d{1,4})(?!\d)', Path(file).stem)
         multi_episode = bool(re.search(r'(?i)S\d+E\d+(?:E\d+|[-._ ]E\d+|-\d{1,4}(?![a-z0-9]))', Path(file).stem))
+        if multi_episode or len(numbers) > 1:
+            unresolved.append({'file': file, 'message': 'Filen indeholder flere afsnitsnumre. Dobbeltafsnit kan ikke navngives som ét afsnit; klargør separate afsnitsfiler.'})
+            continue
         identity = None
         if override:
             identity = (override.season, override.episode)
@@ -121,7 +124,7 @@ def plan_episodes(body, catalogue, today=None):
         if len(selected_seasons) == 1 and 0 not in selected_seasons:
             if season_checks[0]['complete']:
                 mode = 'season'
-        elif verified and used == expected and any(e['season'] > 0 for e in entries) and fully_aired(episodes) and catalogue.get('seriesStatus') in {'Ended', 'Canceled'}:
+        elif 0 not in selected_seasons and verified and used == expected and any(e['season'] > 0 for e in entries) and fully_aired(episodes) and catalogue.get('seriesStatus') in {'Ended', 'Canceled'}:
             mode = 'series'
     return {'status': 'needs_review' if unresolved else 'ready', 'mode': mode, 'complete': mode != 'episodes',
             'entries': entries, 'unresolved': unresolved, 'missing': missing,

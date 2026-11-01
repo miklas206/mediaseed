@@ -6,8 +6,29 @@ NORDIC = {'da', 'sv', 'no', 'fi'}
 LANGUAGE_TAGS = {'da':'DANiSH', 'sv':'SWEDiSH', 'no':'NORWEGiAN', 'fi':'FiNNiSH', 'ja':'JAPANESE'}
 
 
+def supplementary_track(track):
+    """Accessibility/commentary tracks cannot establish the main audio claim."""
+    flags = ('Commentary', 'AudioDescription', 'VisualImpaired')
+    return any(str(track.get(key, '')).lower() in {'yes', 'true', '1'} for key in flags) or bool(
+        re.search(r'\b(?:commentary|audio description|descriptive audio|synstolkning|kommentarspor)\b',
+                  str(track.get('Title', '')), re.I))
+
+
+def primary_audio(tracks):
+    candidates = [t for t in tracks if t.get('@type') == 'Audio' and not supplementary_track(t)]
+    defaults = [t for t in candidates if str(t.get('Default', '')).lower() in {'yes', 'true', '1'}]
+    if len(defaults) > 1 or not defaults and len(candidates) > 1:
+        raise ValueError('Flere hovedlydspor uden entydigt standardspor. Vælg ét standardlydspor i filen før navngivning.')
+    if not candidates and any(t.get('@type') == 'Audio' for t in tracks):
+        raise ValueError('Kun kommentarspor eller synstolkning fundet. Kontrollér filmens hovedlydspor.')
+    return (defaults or candidates or [None])[0]
+
+
 def subtitle_languages(tracks):
     return {code for t in tracks if t.get('@type') == 'Text'
+            and str(t.get('Forced', '')).lower() not in {'yes', 'true', '1'}
+            and not supplementary_track(t)
+            and not re.search(r'\b(?:forced|signs(?: and songs)?|songs only)\b', str(t.get('Title', '')), re.I)
             if (code := language_code(t.get('Language', ''))) }
 
 
