@@ -20,6 +20,7 @@ class OriginalRemoval:
     def job(self,identifier):
         job=next((j for j in self.manager.records() if j['id']==identifier),None)
         if not job:raise HTTPException(404,'Konverteringen findes ikke.')
+        if job.get('kind')=='mux':raise HTTPException(409,'Begge mux-originaler bevares. Administrér originaltorrents hver for sig efter trackerens seedkrav.')
         if job['status']!='complete':raise HTTPException(409,'Konverteringen skal være færdig først.')
         return job
     async def preview(self,identifier):

@@ -256,3 +256,53 @@ Existing completed import history and user settings remain unchanged.
 The file/magnet and RSS forms no longer ask for a separate stop ratio. Retained
 torrents seed without an automatic ratio or time stop; ratio inputs appear only
 for cleanup modes that actually use a ratio target.
+
+
+### Combine higher-resolution picture with better audio (0.1.43)
+
+Open **Konvertering → Kombinér billede og lyd → Analysér film og serier**.
+The bounded scan reads up to 80 completed torrents and 240 MKV videos across
+approved storage, including episodes and torrents previously considered for
+space-saving conversion. No media is modified by analysis.
+
+Suggestions require an exact title/year or series/season/episode match and
+matching edition markers. The picture source must have strictly higher width
+and height without losing HDR, Dolby Vision or bit depth. A donor audio track
+must have a known matching language and improve channels, losslessness or
+measured Atmos support without regressing any of those properties against any
+main track in that language. Equal resolution, equivalent sound, commentary,
+unknown language, incompatible frame rate/runtime/chapters and different cuts
+produce no suggestion. Release labels alone never establish audio quality.
+Conservative matching can omit usable pairs; it does not attempt to judge
+subjective mastering or infer different language titles refer to the same film.
+
+Choose a proposal, select writable storage and explicitly confirm the same cut
+and checked audio synchronization. Matching duration is not proof of sync;
+check beginning, middle and end. An optional fixed delay is supported, but
+speed changes, different edits and progressive drift are not repaired. There
+is no automatic deletion. Both source torrents remain protected from moving,
+checking, renaming and deletion while a job is pending; errors keep that guard
+until cancellation. Source seeding and cleanup settings remain unchanged.
+
+Mux jobs appear in the existing queue/history and copy compressed streams with
+MKVToolNix. They preserve the picture source's existing audio, subtitles,
+attachments and chapters, adding the donor track as default. Full video and
+donor-audio stream hashes, metadata checks, input fingerprints and a durable
+receipt gate atomic publication. Failed/cancelled jobs never replace either
+original. Completed combinations are not suggested again while their output
+exists. The new copy can be handed to the upload draft with both source credits.
+
+The app image already installs ffmpeg, MediaInfo and MKVToolNix. Fresh installs
+and normal MediaSeed image updates prepare `/data/mux-state` automatically;
+existing configuration, credentials, media and jobs are preserved. No GPU or
+converter-worker update is needed for muxing. Missing tools/storage yield a
+specific prerequisite. Pending metadata and mux jobs resume after restart;
+only one app mux runner writes at a time. An older app must not be used to
+process pending mux jobs: finish/cancel them before a downgrade.
+
+Validation uses synthetic transports and generated media, including actual
+stream-copy/hash verification, automatic queue publication, both-source guards,
+permissions, fresh/legacy initialization and desktop/mobile browser flows.
+It does not certify synchronization of a user's real movies or physical Atmos
+playback equipment. Tests: `tests/test_conversion_mux.py` and
+`tests/verify_mux_browser.cjs`.

@@ -59,7 +59,7 @@ class ConversionPreferences(BaseModel):
 
 
 class Conversions:
-    def __init__(self, database, qbit, storage, cleanup, queue):
+    def __init__(self, database, qbit, storage, cleanup, queue, mux_state=None):
         self.database, self.qbit, self.storage, self.cleanup = database, qbit, storage, cleanup
         self.queue = Path(queue) if queue else None
         self.lock = asyncio.Lock()
@@ -70,6 +70,8 @@ class Conversions:
             db.execute('CREATE TABLE IF NOT EXISTS media_conversion_history_hidden (id TEXT PRIMARY KEY, cleared REAL NOT NULL)')
         from mediaseed.conversion_layout import flatten_pending_library
         flatten_pending_library(self)
+        from mediaseed.conversion_mux_jobs import MuxJobs
+        self.mux = MuxJobs(self, mux_state or (self.queue/'mux' if self.queue else None))
 
     def preferences(self,owner):
         with self.database() as db:
@@ -120,7 +122,8 @@ class Conversions:
         if path.rsplit('/', 1)[-1] not in {'delete', 'setLocation', 'recheck', 'renameFile', 'renameFolder'}:
             return
         hashes = str((payload or {}).get('hashes', (payload or {}).get('hash', ''))).lower().split('|')
-        if any(j['status'] not in TERMINAL and (j['hash'] in hashes or 'all' in hashes) for j in self.records()):
+        from mediaseed.conversion_mux_jobs import source_hashes
+        if any(j['status'] not in TERMINAL and (source_hashes(j).intersection(hashes) or 'all' in hashes) for j in self.records()):
             raise HTTPException(409, 'Finish or cancel the conversion before removing, moving or checking its originals')
 
     async def read(self, endpoint, payload):
@@ -169,7 +172,8 @@ class Conversions:
             chosen = [f for f in videos if f['index'] in indexes]
             if len(indexes) != len(choice.indexes) or len(chosen) != len(indexes):
                 raise HTTPException(422, 'Choose available complete video files')
-            if any(j['hash'] == row['hash'] and j['status'] not in TERMINAL for j in self.records()):
+            from mediaseed.conversion_mux_jobs import source_hashes
+            if any(row['hash'] in source_hashes(j) and j['status'] not in TERMINAL for j in self.records()):
                 raise HTTPException(409, 'This torrent already has a conversion')
             _, destination = self.storage.directory(choice.location, choice.folder, writable=True)
             identifier = uuid.uuid4().hex
@@ -233,7 +237,8 @@ class Conversions:
         excluded=set()
         for job in jobs:
             if job['status']!='complete':
-                excluded.add(job['hash']);continue
+                from mediaseed.conversion_mux_jobs import source_hashes
+                excluded.update(source_hashes(job));continue
             # History is evidence, not proof that the converted media still exists.
             # Keep hidden/renamed real outputs excluded, but allow deleted copies
             # to appear in a later analysis without changing their old receipt.
@@ -298,36 +303,47 @@ class Conversions:
             'destination': job['destination'], 'originalsRetained': job.get('originalRemoval',{}).get('status')!='removed',
             'originalRemoval':{k:v for k,v in job.get('originalRemoval',{}).items() if k in {'status','message','requestedAt','removedAt'}},'options':options_dict(job.get('options')),
             **{k: job.get(k) for k in ('updated','started','fps','speed','etaSeconds','currentFile','worker')},
-            'cancelling': bool(self.queue and (self.queue/(job['id']+'.cancel')).exists() and job['status'] not in TERMINAL)}
+            'kind':job.get('kind','conversion'),
+            'donorName':job.get('proposal',{}).get('donor',{}).get('name'),
+            'muxAudio':job.get('proposal',{}).get('audio',{}).get('label'),
+            'cancelling': bool((queue := self.mux.queue if job.get('kind')=='mux' else self.queue) and (queue/(job['id']+'.cancel')).exists() and job['status'] not in TERMINAL)}
 
     async def tick(self):
-        if not self.queue: return
+        if not self.queue and not self.mux.queue: return
         async with self.lock:
+            try: await self.mux.tick()
+            except Exception:
+                import logging
+                logging.exception('Could not advance mux jobs; existing conversions are preserved')
             from mediaseed.conversion_layout import flatten_pending_library
             flatten_pending_library(self)
             for job in self.records():
                 if job['status'] in TERMINAL: continue
                 try:
-                    request = self.queue/(job['id']+'.request.json')
-                    if not request.exists(): atomic(request, job)
-                    status_path = self.queue/(job['id']+'.status.json')
+                    queue = self.mux.queue if job.get('kind')=='mux' else self.queue
+                    if not queue: continue
+                    if job.get('kind')!='mux':
+                        request = queue/(job['id']+'.request.json')
+                        if not request.exists(): atomic(request, job)
+                    status_path = queue/(job['id']+'.status.json')
                     if not status_path.exists(): continue
                     status = json.loads(status_path.read_text())
                     if status.get('id') != job['id']: raise ValueError('Wrong conversion identity')
                     state = status.get('state')
-                    if state not in {'encoding', 'verifying', 'ready', 'error', 'cancelled'}: continue
+                    if state not in {'encoding', 'muxing', 'verifying', 'ready', 'error', 'cancelled'}: continue
                     job.update(progress=min(100, max(0, float(status.get('progress', 0)))), status=state)
                     for key in ('updated','started','fps','speed','etaSeconds','currentFile','worker'):
                         if key in status: job[key] = status[key]
                     if state == 'error':
-                        job['error'] = {'selection':'Ingen lydspor matcher de valgte sprog. Originalen er bevaret. Vælg andre sprog eller alle lydspor.',
+                        job['error'] = {'mux':'Muxing eller kontrollen af lyd/billede fejlede. Begge originaler er bevaret. Analysér igen eller kontrollér mux-loggen.',
+                                        'selection':'Ingen lydspor matcher de valgte sprog. Originalen er bevaret. Vælg andre sprog eller alle lydspor.',
                                         'no_saving':'The converted copy is not smaller. Originals are preserved; cancel this job to release its temporary space.',
                                         'space':'Not enough working space. Originals are preserved.',
                                         'validation':'Video, HDR, audio or subtitle validation failed. Originals are preserved.'}.get(status.get('errorCode'),
                                         'Conversion failed. Originals are preserved. Check the conversion log or cancel and try again.')
                     if state == 'cancelled': job['error'] = None
                     if state == 'ready':
-                        if (self.queue/(job['id']+'.cancel')).exists(): continue
+                        if (queue/(job['id']+'.cancel')).exists(): continue
                         await self.publish(job, status)
                     self.save(job)
                 except asyncio.CancelledError:
@@ -337,6 +353,7 @@ class Conversions:
                     self.save(job)
 
     async def publish(self, job, status):
+        if job.get('kind')=='mux': await self.mux.validate_sources(job)
         row, source_root, videos, _ = await self.inspect(job['hash'])
         if row.get('added_on') != job['added'] or str(source_root) != job['source']:
             raise ValueError('Torrent changed')
@@ -367,7 +384,10 @@ class Conversions:
                 raise ValueError('Companion changed')
             if fingerprint(file_path(existing, entry.get('output', name))) != receipt.get('companionIdentities', {}).get(entry.get('output', name)):
                 raise ValueError('Companion output changed')
-        if total <= 0 or total >= job['originalBytes']: raise ValueError('Output does not save space')
+        if job.get('kind')=='mux':
+            if receipt.get('kind')!='mux' or receipt.get('proposal')!=job['proposal']['id'] or receipt.get('delayMs')!=job['delayMs'] or not receipt.get('videoHash') or not receipt.get('audioHash'):
+                raise ValueError('Missing mux evidence')
+        if total <= 0 or (job.get('kind')!='mux' and total >= job['originalBytes']): raise ValueError('Output does not save space')
         if not target.exists(): output.rename(target)
         job.update(status='complete', progress=100, outputBytes=total, error=None)
 
@@ -382,9 +402,10 @@ class Conversions:
             job = next((j for j in self.records() if j['id'] == identifier), None)
             if job is None: raise HTTPException(404, 'Conversion not found')
             if job['status'] in TERMINAL: return self.public(job)
-            if self.queue is None: raise HTTPException(409, 'Restore conversion worker configuration before cancelling this job')
-            atomic(self.queue/(identifier+'.cancel'), {'id': identifier})
-            with (self.queue/(identifier+'.lock')).open('a') as handle:
+            queue = self.mux.queue if job.get('kind')=='mux' else self.queue
+            if queue is None: raise HTTPException(409, 'Restore conversion worker configuration before cancelling this job')
+            atomic(queue/(identifier+'.cancel'), {'id': identifier})
+            with (queue/(identifier+'.lock')).open('a') as handle:
                 try: fcntl.flock(handle, fcntl.LOCK_EX|fcntl.LOCK_NB)
                 except BlockingIOError: return {'accepted': True}
                 work = Path(job['work'])
@@ -397,8 +418,10 @@ class Conversions:
             return self.public(job)
 
 
-def install_conversions(app, authorized, database, qbit, storage, cleanup, queue):
-    manager = Conversions(database, qbit, storage, cleanup, queue)
+def install_conversions(app, authorized, database, qbit, storage, cleanup, queue, mux_state=None):
+    manager = Conversions(database, qbit, storage, cleanup, queue, mux_state)
+    from mediaseed.conversion_mux_jobs import install_routes
+    install_routes(app, authorized, manager.mux)
     app.state.conversions = manager
     from mediaseed.conversion_originals import OriginalRemoval,RemoveOriginal
     originals=OriginalRemoval(manager);app.state.conversion_originals=originals

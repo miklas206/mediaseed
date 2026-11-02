@@ -157,7 +157,7 @@ class UploaderBridge:
         title=Path(files[0]).stem
         source='BluRay' if re.search(r'(?i)blu[ ._-]?ray',job['name']) else 'WEB-DL' if 'WEB-DL' in job['name'] else 'Other'
         if source!='Other':title=re.sub(r'(?i)(\.H265\.)','.'+source+r'\1',title)
-        return {'location':config.get('converted_location','library'),'folder':folder,'files':[Path(n).name for n in files],'title':title,'tmdb':meta.get('tmdb_id'),'source_type':source,'source_credit':'Converted with NVIDIA HEVC by MDTech. Original source: '+job['name'],'reviewOnly':True}
+        return {'location':config.get('converted_location','library'),'folder':folder,'files':[Path(n).name for n in files],'title':title,'tmdb':meta.get('tmdb_id'),'source_type':source,'source_credit':('Muxed without re-encoding by MDTech. Picture source: '+job['name']+'. Audio source: '+job['proposal']['donor']['name']) if job.get('kind')=='mux' else 'Converted with NVIDIA HEVC by MDTech. Original source: '+job['name'],'reviewOnly':True}
 
     def mapped_paths(self,value):
         if isinstance(value,list):return [self.mapped_paths(v) for v in value]

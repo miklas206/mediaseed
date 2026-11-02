@@ -253,6 +253,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
                 await worker
         if hasattr(app.state,"tracker_reads"):
             await app.state.tracker_reads.close()
+        await conversion_manager.mux.close()
         await app.state.native_uploader.stop()
         if hasattr(app.state,"uploader_bridge"):
             await app.state.uploader_bridge.close()
@@ -411,7 +412,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     @app.get("/healthz")
     def health():
-        return {"status": "healthy", "version": "0.1.42"}
+        return {"status": "healthy", "version": "0.1.43"}
 
     @app.get("/api/auth/status")
     async def status(request: Request):
@@ -846,7 +847,7 @@ def create_app(data_dir=None, base_url=None, qbit_url=None, qbit_password=None, 
 
     from mediaseed.conversion import install_conversions
     conversion_manager = install_conversions(app, authorized, database, qbit, storage_catalog, cleanup,
-                                             os.environ.get("MEDIASEED_CONVERSION_QUEUE"))
+                                             os.environ.get("MEDIASEED_CONVERSION_QUEUE"), data/"mux-state")
 
     background = install_features(app, authorized, database, qbit, vpn_status=vpn_status, data_dir=data, cleanup=cleanup, credit=credit, storage=storage_catalog)
 

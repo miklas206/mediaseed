@@ -11,7 +11,7 @@
  if(icon)icon.innerHTML='<path d="M4 8h12l-3-3m7 11H8l3 3M20 8v3M4 16v-3"/>';
  const $=id=>document.getElementById(id), selected=new Map();
  let running=false,timer,selectionVersion=0,lastAdvice='';
- const phase={queued:'I kø',encoding:'Konverterer',verifying:'Kontrollerer',ready:'Publicerer',complete:'Færdig',cancelled:'Annulleret',error:'Kræver kontrol'};
+ const phase={queued:'I kø',encoding:'Konverterer',muxing:'Muxer',verifying:'Kontrollerer',ready:'Publicerer',complete:'Færdig',cancelled:'Annulleret',error:'Kræver kontrol'};
  const btn=(label,action)=>{const b=element('button',label);b.type='button';b.onclick=action;return b;};
  const mutate=()=>typeof appRole!=='undefined'&&appRole!=='viewer';
  const duration=v=>v==null?'—':v>=3600?Math.floor(v/3600)+' t '+Math.round(v%3600/60)+' min':Math.max(1,Math.round(v/60))+' min';
@@ -42,21 +42,22 @@
  function jobCard(job){
   const card=element('article',undefined,'conversion-job');card.dataset.job=job.id;
   card.append(element('h3',job.name));
-  card.append(element('p',(job.cancelling?'Annullerer…':phase[job.status]||job.status)+' · '+job.bitrate+' Mbit/s · '+job.fileCount+' videoer'+(job.queuePosition?' · Plads '+job.queuePosition+' i køen':'')));
-  if(['encoding','verifying','ready'].includes(job.status)){
+  card.append(element('p',(job.cancelling?'Annullerer…':phase[job.status]||job.status)+(job.kind==='mux'?' · Mux uden genkodning · 1 video':' · '+job.bitrate+' Mbit/s · '+job.fileCount+' videoer')+(job.queuePosition?' · Plads '+job.queuePosition+' i køen':'')));
+  if(['encoding','muxing','verifying','ready'].includes(job.status)){
    const progress=element('progress');progress.max=100;progress.value=Number(job.progress)||0;progress.setAttribute('aria-label','Konverteringsfremdrift');
    card.append(progress,element('p',Math.round(job.progress||0)+' % · '+(job.worker||'Server · NVIDIA')+(job.fps?' · '+job.fps+' fps':'')+(job.etaSeconds!=null?' · ca. '+duration(job.etaSeconds)+' tilbage på denne video':'')));
    if(job.currentFile)card.append(element('p',job.currentFile,'conversion-path muted'));
    if(job.updated&&Date.now()/1000-job.updated>30)card.append(element('p','Status er ikke opdateret for nylig. Kontrollér serverforbindelsen.','muted'));
   }
-  card.append(element('p',MediaSeedConversionOptions.summary(job.options),'muted'));
+  if(job.kind==='mux')card.append(element('p','Lyd: '+job.muxAudio+' · Fra: '+job.donorName,'conversion-path muted'));
+  else card.append(element('p',MediaSeedConversionOptions.summary(job.options),'muted'));
   card.append(element('p',job.destination,'conversion-path muted'));
   if(job.status==='complete'&&mutate()){
    const actions=element('div',undefined,'conversion-job-actions');actions.append(btn('Klargør upload',()=>window.dispatchEvent(new CustomEvent('uploader-open',{detail:{conversion:job.id}}))));
-   if(!['pending','removed'].includes(job.originalRemoval?.status)){const remove=btn('Fjern original',()=>removeOriginal(job));remove.className='danger';actions.append(remove);}card.append(actions);
+   if(job.kind!=='mux'&&!['pending','removed'].includes(job.originalRemoval?.status)){const remove=btn('Fjern original',()=>removeOriginal(job));remove.className='danger';actions.append(remove);}card.append(actions);
   }
   if(job.originalRemoval?.message)card.append(element('p',job.originalRemoval.message,job.originalRemoval.status==='removed'?'conversion-saving':'muted'));
-  if(job.status==='complete')card.append(element('p',(job.originalRemoval?.status==='removed'?'Besparelse i forhold til original: ':'Mulig besparelse efter fjernelse af original: ')+bytes(job.potentialSavingBytes),'conversion-saving'));
+  if(job.status==='complete'&&job.kind!=='mux')card.append(element('p',(job.originalRemoval?.status==='removed'?'Besparelse i forhold til original: ':'Mulig besparelse efter fjernelse af original: ')+bytes(job.potentialSavingBytes),'conversion-saving'));
   if(job.error)card.append(element('p',job.error,'error'));
   if(mutate()&&!['complete','cancelled'].includes(job.status)){
    const cancel=btn('Annullér',async()=>{cancel.disabled=true;try{await api('conversions/'+job.id+'/cancel',{});await refresh();}catch(e){notify(e);cancel.disabled=false;}});
@@ -67,14 +68,14 @@
  function jobs(result){
   const rows=result.jobs||[];
   $('conversion-page-state').textContent=result.ready?'Server · NVIDIA HEVC er klar':result.reason||'Konverteringsarbejderen er ikke klar';
-  const active=rows.filter(j=>['encoding','verifying','ready'].includes(j.status)),queued=rows.filter(j=>j.status==='queued').sort((a,b)=>a.queuePosition-b.queuePosition);
+  const active=rows.filter(j=>['encoding','muxing','verifying','ready'].includes(j.status)),queued=rows.filter(j=>j.status==='queued').sort((a,b)=>a.queuePosition-b.queuePosition);
   const finished=rows.filter(j=>!active.includes(j)&&!queued.includes(j));
   let clear=$('conversion-clear-history');
   if(!clear){const tools=element('div',undefined,'conversion-history-tools'),message=element('p','Mediefilerne bevares.','muted');message.id='conversion-history-state';message.setAttribute('role','status');clear=btn('Ryd historik',async()=>{clear.disabled=true;try{const result=await api('conversions/history/clear',{});await refresh();message.textContent=result.cleared+' poster fjernet fra historikken. Mediefilerne er bevaret.';}catch(e){notify(e);clear.disabled=false;}});clear.id='conversion-clear-history';tools.append(clear,message);$('conversion-completed').before(tools);}
   clear.hidden=!mutate();clear.disabled=!finished.length;
 
   $('conversion-summary').replaceChildren();
-  for(const [caption,value] of [['Aktive',active.length],['I kø',queued.length],['Færdige i historikken',rows.filter(j=>j.status==='complete').length],['Mulig besparelse',bytes(rows.filter(j=>j.status==='complete').reduce((n,j)=>n+(j.potentialSavingBytes||0),0))]]){
+  for(const [caption,value] of [['Aktive',active.length],['I kø',queued.length],['Færdige i historikken',rows.filter(j=>j.status==='complete').length],['Mulig besparelse',bytes(rows.filter(j=>j.status==='complete'&&j.kind!=='mux').reduce((n,j)=>n+(j.potentialSavingBytes||0),0))]]){
    const tile=element('div',undefined,'workspace-card');tile.append(element('span',caption,'muted'),element('strong',String(value)));$('conversion-summary').append(tile);
   }
   for(const [id,list,empty] of [['conversion-active',active,'Ingen aktiv konvertering.'],['conversion-queue',queued,'Køen er tom. Vælg en anbefaling eller Konvertér video i torrentmenuen.'],['conversion-completed',finished,'Ingen historik endnu.']])$(id).replaceChildren(...(list.length?list.map(jobCard):[element('p',empty,'muted')]));

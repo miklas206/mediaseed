@@ -14,3 +14,5 @@
 #conversions .conversion-panel>summary:focus-visible{outline:2px solid var(--accent,#edc46c);outline-offset:4px;border-radius:4px}
 .conversion-panel-action{margin-left:auto;font-size:.85rem;font-weight:400;color:var(--muted,#9aafbd);white-space:nowrap}
 .conversion-panel:not([open]) .when-open,.conversion-panel[open] .when-closed{display:none}
+
+.conversion-mux-dialog .conversion-remove-confirm{display:flex;align-items:flex-start;gap:.7rem}.conversion-mux-dialog .conversion-remove-confirm input{width:auto;flex:none;margin-top:.3rem}

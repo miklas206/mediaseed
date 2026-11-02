@@ -22,6 +22,7 @@ const origin = process.env.MEDIASEED_TEST_ORIGIN || 'http://127.0.0.1:15392';
     else data={ready:true,capabilities:['conversion-options-v1'],jobs:queued?[{id:'synthetic-job',name:'Synthetic conversion',status:'complete',bitrate:20,fileCount:1,destination:'/media/tv/HEVC/Synthetic.mkv',potentialSavingBytes:1000000000}]:[]};
    }
    if(path==='/api/conversions'&&req.method()==='GET')data.jobs.push({id:'active',name:'Aktiv testfilm',status:'encoding',bitrate:30,fileCount:1,progress:62,fps:42,etaSeconds:400,currentFile:'Synthetic.mkv',destination:'/synthetic/Konverteret',updated:Date.now()/1000},{id:'waiting',name:'Ventende testfilm',status:'queued',bitrate:30,fileCount:1,queuePosition:1,destination:'/synthetic/Konverteret'});
+   if(path==='/api/conversions/mux/recommendations')data={ready:true,rows:[],scanned:false,total:0,pending:0,errors:0};
    if(path==='/api/conversions/analyze')data={accepted:true,files:2};
    if(path==='/api/conversions/recommendations')data={scanned:true,total:2,pending:0,rows:bulkQueued?[]:[0,1].map(index=>({hash:rows[2].hash,index,title:'Synthetic recommendation',name:'Synthetic.Part'+index+'.mkv',originalBytes:60e9,estimatedBytes:30e9,savingBytes:30e9,savingLowBytes:25e9,savingHighBytes:35e9,currentMbps:80,targetMbps:30,codec:'hevc',recommended:true}))};
    if(path.startsWith('/api/conversions/torrents/'))data={name:'Synthetic conversion',files:[{index:0,name:'Synthetic movie.mkv',size:24000000000}],storage:{location:'local',folder:'OriginalRelease'},destinationStorage:{location:'local',folder:''}};
