@@ -112,7 +112,7 @@ const origin = process.env.MEDIASEED_TEST_ORIGIN || 'http://127.0.0.1:15392';
   await page.locator('#conversion-active progress').waitFor();
   assert.equal(await page.locator('#conversion-active progress').getAttribute('value'),'62');
   await page.locator('#conversion-queue').getByText(/Plads 1 i køen/).waitFor();
-  await page.locator('#conversions details summary').click();
+  await page.locator('#conversion-history-panel > summary').click();
   await page.locator('#conversion-completed').getByText('Færdig · 20 Mbit/s · 1 videoer',{exact:true}).waitFor();
   assert.equal(await page.locator('#conversion-recommendations .conversion-advice-row').count(),2);
   await page.locator('#conversion-analyze').click();

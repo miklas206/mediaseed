@@ -1,6 +1,12 @@
 /* Server-only conversion workspace. Writes require explicit user actions. */
 (() => {
  const page=document.querySelector('#conversions');if(!page)return;
+ // Keep each section independent, including across page reloads and status polling.
+ for(const panel of page.querySelectorAll('.conversion-panel')){
+  const key='mediaseed.'+panel.id+'.open';
+  try{const saved=localStorage.getItem(key);if(saved!==null)panel.open=saved==='true';}catch{}
+  panel.addEventListener('toggle',()=>{try{localStorage.setItem(key,String(panel.open));}catch{}});
+ }
  const icon=document.querySelector('[data-view=conversions] .app-nav-icon svg');
  if(icon)icon.innerHTML='<path d="M4 8h12l-3-3m7 11H8l3 3M20 8v3M4 16v-3"/>';
  const $=id=>document.getElementById(id), selected=new Map();

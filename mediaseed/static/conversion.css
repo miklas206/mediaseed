@@ -5,3 +5,12 @@
 .media-conversion-dialog .conversion-options{max-height:none;overflow:visible;display:grid;gap:1rem;min-width:0}.conversion-options>label:not(.conversion-option-check){display:grid;gap:.4rem}.media-conversion-dialog .conversion-option-check{display:flex;align-items:flex-start;gap:.7rem}.conversion-option-check input{width:auto;flex:none;margin-top:.3rem}.conversion-options p{margin:0;overflow-wrap:anywhere}.conversion-options [hidden]{display:none}.conversion-options select,.conversion-options input:not([type=checkbox]){width:100%;min-width:0}
 
 .conversion-job-actions{display:flex;gap:.75rem;flex-wrap:wrap;align-items:center}.conversion-remove-dialog .conversion-remove-confirm{display:flex;gap:.7rem;align-items:flex-start}.conversion-remove-confirm input{width:auto;flex:none;margin-top:.3rem}.conversion-remove-dialog li{overflow-wrap:anywhere}.conversion-remove-dialog form{margin:1rem 0}.conversion-remove-dialog .danger,.conversion-job-actions .danger{color:var(--danger,#f1a0a0);border-color:currentColor}.conversion-remove-dialog>button{margin-top:1rem}
+
+#conversions .conversion-panel>summary{display:flex;align-items:center;gap:.75rem;min-height:44px;list-style:none;font-size:1.1rem}
+#conversions .conversion-panel>summary::-webkit-details-marker{display:none}
+#conversions .conversion-panel>summary::before{content:"›";font-size:1.5rem;line-height:1;flex:none}
+#conversions .conversion-panel[open]>summary::before{transform:rotate(90deg)}
+#conversions .conversion-panel[open]>summary{margin-bottom:1rem}
+#conversions .conversion-panel>summary:focus-visible{outline:2px solid var(--accent,#edc46c);outline-offset:4px;border-radius:4px}
+.conversion-panel-action{margin-left:auto;font-size:.85rem;font-weight:400;color:var(--muted,#9aafbd);white-space:nowrap}
+.conversion-panel:not([open]) .when-open,.conversion-panel[open] .when-closed{display:none}
