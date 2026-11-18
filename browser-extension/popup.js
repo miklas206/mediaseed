@@ -17,7 +17,7 @@ async function refresh() {
 async function run(action) {
   if (busy) return;
   busy = true;
-  const controls = [$('save'), $('resume'), $('clear')]; controls.forEach(button => button.disabled = true);
+  const controls = [...document.querySelectorAll('button,input[type=file]')]; controls.forEach(button => button.disabled = true);
   try { await action(); await refresh(); }
   catch (error) { status(error.message, true); }
   finally { busy = false; controls.forEach(button => button.disabled = false); }
@@ -44,9 +44,29 @@ $('clear').onclick = () => run(() => message({type: 'clear'}));
 async function initialize() {
   const config = await api.storage.local.get('origin');
   $('origin').value = config.origin || '';
-  if (config.origin) status('Forbundet. Højreklik på et RSS- eller torrentlink → Send til MediaSeed.');
+  if (config.origin) status('Forbundet. Vælg et link eller en torrentfil, og send til MediaSeed.');
   await refresh();
 }
 initialize().catch(error => status(error.message, true));
 
 $('open-app').onclick = () => run(() => message({type: 'open'}));
+
+$('scan-links').onclick=()=>run(async()=>{
+  const result=await message({type:'page-links'});$('page-links').replaceChildren();
+  for(const item of result.links){
+    const button=document.createElement('button');button.type='button';button.textContent=item.label+' · '+item.host;
+    button.onclick=()=>run(()=>message({type:'send-source',url:item.url,tabId:result.tabId}));$('page-links').append(button);
+  }
+  status(result.links.length?'Vælg det link, du vil åbne i MediaSeed.':'Ingen downloadlinks fundet. Indsæt linket, eller vælg en torrentfil nedenfor.');
+});
+$('send-source').onsubmit=event=>{event.preventDefault();return run(async()=>{
+  const value=$('source-link').value.trim(),item=MS.sourceLink(value);
+  if(item.kind==='link'&&!await api.permissions.request({origins:[MS.pattern(new URL(item.url).origin)]}))throw Error('Giv adgang til trackerens hjemmeside for at hente torrentfilen.');
+  await message({type:'send-source',url:value});$('source-link').value='';
+});};
+$('source-file').onchange=()=>run(async()=>{
+  const file=$('source-file').files[0];if(!file)return;
+  if(file.size>MS.MAX_FILE)throw Error('Torrentfilen må højst fylde 4 MiB.');
+  const bytes=new Uint8Array(await file.arrayBuffer());MS.file(file.name,bytes);
+  await message({type:'send-file',name:file.name,base64:MS.encode(bytes),transferId:crypto.randomUUID()});$('source-file').value='';
+});

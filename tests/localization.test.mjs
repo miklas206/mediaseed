@@ -10,7 +10,7 @@ test('account language translates static text, attributes and title reversibly w
   const detached = {nodeValue: 'Gem', isConnected: true};
   const attribute = {isConnected: true, values: {placeholder: 'Brugernavn'}, hasAttribute(k) {return k in this.values;}, getAttribute(k) {return this.values[k];}, setAttribute(k,v) {this.values[k] = v;}};
   const nodes = [label, detached]; let index = 0;
-  const document = {title: 'MediaSeed', documentElement: {}, body: {}, createTreeWalker: () => ({nextNode: () => nodes[index++]}), querySelectorAll: () => [attribute]};
+  const document = {title: 'MediaSeed', documentElement: {}, body: {querySelectorAll: () => [attribute]}, createTreeWalker: () => ({nextNode: () => nodes[index++]}), querySelectorAll: () => [attribute]};
   const context = vm.createContext({document}); vm.runInContext(source, context);
   const {t, setLanguage, locale} = context.MediaAppI18n;
   detached.isConnected = false; detached.nodeValue = 'User.File.S01E01.mkv';

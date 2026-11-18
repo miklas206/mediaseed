@@ -14,6 +14,9 @@ def package(browser):
     manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
     if browser != "chromium":
         manifest["background"] = {"scripts": ["i18n.js", "common.js", "bridge.js", "background.js"]}
+    if browser == "safari":
+        manifest["permissions"].remove("contextMenus")
+        manifest["background"]["persistent"] = False
     if browser == "firefox":
         manifest["browser_specific_settings"] = {"gecko": {
             "id": "mediaseed@mediahub.local", "strict_min_version": "140.0",

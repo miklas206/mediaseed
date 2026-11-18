@@ -1,5 +1,9 @@
 # MediaSeed
 
+## 0.1.44 · Sprog i upload og browserudvidelse
+
+Uploadformularen bruger kontoens sprog, også når formularen åbnes efter login. Udvidelse 1.6.1 og dens installationsside har nye engelske og danske tekster. Filnavne og andet brugerindhold bevarer deres oprindelige tekst.
+
 ## 0.1.31 - NAS og lokal disk samtidig
 
 NAS-placeringer fra MediaHub accepterer nu den afgrænsede `files`-undermappe.

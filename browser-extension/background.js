@@ -47,7 +47,7 @@ async function destination() {
 async function openDestination(origin, preferredId) {
   const existing = MS.selectSeedTab(await api.tabs.query({}), origin, preferredId);
   const tab = existing ? await api.tabs.update(existing.id, {active: true}) : await api.tabs.create({url: origin + '/', active: true});
-  if (tab.windowId !== undefined) await api.windows?.update(tab.windowId, {focused: true});
+  if (tab.windowId !== undefined) await api.windows?.update?.(tab.windowId, {focused: true}).catch(() => {});
   return tab;
 }
 async function deliver(tabId) {
@@ -135,6 +135,7 @@ async function resume() {
   } finally { working = false; }
 }
 api.runtime.onInstalled.addListener(async () => {
+  if(!api.contextMenus?.create)return;
   await api.contextMenus.removeAll();
   api.contextMenus.create({id: 'mediaseed-add', title: 'Send til MediaSeed', contexts: ['link']});
 });
@@ -148,7 +149,7 @@ function queueContext(info, tab) {
     .catch(error => report(error.message, true).catch(() => {}))
     .finally(() => { contextCount--; });
 }
-api.contextMenus.onClicked.addListener(queueContext);
+api.contextMenus?.onClicked?.addListener(queueContext);
 api.tabs.onUpdated.addListener((id, change) => {
   if (change.status === 'complete') deliver(id).catch(() => report('Linket venter. Åbn udvidelsen og tryk Fortsæt.', true).catch(() => {}));
 });
@@ -161,6 +162,17 @@ async function handle(message, sender) {
   }
   if (message.type === 'batch-window') {
     await openDestination(await destination()); return {ok: true};
+  }
+  if (message.type === 'page-links') {
+    const [tab] = await api.tabs.query({active: true, currentWindow: true});
+    if (!tab?.id || !/^https?:/.test(tab.url || '')) throw Error('Åbn en trackerside og vælg MediaSeed igen.');
+    const results = await api.scripting.executeScript({target: {tabId: tab.id}, func: mediaSeedPageLinks});
+    return {tabId: tab.id, links: results[0]?.result || []};
+  }
+  if (message.type === 'send-source') {
+    const item = MS.sourceLink(String(message.url || '').trim());
+    const source = Number.isInteger(message.tabId) ? await api.tabs.get(message.tabId).catch(() => null) : null;
+    return begin(item, source);
   }
   if (message.type === 'send-file') return begin({kind: 'file', name: message.name, base64: message.base64, transferId: message.transferId});
   if (message.type === 'send-link') {

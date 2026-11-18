@@ -30,9 +30,12 @@ def test_extension_packages_match_source_and_are_served(tmp_path):
                 manifest = json.loads(archive.read("manifest.json"))
                 assert manifest["manifest_version"] == 3
                 assert "host_permissions" not in manifest
-                assert set(manifest["permissions"]) == {"storage", "contextMenus", "scripting", "activeTab"}
+                expected_permissions = {"storage", "scripting", "activeTab"}
+                if browser != "safari":
+                    expected_permissions.add("contextMenus")
+                assert set(manifest["permissions"]) == expected_permissions
                 assert "externally_connectable" not in manifest
-                assert manifest["version"] == "1.5.1"
+                assert manifest["version"] == json.loads((root / "browser-extension/manifest.json").read_text())["version"]
                 assert manifest["action"]["default_icon"] == manifest["icons"]
                 for size in (16, 32, 48, 128):
                     import struct

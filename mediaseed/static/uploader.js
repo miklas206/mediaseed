@@ -13,6 +13,7 @@
    status.textContent='Åbner upload…';
    const response=await fetch('/static/upload-workspace.html');if(!response.ok)throw Error('Uploadformularen kunne ikke hentes. Genindlæs MediaSeed.');
    const root=document.getElementById('uploader-workspace');root.innerHTML=await response.text();
+   window.MediaAppI18n.captureTemplate(root);
    const {default:initialize}=await import('/static/upload-workspace.js?v=09d1e010be48');await initialize(root);
    initialized=true;status.textContent='Gennemgå oplysningerne og dubletkontrollen før publicering.';
   }catch(e){status.textContent=e.message;}finally{loading=null;}})();

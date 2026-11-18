@@ -82,3 +82,22 @@ async function mediaSeedReadFile(value, requireSameOrigin = true) {
   title = [...title].slice(0, 100).join('') || 'download';
   return {base64: btoa(text), name: title + '.torrent'};
 }
+
+/* Runs only after the user opens the extension and asks to inspect this page. */
+function mediaSeedPageLinks() {
+  const rows=[],seen=new Set();
+  for(const anchor of document.querySelectorAll('a[href]')){
+    if(rows.length>=100)break;
+    let url;try{url=new URL(anchor.href,location.href);}catch{continue;}
+    if(url.username||url.password||url.href.length>8192)continue;
+    const magnet=url.protocol==='magnet:';
+    if(!magnet&&!['http:','https:'].includes(url.protocol))continue;
+    if(!magnet&&!/(?:\.(?:torrent|rss|xml|atom)$|\/(?:download(?:\.php)?|rss(?:\.php)?|feed|feeds)(?:\/|$))/i.test(url.pathname))continue;
+    if(/\/(?:create|edit|delete|manage)(?:\/|$)/i.test(url.pathname)||seen.has(url.href))continue;
+    seen.add(url.href);
+    const text=(anchor.textContent||anchor.getAttribute('title')||'').trim().replace(/\s+/g,' ');
+    // Never use a private URL or its query string as the visible label.
+    rows.push({url:url.href,label:(!/https?:\/\/|magnet:|passkey|token=/i.test(text)&&text?text:'Link '+(rows.length+1)).slice(0,160),host:magnet?'Magnetlink':url.hostname});
+  }
+  return rows;
+}

@@ -114,7 +114,7 @@ test('setup has only an address and pending controls, with grants requested befo
  const html=file('popup.html');assert.doesNotMatch(html,/id="(?:settings|cleanup-mode|add-default|magnet|file|enable)"/);assert.match(file('popup.css'),/width:560px/);
  const nodes=new Map(),requests=[],local={origin:'https://seed.example',defaults:{start:true}},state={pending:null};
  const node=id=>{if(!nodes.has(id))nodes.set(id,{value:'',dataset:{}});return nodes.get(id);};
- const c=context({location:{hash:''},document:{getElementById:node},chrome:{storage:{local:{get:async()=>local,set:async value=>{requests.push('save');Object.assign(local,value);}}},permissions:{request:async value=>{requests.push(value.origins);return true;}},runtime:{sendMessage:async value=>{requests.push(value.type);return value.type==='state'?state:{ok:true};}}}});
+ const c=context({location:{hash:''},document:{getElementById:node,querySelectorAll:()=>[]},chrome:{storage:{local:{get:async()=>local,set:async value=>{requests.push('save');Object.assign(local,value);}}},permissions:{request:async value=>{requests.push(value.origins);return true;}},runtime:{sendMessage:async value=>{requests.push(value.type);return value.type==='state'?state:{ok:true};}}}});
  vm.runInContext(file('popup.js'),c);await settled();assert.equal(node('origin').value,'https://seed.example');
  node('origin').value='https://new.example:18800';await node('connect').onsubmit({preventDefault(){}});
  assert.equal(local.origin,'https://new.example:18800');assert.equal(local.defaults.start,true);assert.ok(requests.indexOf('save')>requests.findIndex(x=>Array.isArray(x)));assert.ok(requests.includes('open'));

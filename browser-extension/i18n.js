@@ -796,7 +796,27 @@ const messages = {
   "Error": "Fejl",
   "Unknown": "Ukendt",
   "Country": "Land",
-  "Save": "Gem"
+  "Save": "Gem",
+  ". The extension opens MediaSeed and shows the relevant settings.": ". Udvidelsen åbner din MediaSeed og viser de rigtige indstillinger dér.",
+  "BROWSER EXTENSION": "BROWSERUDVIDELSE",
+  "Use the address you normally open in your browser. Sign in to MediaSeed as usual.": "Brug samme adresse som i browseren. Du logger ind normalt på MediaSeed.",
+  "Your MediaSeed address": "Din MediaSeed-adresse",
+  "A link is waiting": "Et link venter",
+  "Continue in MediaSeed": "Fortsæt i MediaSeed",
+  "Save the address once to get started.": "Gem adressen én gang for at komme i gang.",
+  "Save and open MediaSeed": "Gem og åbn MediaSeed",
+  "Right-click a torrent or RSS link, then select": "Højreklik på et torrent- eller RSS-link, og vælg",
+  "MediaSeed 1.6.1 · Choose the folder, start or pause state and cleanup in MediaSeed.": "MediaSeed 1.6.1 · Mappe, start/pause og oprydning vælges i MediaSeed.",
+  "Clear link": "Ryd link",
+  "To send several torrents, right-click each download link and choose Send to MediaSeed. The files appear together in MediaSeed, where you can choose a folder and start them.": "Send flere torrents ved at højreklikke på downloadlinkene og vælge Send til MediaSeed. Filerne samles direkte i MediaSeeds åbne tilføjelsesvindue, hvor du vælger mappe og starter dem.",
+  "Send to MediaSeed": "Send til MediaSeed",
+  "Find links on this page": "Find links på siden",
+  "Paste a link or select a file": "Indsæt link eller vælg fil",
+  "On iPhone, open MediaSeed from the Safari menu and select a link here.": "På iPhone: Åbn MediaSeed fra Safaris sidemenu, og vælg et link her.",
+  "Send from this page": "Send fra denne side",
+  "Send link to MediaSeed": "Send link til MediaSeed",
+  "Torrent, magnet or RSS link": "Torrent-, magnet- eller RSS-link",
+  "Torrent file from Files": "Torrentfil fra Filer"
 };
 
 globalThis.MediaAppI18n = (() => {

@@ -24,6 +24,10 @@ test('cleanup choices expose the correct goals and send file-removal intent expl
   assert.equal(new URL(uploads.at(-1).url, 'https://synthetic.example').searchParams.get('ratio'), '1');
 });
 
+function jsonReply(payload, status = 200) {
+  return {ok: status >= 200 && status < 300, status, json: async () => payload, text: async () => JSON.stringify(payload)};
+}
+
 function setup() {
   const nodes = new Map(), listeners = new Map(), uploads = [];
   const create = () => {
@@ -47,11 +51,12 @@ function setup() {
     URLSearchParams,
     Option: function(text, value) {this.textContent = text; this.value = value;},
     MediaAppTheme: {setOverrideHandler() {}, applyIdentity() {}}, window: {addEventListener() {}},
-    setInterval() {}, setTimeout() {}, clearTimeout() {},
+    setInterval() {}, setTimeout(callback, delay) {if ([500, 1000, 2000].includes(delay)) queueMicrotask(callback);}, clearTimeout() {},
     fetch: async (url, options) => {
       if (url === '/api/storage') return {ok: true, json: async () => ({locations: [{id: 'local', label: 'Local downloads', available: true, writable: true, freeBytes: 2000, totalBytes: 3000}], defaultLocation: 'local'})};
       if (url.startsWith('/api/storage/folders')) return {ok: true, json: async () => ({folders: [], writable: true})};
-      if (url.startsWith('/api/torrents/upload')) uploads.push({url, ...options});
+      if (url.startsWith('/api/torrent-import-status?')) return jsonReply({present: false, pending: false});
+      if (url.startsWith('/api/torrents/upload')) {uploads.push({url, ...options}); return jsonReply({added: true});}
       return {ok: true, json: async () => ({needsSetup: true})};
     },
   });
@@ -132,7 +137,7 @@ for (const source of ['file', 'magnet']) for (const action of ['start', 'pause']
     const original = context.fetch;
     let release;
     context.fetch = (url, options) => url.startsWith('/api/torrents')
-      ? new Promise(resolve => {release = () => resolve({ok: true, json: async () => ({startRequested: action === 'start'})});})
+      ? new Promise(resolve => {release = () => resolve(jsonReply({startRequested: action === 'start'}));})
       : original(url, options);
     const submitted = form.onsubmit({preventDefault() {}, submitter: {value: action}});
     assert.equal(find('#add-torrent').open, false);
@@ -140,6 +145,7 @@ for (const source of ['file', 'magnet']) for (const action of ['start', 'pause']
     assert.equal(find('#new-torrent').disabled, true);
     context.openAdd();
     assert.equal(find('#add-torrent').open, false);
+    await new Promise(resolve => setImmediate(resolve));
     release(); await submitted;
     assert.equal(vm.runInContext('addingTorrent', context), false);
     assert.equal(Boolean(find('#new-torrent').disabled), false);
@@ -293,7 +299,7 @@ test('one rejection does not stop a batch and reopening preserves only unsuccess
   const original = context.fetch; let reject = true;
   context.fetch = async (url, options) => {
     const response = await original(url, options);
-    if (url.includes('filename=Bad.torrent') && reject) return {ok:false,status:422,json:async()=>({detail:'Invalid torrent file'})};
+    if (url.includes('filename=Bad.torrent') && reject) return jsonReply({detail:'Invalid torrent file'}, 422);
     return response;
   };
   drag('drop', [torrent('Good.torrent'), torrent('Bad.torrent'), torrent('Last.torrent')]);
@@ -323,7 +329,7 @@ test('mixed selections retain valid files and enforce file count and aggregate l
 });
 
 
-test('lost acknowledgement is not retried automatically and does not stop later files', async () => {
+test('lost acknowledgement pauses the remaining batch without resending the file', async () => {
   const {context, drag, form, uploads} = setup();
   const original = context.fetch;
   context.fetch = async (url, options) => {
@@ -333,9 +339,9 @@ test('lost acknowledgement is not retried automatically and does not stop later 
   };
   drag('drop', [torrent('Uncertain.torrent'),torrent('Next.torrent')]);
   await form.onsubmit({preventDefault() {}});
-  assert.equal(uploads.length, 2);
-  assert.equal(vm.runInContext('torrentFiles[0].state',context),'error');
-  assert.equal(vm.runInContext('torrentFiles[1].state',context),'added');
+  assert.equal(uploads.length, 1);
+  assert.equal(vm.runInContext('torrentFiles[0].state',context),'unconfirmed');
+  assert.equal(vm.runInContext('torrentFiles[1].state',context),'pending');
 });
 
 test('ratio display and sorting retain verified credit while stale reads fail goal checks', () => {
