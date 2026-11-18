@@ -41,7 +41,7 @@
   };
   const feedHelp=element('p',t('Seeding rules apply to new downloads from this feed. Existing torrents keep their settings.'),'muted');
   const first=[...feed.children].filter(node=>node!==feedRatio&&!node.classList.contains('actions'));
-  MediaWizard({form:feed,dialog:feedDialog,titles:['Feed and filters','Seeding and files'],groups:[first,[cleanupCopy,feedHelp]]});
+  MediaWizard({form:feed,dialog:feedDialog,titles:['Feed and folder','Seeding and files'],groups:[first,[cleanupCopy,feedHelp]]});
   cleanupCopy.onchange=updatePolicy;
   globalThis.MediaSeedFeedPolicy={value:policy,load:value=>{value=value||{};for(const [key,defaultValue] of [['mode','never'],['hours',50],['ratio',1],['action','torrent']])document.querySelector('#feed-cleanup-'+key).value=key==='action'?(value.delete_files?'files':'torrent'):(value[key]??defaultValue);updatePolicy();}};
   feed.addEventListener('reset',()=>MediaSeedFeedPolicy.load()); updatePolicy();

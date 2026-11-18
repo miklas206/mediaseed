@@ -1,6 +1,14 @@
 // Account language; English source keys and Danish translations.
 (() => {
 const messages = {
+  "Tracker saved.": "Trackeren er gemt.",
+  "Feed saved.": "Feedet er gemt.",
+  "Edit feed": "Redigér feed",
+  "Edit tracker": "Redigér tracker",
+  "Advanced filters": "Avancerede filtre",
+  "View VPN connection": "Vis VPN-forbindelse",
+  "Feed and folder": "Feed og mappe",
+  "New feeds are saved paused. Enable a feed when your VPN is verified.": "Nye feeds gemmes på pause. Aktivér et feed, når din VPN-forbindelse er verificeret.",
   "Connections and queue": "Forbindelser og kø",
   "Connections in total": "Forbindelser i alt",
   "Connections per torrent": "Forbindelser pr. torrent",
@@ -1604,7 +1612,7 @@ const messages = {
   "Select what you have checked. The finished draft lists the remaining checks.": "Markér kun det, du har kontrolleret. Resten bliver vist som mangler i den færdige kladde.",
   "MediaHub apps": "MediaHub apps",
   "MediaSeed": "MediaSeed",
-  "MediaSeed 0.1.44": "MediaSeed 0.1.44",
+  "MediaSeed 0.1.46": "MediaSeed 0.1.46",
   "MediaSeed 1.6.1 · Choose the folder, start or pause state and cleanup in MediaSeed.": "MediaSeed 1.6.1 · Mappe, start/pause og oprydning vælges i MediaSeed.",
   "MediaVPN": "MediaVPN",
   "Include our NFO in the torrent folder": "Medtag vores NFO i torrentens mappe",

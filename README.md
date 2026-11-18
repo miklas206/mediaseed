@@ -1,5 +1,9 @@
 # MediaSeed
 
+## 0.1.46 · RSS og VPN-status
+
+RSS viser den aktuelle VPN-status. Vælg **Vis VPN-forbindelse** for at åbne forbindelsen. I feedguiden kan du åbne **Avancerede filtre** for at angive søgeord, størrelsesgrænse og trackerkrav. Ved redigering åbnes eksisterende filtre automatisk.
+
 ## 0.1.44 · Sprog i upload og browserudvidelse
 
 Uploadformularen bruger kontoens sprog, også når formularen åbnes efter login. Udvidelse 1.6.1 og dens installationsside har nye engelske og danske tekster. Filnavne og andet brugerindhold bevarer deres oprindelige tekst.

@@ -31,6 +31,12 @@
   cards.append(vpn,account,queue);document.querySelector('#downloads').prepend(cards);
   const events=element('details',undefined,'automatic-activity');events.id='automatic-activity';const summary=element('summary',t('Latest automatic activity'));const eventList=element('div');events.append(summary,eventList);cards.after(events);
   const technical=element('details',undefined,'client-details');technical.append(element('summary',t('Client details')));document.querySelector('#transfer').before(technical);technical.append(document.querySelector('#transfer'));
+  const feedStatus = document.querySelector('#feed-vpn-status');
+  document.querySelector('#feed-open-vpn').onclick = () => {
+    const tab = document.querySelector('[data-view="vpn"]');
+    tab.click();
+    tab.focus();
+  };
   const editors={};
   for(const [kind,id,title] of [['feeds','feed-form','Add feed'],['trackers','tracker-form','Add tracker']]) {
     const form=document.querySelector('#'+id),card=form.closest('.workspace-card'),dialog=element('dialog',undefined,'source-editor');dialog.id=kind+'-editor';dialog.setAttribute('aria-label',t(title));
@@ -44,7 +50,24 @@
   badges.closest('label').replaceWith(group);badges.hidden=true;group.append(badges);group.append(element('p',t('Every selected badge must match.'),'muted'));
   function syncBadges(){for(const [box,option] of boxes)box.checked=option.selected;}
   document.querySelector('#feed-form').addEventListener('reset',()=>setTimeout(syncBadges,0));
-  function openEditor(kind){if(appRole!=='administrator')return;editors[kind]?.showModal();setTimeout(syncBadges,0);}
+  function openEditor(kind, record) {
+    if (appRole !== 'administrator') return;
+    const dialog = editors[kind];
+    const editing = Boolean(record);
+    const title = kind === 'feeds' ? (editing ? 'Edit feed' : 'Add feed') : (editing ? 'Edit tracker' : 'Add tracker');
+    const heading = dialog.querySelector('h2');
+    heading.textContent = t(title);
+    dialog.setAttribute('aria-label', t(title));
+    const reset = dialog.querySelector('button[type="reset"]');
+    if (reset) reset.hidden = editing;
+    if (kind === 'feeds') {
+      document.querySelector('#feed-advanced').open = Boolean(record && (
+        record.include?.length || record.exclude?.length || record.badges?.length || record.max_bytes || record.start_at
+      ));
+    }
+    dialog.showModal();
+    setTimeout(syncBadges, 0);
+  }
   function render(){
     const connectionState=document.querySelector('#connection-flow').dataset.state;
     const active=connectionState==='active' && downloadsEnabled;
@@ -56,6 +79,8 @@
     flow.dataset.active=String(active);flow.dataset.download=String(active&&!!traffic&&traffic.dl_info_speed>0);flow.dataset.upload=String(active&&!!traffic&&traffic.up_info_speed>0);
     const status=active?!traffic?'Waiting for a fresh traffic measurement.':traffic&&(traffic.dl_info_speed>0||traffic.up_info_speed>0)?'Protected transfers active':'VPN ready · waiting for peers':connectionState==='connecting'?'Connecting · downloads blocked':connectionState==='unknown'?'Status cannot be verified':connectionState==='disconnected'?'No VPN selected':'Transfers blocked · check VPN';
     description.textContent=t(status);
+    const connectionLabel = document.querySelector('#connection-status').textContent;
+    if (feedStatus.textContent !== connectionLabel) feedStatus.textContent = connectionLabel;
     const runtime=document.querySelector('#connection-country').textContent;
     vpn.replaceChildren(element('span',t('Connection')),element('strong',active?t('VPN verified'):t(connectionState==='connecting'?'Connecting · downloads blocked':connectionState==='unknown'?'Status cannot be verified':connectionState==='disconnected'?'No VPN selected':'Connection blocked')),element('small',active?runtime:t('Check the connection under VPN')));
 

@@ -17,4 +17,17 @@ form.guided-form { display:flex!important; flex-direction:column; align-items:st
 .wizard-step #torrent-file-list { max-height:none; overflow:visible; }
 form.guided-form .wizard-footer { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; position:static!important; margin:0!important; padding:16px 24px!important; border-top:1px solid var(--line); background:var(--surface); }
 .wizard-back { margin-right:auto; }
+.feed-connection { align-items:center; flex-wrap:wrap; gap:.75rem; }
+.feed-advanced { grid-column:1/-1; min-width:0; }
+.feed-advanced > summary { cursor:pointer; padding:.65rem 0; font-weight:600; }
+.feed-advanced[open] > summary { margin-bottom:.5rem; }
+.guided-dialog .wizard-footer button, .feed-connection button {
+  min-height:2.75rem;
+  max-width:100%;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  line-height:1.25;
+}
+.guided-dialog .workspace-card > h2 { padding-inline-end:6.25rem; }
+
 @media(max-width:650px) { .wizard-step { grid-template-columns:minmax(0,1fr); } .wizard-body { padding:16px; } .guided-dialog > .heading { padding:16px!important; } }

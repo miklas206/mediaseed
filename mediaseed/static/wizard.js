@@ -20,7 +20,7 @@ globalThis.MediaWizard = function ({form, dialog, titles, groups, onStep, valida
   }
   function valid(index) {
     for(const control of panels[index].querySelectorAll('input,select,textarea')) {
-      if(!control.disabled && !control.checkValidity()) {show(index,false); control.reportValidity(); return false;}
+      if(!control.disabled && !control.checkValidity()) {show(index,false); const group = control.closest('details'); if (group) group.open = true; control.reportValidity(); return false;}
     }
     return validate?.(index) !== false;
   }
